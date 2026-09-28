@@ -5,3 +5,7 @@ allowBuilds:
   workerd: true
   sharp: false
   unrs-resolver: false
+
+# Moved from package.json "overrides" (pnpm 11 reads overrides here).
+overrides:
+  miniflare>sharp: 0.35.4
