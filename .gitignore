@@ -1,6 +1,6 @@
 
 # ==============================
-# Chalupa Vsetice - Astro
+# Chalupa Vsetice - vinext (React) + Cloudflare Workers
 # ==============================
 
 # Dependencies
@@ -10,6 +10,7 @@ node_modules/
 # Build outputs
 dist/
 .astro/
+.next/
 *.tsbuildinfo
 
 # Environment variables & secrets
