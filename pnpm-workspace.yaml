@@ -1,0 +1,7 @@
+# Build scripts allowed during install (pnpm 11 blocks unapproved ones).
+# esbuild/workerd install native binaries used by Vite and Wrangler.
+allowBuilds:
+  esbuild: true
+  workerd: true
+  sharp: false
+  unrs-resolver: false
