@@ -10,6 +10,7 @@ node_modules/
 # Build outputs
 dist/
 .astro/
+.next/
 *.tsbuildinfo
 
 # Environment variables & secrets
