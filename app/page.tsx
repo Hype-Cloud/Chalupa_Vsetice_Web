@@ -22,7 +22,7 @@ export default function Home(){
 const calendarBase='https://obsazenost.e-chalupy.cz/kalendar.php';
 // Parametry vzhledu 1:1 z oficiálního konfigurátoru e-chalup (api2.e-chalupy.cz/konfigurator/obsazenost/).
 // pocetMesicu, vybraneMesice a extCss doplňuje komponenta.
-const calendarParams='id=19216&velikost=5&legenda=ano&naStred=ano&ctvrtleti=ne&stin=ne&jazyk=cz&jednotky=ano&idJednotky=0&vypisJednotky=ne&souhrnny=&pozadi=ffffff&kalendarText=163d33&kalendarPozadi=ffffff&ramecek=ffffff&mesicText=163d33&mesicPozadi=ffffff&dnyText=657267&dnyPozadia=ffffff&obsazenoText=784b37&obsazenoPozadi=e8d7ce&volnoText=163d33&volnoPozadi=dbe8bd&castecneText=222222&castecnePozadi=489ce0&neaktivniDnyText=aab4ae&neaktivniDnyPozadi=ffffff&legendaText=657267&fontFamily=Verdana';
+const calendarParams='id=19216&velikost=5&legenda=ano&naStred=ano&ctvrtleti=ne&stin=ne&jazyk=cz&jednotky=ano&idJednotky=0&vypisJednotky=ne&souhrnny=&pozadi=ffffff&kalendarText=163d33&kalendarPozadi=ffffff&ramecek=ffffff&mesicText=163d33&mesicPozadi=ffffff&dnyText=657267&dnyPozadia=ffffff&obsazenoText=784b37&obsazenoPozadi=e8d7ce&volnoText=163d33&volnoPozadi=dbe8bd&castecneText=222222&castecnePozadi=489ce0&neaktivniDnyText=aab4ae&neaktivniDnyPozadi=ffffff&legendaText=657267&fontFamily=Arial';
 // Horizont 12 měsíců: čísla měsíců jsou v něm jednoznačná, takže je lze adresovat přes vybraneMesice.
 const horizon=12;
 // Stylopis kalendáře se načítá z originu, na kterém běží stránka (produkce i každý Preview
