@@ -64,7 +64,7 @@ e-chalupy (iCal export, GET) → Worker /api/availability → React kalendář
 
 | Situace | Chování API (`status`) | Kalendář |
 |---|---|---|
-| Data mladší než 10 minut | `ok` z cache (paměť izolátu + Cache API) | normální zobrazení |
+| Data mladší než 5 minut | `ok` z cache (paměť izolátu + Cache API) | normální zobrazení |
 | Cache vypršela, export dostupný | `ok`, export se stáhne znovu | normální zobrazení |
 | Export načtený, ale některé události nešly převést | `partial` (`reason: skipped-events`) | data + upozornění, že obsazenost nemusí být úplná |
 | Export nedostupný nebo neplatný, poslední data < 24 h | `stale` | data + upozornění na čas poslední synchronizace; pokud byl záložní snapshot neúplný (`incomplete: true`), výběr je zablokovaný jako u `partial` |
@@ -72,10 +72,6 @@ e-chalupy (iCal export, GET) → Worker /api/availability → React kalendář
 
 - Po neúspěšném stažení se další pokus provede nejdřív za minutu.
 - Neplatný iCal se nikdy nevyloží jako prázdný kalendář.
-- Odpověď obsahuje `source: { events, skipped }` (počet událostí v exportu a kolik z nich
-  nešlo převést). Porovnáním s počtem `BEGIN:VEVENT` v exportu lze ověřit, že Worker čte
-  stejný export.
-- Otevřená stránka obnovuje obsazenost každých 10 minut a při návratu na kartu.
 
 ## Technologie
 
