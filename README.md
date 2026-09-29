@@ -59,14 +59,14 @@ e-chalupy (iCal export, GET) → Worker /api/availability → React kalendář
 
 | Situace | Chování API (`status`) | Kalendář |
 |---|---|---|
-| Data mladší než 10 minut | `ok` z cache (paměť izolátu + Cache API) | normální zobrazení |
+| Data mladší než 5 minut | `ok` z cache (paměť izolátu + Cache API) | normální zobrazení |
 | Cache vypršela, export dostupný | `ok`, export se stáhne znovu | normální zobrazení |
 | Export nedostupný nebo neplatný, poslední data < 24 h | `stale` | data + upozornění na čas poslední synchronizace |
 | Bez použitelných dat nebo bez secretu | `unavailable` | žádný den se netváří jako volný, výběr je zablokovaný, odkaz na e-chalupy |
 
 - Po neúspěšném stažení se další pokus provede nejdřív za minutu.
 - Neplatný iCal se nikdy nevyloží jako prázdný kalendář.
-- Otevřená stránka obnovuje obsazenost každých 10 minut a při návratu na kartu.
+- Otevřená stránka obnovuje obsazenost každých 5 minut a při návratu na kartu.
 
 ## Technologie
 

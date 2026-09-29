@@ -2,8 +2,8 @@ import { addDays, todayInPrague } from '../lib/availability/dates.ts';
 import type { AvailabilityResponse, BusyInterval } from '../lib/availability/types.ts';
 import { IcalParseError, parseBusyIntervals } from './ical.ts';
 
-/** Data jsou čerstvá 10 minut, pak se export stáhne znovu. */
-export const FRESH_MS = 10 * 60_000;
+/** Data jsou čerstvá 5 minut, pak se export stáhne znovu (při další návštěvě). */
+export const FRESH_MS = 5 * 60_000;
 /** Při výpadku e-chalup se poslední úspěšná data zobrazují nejdéle 24 hodin (stav `stale`). */
 export const STALE_MAX_MS = 24 * 60 * 60_000;
 export const FETCH_TIMEOUT_MS = 8_000;
