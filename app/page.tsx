@@ -30,9 +30,10 @@ const horizon=12;
 // proto se výchozí hodnota nahradí až v prohlížeči.
 const productionCss='https://chalupavsetice.cz/calendar.css';
 const calendarSrc=(css:string,months:number[]=[])=>`${calendarBase}?${calendarParams}&pocetMesicu=${horizon}&vybraneMesice=${months.join(',')}&extCss=${encodeURIComponent(css)}`;
-// Počet měsíců podle skutečné šířky kontejneru kalendáře. Měsíc při velikost=5 má v náhledu
-// konfigurátoru zhruba 175 px; prahy nechávají rezervu, aby se měsíce nativně nezalamovaly.
-const monthsFor=(width:number)=>width>=700?3:width>=440?2:1;
+// Počet měsíců podle skutečné šířky kontejneru kalendáře. calendar.css roztahuje měsíce
+// (table.month) na dostupnou šířku; 220 px na měsíc drží buňky dní kolem 28 px a víc.
+const minMonthWidth=220,monthGap=24,frameInset=8;
+const monthsFor=(width:number)=>Math.max(1,Math.min(3,Math.floor((width-frameInset+monthGap)/(minMonthWidth+monthGap))));
 const monthYear=new Intl.DateTimeFormat('cs-CZ',{month:'long',year:'numeric'}),monthOnly=new Intl.DateTimeFormat('cs-CZ',{month:'long'});
 function EchalupyCalendar(){
  const [ready,setReady]=useState(false);
