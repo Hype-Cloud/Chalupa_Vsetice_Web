@@ -107,9 +107,12 @@ pnpm preview        # lokální běh přes wrangler dev (Workers runtime)
   - `allowBuilds` povoluje instalační skripty `esbuild` a `workerd`, které pnpm 11
     jinak blokuje.
   - `overrides` fixuje `miniflare>sharp` na verzi 0.35.4.
-- **Kalendář e-chalupy:** parametry iframe (ID objektu, barvy, horizont
-  `pocetMesicu`) jsou v konstantě `calendarParams` v `app/page.tsx`. Navigace mezi
-  měsíci mění parametr `vybraneMesice`, `extCss` se doplňuje podle originu stránky.
+- **Kalendář e-chalupy:** parametry vzhledu (ID objektu, velikost, barvy, font) jsou
+  převzaté z oficiálního [konfigurátoru e-chalup](https://api2.e-chalupy.cz/konfigurator/obsazenost/)
+  a uložené v konstantě `calendarParams` v `app/page.tsx`. Při změně vzhledu se
+  hodnoty nastaví v konfigurátoru a zkopírují z vygenerovaného kódu. Komponenta
+  doplňuje `pocetMesicu` (horizont 12 měsíců), `vybraneMesice` (navigace) a `extCss`
+  (podle originu stránky).
 
 ## Nasazení
 
