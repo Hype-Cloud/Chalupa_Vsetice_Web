@@ -20,7 +20,9 @@ export default function Home(){
 // na zvolená čísla měsíců v rámci horizontu pocetMesicu; šipky tak posouvají okno
 // po celém rezervačním období bez vlastní kopie dat.
 const calendarBase='https://obsazenost.e-chalupy.cz/kalendar.php';
-const calendarParams='id=19216&velikost=3&legenda=ano&naStred=ano&ctvrtleti=ne&stin=ne&jazyk=cz&jednotky=ano&idJednotky=0&vypisJednotky=ne&souhrnny=&pozadi=ffffff&kalendarText=163d33&kalendarPozadi=ffffff&ramecek=ffffff&mesicText=163d33&mesicPozadi=ffffff&dnyText=657267&dnyPozadia=ffffff&obsazenoText=784b37&obsazenoPozadi=e8d7ce&volnoText=163d33&volnoPozadi=f4f6f1&castecneText=345d70&castecnePozadi=d9e6ed&neaktivniDnyText=aab4ae&neaktivniDnyPozadi=ffffff&legendaText=657267&fontFamily=Arial';
+// Parametry vzhledu 1:1 z oficiálního konfigurátoru e-chalup (api2.e-chalupy.cz/konfigurator/obsazenost/).
+// pocetMesicu, vybraneMesice a extCss doplňuje komponenta.
+const calendarParams='id=19216&velikost=5&legenda=ano&naStred=ano&ctvrtleti=ne&stin=ne&jazyk=cz&jednotky=ano&idJednotky=0&vypisJednotky=ne&souhrnny=&pozadi=ffffff&kalendarText=163d33&kalendarPozadi=ffffff&ramecek=ffffff&mesicText=163d33&mesicPozadi=ffffff&dnyText=657267&dnyPozadia=ffffff&obsazenoText=784b37&obsazenoPozadi=e8d7ce&volnoText=163d33&volnoPozadi=dbe8bd&castecneText=222222&castecnePozadi=489ce0&neaktivniDnyText=aab4ae&neaktivniDnyPozadi=ffffff&legendaText=657267&fontFamily=Arial';
 // Horizont 12 měsíců: čísla měsíců jsou v něm jednoznačná, takže je lze adresovat přes vybraneMesice.
 const horizon=12;
 // Stylopis kalendáře se načítá z originu, na kterém běží stránka (produkce i každý Preview
@@ -28,8 +30,9 @@ const horizon=12;
 // proto se výchozí hodnota nahradí až v prohlížeči.
 const productionCss='https://chalupavsetice.cz/calendar.css';
 const calendarSrc=(css:string,months:number[]=[])=>`${calendarBase}?${calendarParams}&pocetMesicu=${horizon}&vybraneMesice=${months.join(',')}&extCss=${encodeURIComponent(css)}`;
-// Minimální šířka měsíce pro čitelné dny, mezera mezi měsíci a vnitřní odsazení iframe (calendar.css).
-const minMonthWidth=224,monthGap=24,frameInset=16;
+// Počet měsíců podle skutečné šířky kontejneru kalendáře. calendar.css roztahuje měsíce
+// (table.month) na dostupnou šířku; 220 px na měsíc drží buňky dní kolem 28 px a víc.
+const minMonthWidth=220,monthGap=24,frameInset=8;
 const monthsFor=(width:number)=>Math.max(1,Math.min(3,Math.floor((width-frameInset+monthGap)/(minMonthWidth+monthGap))));
 const monthYear=new Intl.DateTimeFormat('cs-CZ',{month:'long',year:'numeric'}),monthOnly=new Intl.DateTimeFormat('cs-CZ',{month:'long'});
 function EchalupyCalendar(){
@@ -69,5 +72,5 @@ function EchalupyCalendar(){
  const last=months[months.length-1];
  const range=!months.length?'':months.length===1?monthYear.format(last):`${(months[0].getFullYear()===last.getFullYear()?monthOnly:monthYear).format(months[0])} – ${monthYear.format(last)}`;
  const move=(dir:number)=>setOffset(Math.max(0,Math.min(maxOffset,first+dir*perView)));
- return <><div className="calendar-nav"><button type="button" onClick={()=>move(-1)} disabled={first<=0} aria-label="Předchozí měsíce"><ChevronLeft size={18} strokeWidth={1.6}/></button><span aria-live="polite">{range}</span><button type="button" onClick={()=>move(1)} disabled={first>=maxOffset} aria-label="Další měsíce"><ChevronRight size={18} strokeWidth={1.6}/></button></div><div ref={box} className={`echalupy-calendar${loading?' is-loading':''}`}>{ready&&src?<iframe src={src} onLoad={()=>setLoading(false)} height="420" width="100%" frameBorder="0" id="echalupy-kalendar" title="Obsazenost chalupy Všetice – kalendář e-chalupy"/>:<p role="status">Načítáme kalendář e-chalupy…</p>}</div><p className="sync-status">Obsazenost z e-chalupy.cz. <a href={calendarSrc(css)} target="_blank" rel="noreferrer">Otevřít celý kalendář v samostatném okně ↗</a></p></>;
+ return <><div className="calendar-nav"><button type="button" onClick={()=>move(-1)} disabled={first<=0} aria-label="Předchozí měsíce"><ChevronLeft size={18} strokeWidth={1.6}/></button><span aria-live="polite">{range}</span><button type="button" onClick={()=>move(1)} disabled={first>=maxOffset} aria-label="Další měsíce"><ChevronRight size={18} strokeWidth={1.6}/></button></div><div ref={box} className={`echalupy-calendar${loading?' is-loading':''}`}>{ready&&src?<iframe src={src} onLoad={()=>setLoading(false)} height="460" width="100%" frameBorder="0" id="echalupy-kalendar" title="Obsazenost chalupy Všetice – kalendář e-chalupy"/>:<p role="status">Načítáme kalendář e-chalupy…</p>}</div><p className="sync-status">Obsazenost z e-chalupy.cz. <a href={calendarSrc(css)} target="_blank" rel="noreferrer">Otevřít celý kalendář v samostatném okně ↗</a></p></>;
 }

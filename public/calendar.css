@@ -1,43 +1,23 @@
 /* Chalupa Všetice: external stylesheet for the e-chalupy occupancy calendar (extCss).
-   Served by the site itself (<origin>/calendar.css), so production and every preview
-   deployment load the matching version. The page passes the URL in the extCss parameter. */
-:root { --ink:#163d33; --muted:#657267; --free:#f4f6f1; --busy:#e8d7ce; --partial:#d9e6ed; }
-html,body { margin:0; padding:0; background:#fff; font:14px/1.5 Arial,Helvetica,sans-serif; color:var(--ink); }
-* { box-sizing:border-box; }
-/* Layout: the page selects 1-3 months via vybraneMesice; they share one centred row.
-   Month boxes are matched structurally (direct children of #obal that contain a table),
-   so the layout does not depend on e-chalupy's internal class names. Every other child
-   of #obal (legend, headings, unit selector) takes a full row below the months. */
-#obal { display:flex !important; flex-wrap:wrap; align-items:flex-start; justify-content:center; gap:20px 24px; width:100%; margin:0 !important; padding:8px 8px 4px; }
-#obal > :is(table, :has(table)) { flex:1 1 0; min-width:0; max-width:360px; width:auto !important; float:none !important; margin:0 !important; text-align:center; }
-#obal > :not(table):not(:has(table)) { flex:0 0 100%; float:none !important; }
-#obal table { width:100% !important; table-layout:fixed; margin:0 auto; }
-#obal table td { height:34px; padding:2px 0; font-size:14px; line-height:1.4; vertical-align:middle; }
-/* Month title rendered outside the table (inside the month box): centred, site typography. */
-#obal > :has(table) > :not(table) { margin:0 0 10px !important; padding:0 !important; text-align:center !important; color:var(--ink); font:400 18px/1.4 Georgia,'Times New Roman',serif !important; }
+   Served by the site itself (<origin>/calendar.css); the page passes the URL in extCss.
+   Colours come from the official configurator parameters in app/page.tsx and are not
+   overridden here. Selectors follow the verified kalendar.php markup:
+   body > #obal > div.legend + table.month × N (td.month-name, tr.days, td.day-*). */
+html, body { margin:0; padding:0; background:#fff; }
+
+/* Months share one centred row; the page selects 1-3 months via vybraneMesice.
+   The legend is rendered first in #obal, order moves it below the months. */
+#obal { display:flex; flex-wrap:wrap; justify-content:center; align-items:flex-start; gap:16px 24px; padding:4px 4px 2px; }
 #obal:after { display:none; }
-.month { float:none; margin:0; border:0; border-collapse:separate; border-spacing:3px; background:#fff; color:var(--ink); }
-.month .month-name { padding:0 0 14px; background:#fff; color:var(--ink); font:400 18px/1.4 Georgia,'Times New Roman',serif; text-align:center; }
-.month tr.days { height:32px; background:#fff; color:var(--muted); font-weight:400; }
-.month tr.days td { height:30px; font-size:12px; padding:2px; }
+#obal > table.month { display:table; flex:1 1 0; width:100%; min-width:0; max-width:340px; margin:0; border:0; border-collapse:separate; border-spacing:3px; table-layout:fixed; }
+
+/* Separate rounded day tiles instead of the native collapsed grid. */
 .month tr { height:auto; }
-.month td { width:auto; height:36px; padding:4px 0; border:0; border-radius:5px; text-align:center; vertical-align:middle; }
-.month td.day-free,.month td.day-full,.month td.day-half,.month td.day-shdw { font-size:14px; font-weight:400; }
-.day-free { background:var(--free); color:var(--ink); }
-.day-full { background:var(--busy); color:#784b37; }
-.day-half { background:var(--partial); color:#345d70; }
-.day-shdw { background:#fff; color:#aab4ae; }
-.day-bold { font-weight:700 !important; box-shadow:inset 0 0 0 1px var(--ink); }
-/* Preserve arrival, departure and partial-occupancy distinctions. */
-.day-full.z { background:linear-gradient(135deg,var(--free) 49%,var(--busy) 50%); }
-.day-full.k { background:linear-gradient(135deg,var(--busy) 49%,var(--free) 50%); }
-.day-half.z { background:linear-gradient(135deg,var(--free) 49%,var(--partial) 50%); }
-.day-half.k { background:linear-gradient(135deg,var(--partial) 49%,var(--free) 50%); }
-.day-half.zo { background:linear-gradient(135deg,var(--busy) 49%,var(--partial) 50%); }
-.day-half.ko { background:linear-gradient(135deg,var(--partial) 49%,var(--busy) 50%); }
-div.legend { order:10; clear:none; border-top:1px solid #e2e7e0; padding:18px 0 0; font-size:13px; line-height:2.2; color:var(--muted); text-align:left; }
-span.legend-obal { display:inline-block; margin-right:10px; }
-span.legend { display:inline-block; width:18px; height:18px; padding:0; margin:0 5px 0 0; border:1px solid #d6ded4; border-radius:4px; color:transparent !important; vertical-align:middle; line-height:16px; }
-h1,h2 { flex-basis:100%; color:var(--ink); font-family:Arial,Helvetica,sans-serif; }
-button { padding:8px 12px; border:1px solid #d6ded4; border-radius:4px; background:#f4f6f1; color:var(--ink); font:14px Arial,Helvetica,sans-serif; cursor:pointer; }
-@media(max-width:440px) { #obal { padding:4px 0; } #obal > :is(table, :has(table)) { max-width:400px; } }
+.month td { width:auto; height:34px; padding:0; border-radius:6px; vertical-align:middle; }
+.month .month-name { height:auto; padding:0 0 10px; border-radius:0; font:400 18px/1.4 Georgia,'Times New Roman',serif; }
+.month tr.days td { height:26px; border-radius:0; font-size:12px; }
+
+/* Legend below the months, compact swatches without the native "XX" text. */
+div.legend { order:1; flex:0 0 100%; margin-top:6px; padding:14px 0 0; border-top:1px solid #e2e7e0; font-size:13px; line-height:2; }
+span.legend-obal { margin:0 6px; white-space:nowrap; }
+span.legend { width:16px; height:16px; margin:0 4px 0 0; padding:0; border:1px solid #d6ded4; border-radius:4px; line-height:16px; color:transparent; vertical-align:-3px; }
