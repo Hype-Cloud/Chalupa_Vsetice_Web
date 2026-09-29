@@ -4,10 +4,11 @@
 :root { --ink:#163d33; --muted:#657267; --free:#f4f6f1; --busy:#e8d7ce; --partial:#d9e6ed; }
 html,body { margin:0; padding:0; background:#fff; font:14px/1.5 Arial,Helvetica,sans-serif; color:var(--ink); }
 * { box-sizing:border-box; }
-#obal { display:flex; flex-wrap:wrap; align-items:flex-start; justify-content:center; gap:28px 24px; padding:8px; }
+/* Months sit side by side in one row; the page selects 1-3 months via vybraneMesice. */
+#obal { display:flex; flex-wrap:wrap; align-items:flex-start; justify-content:center; gap:24px 20px; padding:8px 8px 4px; }
 #obal:after { display:none; }
-.month { float:none; flex:1 1 260px; width:calc(50% - 12px); max-width:360px; margin:0; table-layout:fixed; border:0; border-collapse:separate; border-spacing:4px; background:#fff; color:var(--ink); }
-.month .month-name { padding:0 0 18px; background:#fff; color:var(--ink); font:600 17px/1.5 Arial,Helvetica,sans-serif; text-align:center; }
+.month { float:none; flex:1 1 0; min-width:190px; width:auto; max-width:360px; margin:0; table-layout:fixed; border:0; border-collapse:separate; border-spacing:3px; background:#fff; color:var(--ink); }
+.month .month-name { padding:0 0 14px; background:#fff; color:var(--ink); font:400 18px/1.4 Georgia,'Times New Roman',serif; text-align:center; }
 .month tr.days { height:32px; background:#fff; color:var(--muted); font-weight:400; }
 .month tr.days td { height:30px; font-size:12px; padding:2px; }
 .month tr { height:auto; }
@@ -30,4 +31,4 @@ span.legend-obal { display:inline-block; margin-right:10px; }
 span.legend { display:inline-block; width:18px; height:18px; padding:0; margin:0 5px 0 0; border:1px solid #d6ded4; border-radius:4px; color:transparent !important; vertical-align:middle; line-height:16px; }
 h1,h2 { flex-basis:100%; color:var(--ink); font-family:Arial,Helvetica,sans-serif; }
 button { padding:8px 12px; border:1px solid #d6ded4; border-radius:4px; background:#f4f6f1; color:var(--ink); font:14px Arial,Helvetica,sans-serif; cursor:pointer; }
-@media(max-width:560px) { #obal { gap:28px; padding:4px; } .month { flex-basis:100%; width:100%; } }
+@media(max-width:440px) { #obal { gap:24px; padding:4px 0; } .month { flex-basis:100%; width:100%; max-width:400px; } }
