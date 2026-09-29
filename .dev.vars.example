@@ -1,0 +1,4 @@
+# Lokální proměnné pro `pnpm preview` (wrangler dev). Zkopírujte do .dev.vars (je v .gitignore).
+# Adresa iCal exportu obsazenosti. Pro vývoj použijte syntetický .ics soubor,
+# soukromý export z e-chalup sem nepatří (v Cloudflare je uložený jako secret).
+ECHALUPY_ICAL_URL=
