@@ -299,12 +299,17 @@ Nasazení zajišťuje Cloudflare Workers Builds napojené na tento repozitář:
 - Secret pro Worker Previews se nastavuje zvlášť: `npx wrangler preview secret`.
   Bez něj Preview ukáže obsazenost jako nedostupnou.
 - Migrace D1 se při buildu nespouštějí. Spouštějí se ručně, nejdřív na testovací
-  databázi. `d1 migrations apply` a `d1 execute` čtou jen top-level `d1_databases`
-  (ne blok `previews`), testovací databáze je proto i v `preview_database_id`:
+  databázi. `wrangler d1` čte jen top-level `d1_databases` (ne blok `previews`), proto má
+  testovací databáze vlastní konfiguraci `wrangler.preview-migrations.jsonc` (stejné ID
+  jako `previews.d1_databases`, slouží jen pro `wrangler d1`, ne pro deploy):
 
   ```bash
-  # Preview / test (--preview = preview_database_id)
-  npx wrangler d1 migrations apply chalupa-vsetice-rezervace --remote --preview
-  # Produkce
+  # Preview / test
+  npx wrangler d1 migrations apply chalupa-vsetice-rezervace-test --remote --config wrangler.preview-migrations.jsonc
+  npx wrangler d1 execute chalupa-vsetice-rezervace-test --remote --config wrangler.preview-migrations.jsonc \
+    --command "INSERT INTO meta (key, value) VALUES ('environment', 'preview')"
+  # Produkce (až po ověření Preview, před merge)
   npx wrangler d1 migrations apply chalupa-vsetice-rezervace --remote
+  npx wrangler d1 execute chalupa-vsetice-rezervace --remote \
+    --command "INSERT INTO meta (key, value) VALUES ('environment', 'production')"
   ```
