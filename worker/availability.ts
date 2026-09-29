@@ -12,6 +12,9 @@ export const RETRY_AFTER_FAILURE_MS = 60_000;
 /** Rozsah dat v odpovědi: od včerejška na 400 dní dopředu. */
 export const HORIZON_DAYS = 400;
 
+// Některé servery odmítají požadavky bez User-Agent; Worker se identifikuje jako čtečka obsazenosti webu.
+const USER_AGENT = 'ChalupaVsetice-Availability/1.0 (+https://chalupavsetice.cz)';
+
 // Klíč cache neobsahuje URL exportu (ta je tajná).
 const CACHE_KEY = 'https://availability.cache.internal/v1/snapshot';
 
@@ -45,12 +48,14 @@ export interface AvailabilityEnv {
 let memory: Snapshot | null = null;
 let inflight: Promise<Snapshot> | null = null;
 let lastFailureAt = 0;
+let lastFailureReason = 'upstream-unknown';
 
 /** Jen pro testy. */
 export function resetAvailabilityMemory() {
   memory = null;
   inflight = null;
   lastFailureAt = 0;
+  lastFailureReason = 'upstream-unknown';
 }
 
 class UpstreamError extends Error {
@@ -77,7 +82,7 @@ async function download(url: string, now: Date, deps: AvailabilityDeps): Promise
   let response: Response;
   try {
     // Pouze čtení: GET bez těla a bez přihlašovacích údajů.
-    response = await deps.fetch(url, { method: 'GET', headers: { accept: 'text/calendar' }, redirect: 'follow', signal: AbortSignal.timeout(FETCH_TIMEOUT_MS) });
+    response = await deps.fetch(url, { method: 'GET', headers: { accept: 'text/calendar', 'user-agent': USER_AGENT }, redirect: 'follow', signal: AbortSignal.timeout(FETCH_TIMEOUT_MS) });
   } catch (error) {
     throw new UpstreamError(error instanceof Error && error.name === 'TimeoutError' ? 'timeout' : 'network');
   }
@@ -91,10 +96,11 @@ async function download(url: string, now: Date, deps: AvailabilityDeps): Promise
   }
 }
 
-function respond(status: AvailabilityResponse['status'], snapshot: Snapshot | null, now: Date): AvailabilityResponse {
+function respond(status: AvailabilityResponse['status'], snapshot: Snapshot | null, now: Date, reason?: string): AvailabilityResponse {
   const today = todayInPrague(now);
   return {
     status,
+    ...(reason ? { reason } : {}),
     busy: snapshot ? snapshot.busy.filter((i) => i.end > addDays(today, -1)) : [],
     updatedAt: snapshot?.updatedAt ?? null,
     checkedAt: now.toISOString(),
@@ -107,7 +113,7 @@ export async function getAvailability(env: AvailabilityEnv, deps: AvailabilityDe
   const url = env.ECHALUPY_ICAL_URL?.trim();
   if (!url) {
     deps.log('availability: ECHALUPY_ICAL_URL is not configured');
-    return respond('unavailable', null, now);
+    return respond('unavailable', null, now, 'not-configured');
   }
 
   const cached = memory ?? (await readCache(deps.cache));
@@ -117,7 +123,7 @@ export async function getAvailability(env: AvailabilityEnv, deps: AvailabilityDe
     return respond('ok', cached, now);
   }
 
-  const fallback = () => (cached && age(cached) < STALE_MAX_MS ? respond('stale', cached, now) : respond('unavailable', null, now));
+  const fallback = () => (cached && age(cached) < STALE_MAX_MS ? respond('stale', cached, now, lastFailureReason) : respond('unavailable', null, now, lastFailureReason));
   if (now.getTime() - lastFailureAt < RETRY_AFTER_FAILURE_MS) return fallback();
 
   try {
@@ -135,8 +141,10 @@ export async function getAvailability(env: AvailabilityEnv, deps: AvailabilityDe
     return respond('ok', fresh, now);
   } catch (error) {
     // Do logu jde jen druh chyby, nikdy URL exportu.
-    deps.log(`availability: upstream failed (${error instanceof UpstreamError ? error.kind : 'unknown'})`);
+    const kind = error instanceof UpstreamError ? error.kind : 'unknown';
+    deps.log(`availability: upstream failed (${kind})`);
     lastFailureAt = now.getTime();
+    lastFailureReason = `upstream-${kind}`;
     return fallback();
   }
 }
