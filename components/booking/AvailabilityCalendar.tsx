@@ -1,7 +1,7 @@
 import { useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent } from 'react';
 import { ChevronLeft, ChevronRight } from 'lucide-react';
 import { addDays, addMonths, startOfMonth, type IsoDate } from '../../lib/availability/dates.ts';
-import type { Occupancy } from '../../lib/availability/occupancy.ts';
+import { isIncomplete, type Occupancy } from '../../lib/availability/occupancy.ts';
 import type { Stay } from '../../lib/availability/stay.ts';
 import { CalendarMonth } from './CalendarMonth.tsx';
 import { HORIZON_MONTHS, INQUIRY_URL } from './config.ts';
@@ -95,6 +95,14 @@ export function AvailabilityCalendar({ today, availability, occupancy, stay, mes
       );
     }
     const { status: dataStatus, updatedAt } = availability.data;
+    if (isIncomplete(availability.data)) {
+      return (
+        <p className="bk-status is-warning" role="status">
+          Část obsazenosti z e-chalupy.cz se nepodařilo načíst, proto teď termíny nelze vybrat. Známé obsazené dny zobrazujeme, volné termíny ověříte na{' '}
+          <a href={INQUIRY_URL} target="_blank" rel="noreferrer">e-chalupy.cz ↗</a>.
+        </p>
+      );
+    }
     if (dataStatus === 'stale') {
       return (
         <p className="bk-status is-warning" role="status">
