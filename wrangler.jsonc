@@ -21,13 +21,26 @@
     {
       "binding": "DB",
       "database_name": "chalupa-vsetice-rezervace",
-      "database_id": "DOPLNIT-ID-PRODUKCNI-DATABAZE",
+      "database_id": "08656b04-3ade-4a34-b9d3-94f7b8e154ef",
       "migrations_dir": "migrations"
     }
   ],
   // Worker Previews nedědí proměnné ani bindingy z produkce: mají vlastní testovací D1
   // a jen zde je zapnutý rezervační POST (s tokenem BOOKING_API_TOKEN).
   "previews": {
+    "observability": {
+      "redact_query_string": true,
+      "logs": {
+        "enabled": true,
+        "invocation_logs": true,
+        "persist": true
+      },
+      "traces": {
+        "enabled": true,
+        "head_sampling_rate": 1,
+        "persist": true
+      }
+    },
     "vars": {
       "BOOKING_ENV": "preview",
       "BOOKING_API_ENABLED": "true"
@@ -36,16 +49,22 @@
       {
         "binding": "DB",
         "database_name": "chalupa-vsetice-rezervace-test",
-        "database_id": "DOPLNIT-ID-TESTOVACI-DATABAZE",
+        "database_id": "b6269d5f-4705-4b4c-a52c-e5030a020605",
         "migrations_dir": "migrations"
       }
     ]
   },
   // Workers Logs: logují se jen volání Workeru, tedy /api/* (statické assety Worker nespouští).
+  // Worker loguje jen druh události, nikdy osobní údaje, obsah požadavků ani adresu exportu.
   "observability": {
+    "redact_query_string": true,
     "logs": {
       "enabled": true,
       "invocation_logs": true
+    },
+    "traces": {
+      "enabled": true,
+      "head_sampling_rate": 0.1
     }
   }
 }

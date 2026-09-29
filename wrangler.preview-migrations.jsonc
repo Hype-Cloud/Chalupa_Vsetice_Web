@@ -9,7 +9,7 @@
     {
       "binding": "DB",
       "database_name": "chalupa-vsetice-rezervace-test",
-      "database_id": "DOPLNIT-ID-TESTOVACI-DATABAZE",
+      "database_id": "b6269d5f-4705-4b4c-a52c-e5030a020605",
       "migrations_dir": "migrations"
     }
   ]
