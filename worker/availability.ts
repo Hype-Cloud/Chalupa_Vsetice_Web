@@ -15,14 +15,18 @@ export const HORIZON_DAYS = 400;
 // Některé servery odmítají požadavky bez User-Agent; Worker se identifikuje jako čtečka obsazenosti webu.
 const USER_AGENT = 'ChalupaVsetice-Availability/1.0 (+https://chalupavsetice.cz)';
 
-// Klíč cache neobsahuje URL exportu (ta je tajná).
-const CACHE_KEY = 'https://availability.cache.internal/v1/snapshot';
+// Klíč cache neobsahuje URL exportu (ta je tajná). Verze se zvyšuje při změně tvaru snapshotu
+// (v2: pole events a skipped), aby se po nasazení nepoužily staré snapshoty bez nich.
+const CACHE_KEY = 'https://availability.cache.internal/v2/snapshot';
 
 export interface Snapshot {
   busy: BusyInterval[];
   /** ISO 8601 čas úspěšného stažení exportu. */
   updatedAt: string;
   range: { from: string; to: string };
+  /** Počet událostí v exportu a počet událostí, které nešlo spolehlivě převést. */
+  events: number;
+  skipped: number;
 }
 
 /** Podmnožina Cache API, kterou služba používá (v testech nahrazená pamětí). */
@@ -89,22 +93,30 @@ async function download(url: string, now: Date, deps: AvailabilityDeps): Promise
   if (!response.ok) throw new UpstreamError(`http-${response.status}`);
   const text = await response.text();
   try {
-    const { busy } = parseBusyIntervals(text, range);
-    return { busy, updatedAt: now.toISOString(), range };
+    const { busy, events, skipped } = parseBusyIntervals(text, range);
+    if (skipped > 0) deps.log(`availability: ${skipped} of ${events} events could not be parsed reliably`);
+    return { busy, updatedAt: now.toISOString(), range, events, skipped };
   } catch (error) {
     throw new UpstreamError(error instanceof IcalParseError ? 'invalid-ical' : 'parse');
   }
 }
 
-function respond(status: AvailabilityResponse['status'], snapshot: Snapshot | null, now: Date, reason?: string): AvailabilityResponse {
+function respond(requested: AvailabilityResponse['status'], snapshot: Snapshot | null, now: Date, failureReason?: string): AvailabilityResponse {
   const today = todayInPrague(now);
+  // Export s nepřevedenými událostmi se nesmí tvářit jako kompletní obsazenost – ani když se
+  // jako záloha (stale) vrací starší neúplný snapshot. Příznak incomplete proto nese každá odpověď.
+  const incomplete = !!snapshot && (snapshot.skipped ?? 0) > 0;
+  const status = requested === 'ok' && incomplete ? 'partial' : requested;
+  const reason = failureReason ?? (incomplete ? 'skipped-events' : undefined);
   return {
     status,
+    incomplete,
     ...(reason ? { reason } : {}),
     busy: snapshot ? snapshot.busy.filter((i) => i.end > addDays(today, -1)) : [],
     updatedAt: snapshot?.updatedAt ?? null,
     checkedAt: now.toISOString(),
     range: snapshot?.range ?? { from: today, to: today },
+    ...(snapshot ? { source: { events: snapshot.events ?? 0, skipped: snapshot.skipped ?? 0 } } : {}),
   };
 }
 
