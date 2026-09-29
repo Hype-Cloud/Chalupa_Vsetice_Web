@@ -14,7 +14,9 @@ a nasazuje se na Cloudflare Workers Static Assets.
 - **Kalendář obsazenosti** se vkládá jako iframe z rezervačního systému
   [e-chalupy.cz](https://www.e-chalupy.cz/). Výšku iframe přizpůsobuje skript
   `resize.js` od poskytovatele. Vzhled kalendáře určuje vlastní stylopis
-  `public/calendar.css`, který se předává parametrem `extCss`.
+  `public/calendar.css`, který se předává parametrem `extCss`. Podle šířky panelu se
+  zobrazují 1–3 měsíce a šipkami lze procházet celý 12měsíční horizont (parametr
+  `vybraneMesice`).
 - **Orientační kalkulace ceny** podle zvoleného data příjezdu a odjezdu probíhá čistě
   na klientu, nic neodesílá a nic nerezervuje.
 - **Poptávka** odkazuje na profil objektu na e-chalupy.cz. Ten slouží jako centrální
@@ -46,7 +48,7 @@ app/
   page.tsx          obsah stránky, kalkulace ceny, komponenta kalendáře
   globals.css       styly webu včetně responzivních breakpointů
 public/
-  calendar.css      stylopis kalendáře e-chalupy (načítaný přes jsDelivr)
+  calendar.css      stylopis kalendáře e-chalupy (předává se parametrem extCss)
   chalupa.jpg       fotografie objektu
   favicon.svg
 scripts/
@@ -105,8 +107,9 @@ pnpm preview        # lokální běh přes wrangler dev (Workers runtime)
   - `allowBuilds` povoluje instalační skripty `esbuild` a `workerd`, které pnpm 11
     jinak blokuje.
   - `overrides` fixuje `miniflare>sharp` na verzi 0.35.4.
-- **Kalendář e-chalupy:** parametry iframe (ID objektu, barvy, počet měsíců,
-  `extCss`) jsou v konstantě `calendarUrl` v `app/page.tsx`.
+- **Kalendář e-chalupy:** parametry iframe (ID objektu, barvy, horizont
+  `pocetMesicu`) jsou v konstantě `calendarParams` v `app/page.tsx`. Navigace mezi
+  měsíci mění parametr `vybraneMesice`, `extCss` se doplňuje podle originu stránky.
 
 ## Nasazení
 
@@ -125,12 +128,8 @@ Nasazení zajišťuje Cloudflare Workers Builds napojené na tento repozitář:
 
 ### Stylopis kalendáře
 
-Kalendář e-chalupy načítá `public/calendar.css` z CDN jsDelivr:
-
-```
-https://cdn.jsdelivr.net/gh/Hype-Cloud/Chalupa_Vsetice_Web@main/public/calendar.css
-```
-
-Soubor se tedy nečte z nasazeného Workeru, ale přímo z větve `main`. Jeho změna se
-v kalendáři projeví i bez nového deploye, ale až po obnovení cache jsDelivr, což může
-trvat až několik hodin.
+Kalendář e-chalupy načítá `public/calendar.css` z originu, na kterém běží stránka
+(`https://chalupavsetice.cz/calendar.css`, u Preview z adresy daného Preview).
+Adresu předává komponenta v parametru `extCss` a určuje ji až v prohlížeči, protože
+při statickém buildu objekt `window` neexistuje. Každé nasazení tak používá vlastní
+verzi stylopisu a nečeká se na obnovení cache CDN.
