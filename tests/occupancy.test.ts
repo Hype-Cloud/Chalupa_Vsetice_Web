@@ -115,3 +115,10 @@ test('ok a stale: úplná obsazenost, volné dny lze vybrat', () => {
     assert.deepEqual(pickDay(EMPTY_STAY, '2030-02-25', full), { stay: { arrival: '2030-02-25', departure: null }, error: null });
   }
 });
+
+test('stale s příznakem incomplete blokuje výběr stejně jako partial', () => {
+  const blocked: StayContext = { today: '2030-02-20', occupancy: occupancyFromResponse({ ...response('stale'), incomplete: true }) };
+  assert.equal(blocked.occupancy!.night('2030-03-02'), 'busy');
+  assert.equal(pickDay(EMPTY_STAY, '2030-02-25', blocked).error, 'unknown');
+  assert.equal(setArrival(EMPTY_STAY, '2030-02-25', blocked).error, 'unknown');
+});

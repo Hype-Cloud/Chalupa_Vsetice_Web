@@ -77,14 +77,17 @@ export class Occupancy {
   }
 }
 
+/** Odpověď vychází z neúplného exportu (i záložní data `stale` z neúplného snapshotu). */
+export const isIncomplete = (data: AvailabilityResponse) => data.status === 'partial' || data.incomplete === true;
+
 /**
  * Obsazenost pro výběr pobytu podle odpovědi API:
  * - `ok`, `stale`: úplný seznam obsazených intervalů (stale s upozorněním na stáří dat),
- * - `partial`: export nešel převést celý, známé obsazené noci se zobrazí, ostatní jsou neznámé
- *   a výběr pobytu je tím zablokovaný,
+ * - `partial` nebo `incomplete`: export nešel převést celý, známé obsazené noci se zobrazí,
+ *   ostatní jsou neznámé a výběr pobytu je tím zablokovaný,
  * - `unavailable`: nic není známo.
  */
 export function occupancyFromResponse(data: AvailabilityResponse): Occupancy | null {
   if (data.status === 'unavailable') return null;
-  return new Occupancy(data.busy, data.range, { freeIsKnown: data.status !== 'partial' });
+  return new Occupancy(data.busy, data.range, { freeIsKnown: !isIncomplete(data) });
 }

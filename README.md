@@ -67,7 +67,7 @@ e-chalupy (iCal export, GET) → Worker /api/availability → React kalendář
 | Data mladší než 10 minut | `ok` z cache (paměť izolátu + Cache API) | normální zobrazení |
 | Cache vypršela, export dostupný | `ok`, export se stáhne znovu | normální zobrazení |
 | Export načtený, ale některé události nešly převést | `partial` (`reason: skipped-events`) | data + upozornění, že obsazenost nemusí být úplná |
-| Export nedostupný nebo neplatný, poslední data < 24 h | `stale` | data + upozornění na čas poslední synchronizace |
+| Export nedostupný nebo neplatný, poslední data < 24 h | `stale` | data + upozornění na čas poslední synchronizace; pokud byl záložní snapshot neúplný (`incomplete: true`), výběr je zablokovaný jako u `partial` |
 | Bez použitelných dat nebo bez secretu | `unavailable` | žádný den se netváří jako volný, výběr je zablokovaný, odkaz na e-chalupy |
 
 - Po neúspěšném stažení se další pokus provede nejdřív za minutu.

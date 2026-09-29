@@ -103,12 +103,14 @@ async function download(url: string, now: Date, deps: AvailabilityDeps): Promise
 
 function respond(requested: AvailabilityResponse['status'], snapshot: Snapshot | null, now: Date, failureReason?: string): AvailabilityResponse {
   const today = todayInPrague(now);
-  // Export s nepřevedenými událostmi se nesmí tvářit jako kompletní obsazenost.
+  // Export s nepřevedenými událostmi se nesmí tvářit jako kompletní obsazenost – ani když se
+  // jako záloha (stale) vrací starší neúplný snapshot. Příznak incomplete proto nese každá odpověď.
   const incomplete = !!snapshot && (snapshot.skipped ?? 0) > 0;
   const status = requested === 'ok' && incomplete ? 'partial' : requested;
   const reason = failureReason ?? (incomplete ? 'skipped-events' : undefined);
   return {
     status,
+    incomplete,
     ...(reason ? { reason } : {}),
     busy: snapshot ? snapshot.busy.filter((i) => i.end > addDays(today, -1)) : [],
     updatedAt: snapshot?.updatedAt ?? null,

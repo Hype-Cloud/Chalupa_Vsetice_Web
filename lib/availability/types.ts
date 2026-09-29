@@ -25,6 +25,11 @@ export interface AvailabilityResponse {
    * `upstream-network`, `upstream-invalid-ical`, `upstream-parse`.
    */
   reason?: string;
+  /**
+   * true = použitý export nešel převést celý (i u záložních dat `stale`). Klient pak smí zobrazit
+   * známé obsazené noci, ale ostatní noci nesmí považovat za volné a výběr pobytu blokuje.
+   */
+  incomplete?: boolean;
   /** Obsazené intervaly (sloučené, seřazené), jen v rozsahu `range`. */
   busy: BusyInterval[];
   /** Čas poslední úspěšné synchronizace s e-chalupami (ISO 8601), nebo null. */

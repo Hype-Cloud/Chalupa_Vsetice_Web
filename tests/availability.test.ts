@@ -2,6 +2,8 @@ import test, { beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
 import { FRESH_MS, getAvailability, resetAvailabilityMemory, RETRY_AFTER_FAILURE_MS, STALE_MAX_MS, type AvailabilityDeps, type SnapshotCache } from '../worker/availability.ts';
 import { fixture } from './helpers.ts';
+import { occupancyFromResponse } from '../lib/availability/occupancy.ts';
+import { EMPTY_STAY, pickDay, setArrival } from '../lib/availability/stay.ts';
 
 // Smyšlená adresa s „tokenem“ – ověřuje, že se nikam nepropíše.
 const SECRET_URL = 'https://ical.test.invalid/api/calendar/0/SECRET-TOKEN-123/default.ics';
@@ -213,4 +215,43 @@ test('po nasazení se nepoužije starý snapshot v1 bez diagnostických polí', 
   assert.equal(t.requests.length, 1, 'starý snapshot se ignoruje a export se stáhne znovu');
   assert.deepEqual(result.source, { events: 3, skipped: 0 });
   assert.deepEqual(result.busy[0], { start: '2026-10-02', end: '2026-10-04' });
+});
+
+test('neúplný export → výpadek e-chalup → záložní neúplný snapshot: výběr pobytu zůstává zablokovaný', async () => {
+  let healthy = true;
+  const t = setup(async () => (healthy ? new Response(fixture('19-invalid-events.ics')) : new Response('down', { status: 500 })));
+  const first = await t.call();
+  assert.equal(first.status, 'partial');
+  assert.equal(first.incomplete, true);
+  await t.flush();
+
+  healthy = false;
+  t.advance(FRESH_MS + 1000);
+  const fallback = await t.call();
+  assert.equal(fallback.status, 'stale');
+  assert.equal(fallback.reason, 'upstream-http-500');
+  assert.equal(fallback.incomplete, true, 'příznak neúplnosti se nesmí ztratit ve stale fallbacku');
+  assert.deepEqual(fallback.source, { events: 4, skipped: 3 });
+
+  // Klient: známé obsazené noci zůstávají, ostatní dny nejsou volné a výběr je zablokovaný.
+  const occupancy = occupancyFromResponse(fallback)!;
+  const ctx = { today: '2030-01-10', occupancy };
+  assert.equal(occupancy.night('2030-03-01'), 'busy');
+  assert.equal(occupancy.night('2030-02-01'), 'unknown');
+  assert.equal(pickDay(EMPTY_STAY, '2030-02-01', ctx).error, 'unknown');
+  assert.equal(setArrival(EMPTY_STAY, '2030-02-01', ctx).error, 'unknown');
+});
+
+test('stale fallback z úplného snapshotu zůstává použitelný (incomplete: false)', async () => {
+  let healthy = true;
+  const t = setup(async () => (healthy ? new Response(fixture('01-single-and-multi.ics')) : new Response('down', { status: 500 })));
+  assert.equal((await t.call()).incomplete, false);
+  await t.flush();
+  healthy = false;
+  t.advance(FRESH_MS + 1000);
+  const fallback = await t.call();
+  assert.equal(fallback.status, 'stale');
+  assert.equal(fallback.incomplete, false);
+  const ctx = { today: '2030-01-10', occupancy: occupancyFromResponse(fallback) };
+  assert.equal(pickDay(EMPTY_STAY, '2030-02-01', ctx).error, null);
 });
