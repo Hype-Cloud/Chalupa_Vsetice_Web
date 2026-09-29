@@ -13,7 +13,7 @@ type Upstream = () => Promise<Response>;
 function setup(upstream: Upstream) {
   let now = START;
   const logs: string[] = [];
-  const requests: { url: string; method: string }[] = [];
+  const requests: { url: string; method: string; userAgent: string | null }[] = [];
   const store = new Map<string, string>();
   const cache: SnapshotCache = {
     async match(key) {
@@ -27,7 +27,7 @@ function setup(upstream: Upstream) {
   const pending: Promise<unknown>[] = [];
   const deps: AvailabilityDeps = {
     fetch: (async (input: RequestInfo | URL, init?: RequestInit) => {
-      requests.push({ url: String(input), method: init?.method ?? 'GET' });
+      requests.push({ url: String(input), method: init?.method ?? 'GET', userAgent: new Headers(init?.headers).get('user-agent') });
       return upstream();
     }) as typeof fetch,
     now: () => now,
@@ -161,4 +161,25 @@ test('secret se neobjeví v odpovědi, cache ani v logu', async () => {
   assert.ok(!everything.includes('SECRET-TOKEN-123'));
   assert.ok(!everything.includes('ical.test.invalid'));
   assert.equal(ok.requests[0].url, SECRET_URL, 'secret se použije jen jako cíl GET požadavku');
+});
+
+test('diagnostika: důvod nedostupnosti v odpovědi bez citlivých údajů', async () => {
+  const notFound = setup(async () => new Response('Not found', { status: 404 }));
+  const result = await notFound.call();
+  assert.equal(result.reason, 'upstream-http-404');
+  notFound.advance(10_000);
+  assert.equal((await notFound.call()).reason, 'upstream-http-404', 'během backoffu zůstává poslední důvod');
+  resetAvailabilityMemory();
+  assert.equal((await setup(ics('07-invalid-html.ics')).call()).reason, 'upstream-invalid-ical');
+  resetAvailabilityMemory();
+  assert.equal((await getAvailability({}, setup(ics('14-empty.ics')).deps)).reason, 'not-configured');
+  resetAvailabilityMemory();
+  const ok = await setup(ics('01-single-and-multi.ics')).call();
+  assert.equal(ok.reason, undefined);
+});
+
+test('požadavek na export má User-Agent webu', async () => {
+  const t = setup(ics('01-single-and-multi.ics'));
+  await t.call();
+  assert.match(t.requests[0].userAgent ?? '', /^ChalupaVsetice-Availability\//);
 });

@@ -18,6 +18,12 @@ export type AvailabilityStatus = 'ok' | 'stale' | 'unavailable';
 
 export interface AvailabilityResponse {
   status: AvailabilityStatus;
+  /**
+   * Důvod stavu `stale` / `unavailable` pro diagnostiku, bez citlivých údajů:
+   * `not-configured`, `upstream-http-<kód>`, `upstream-timeout`, `upstream-network`,
+   * `upstream-invalid-ical`, `upstream-parse`.
+   */
+  reason?: string;
   /** Obsazené intervaly (sloučené, seřazené), jen v rozsahu `range`. */
   busy: BusyInterval[];
   /** Čas poslední úspěšné synchronizace s e-chalupami (ISO 8601), nebo null. */

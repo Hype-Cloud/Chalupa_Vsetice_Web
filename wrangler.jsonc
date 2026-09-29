@@ -11,5 +11,12 @@
     "run_worker_first": ["/api/*"]
   },
   // Secret ECHALUPY_ICAL_URL se nastavuje v Cloudflare (wrangler secret put), nikdy v repozitáři.
-  "previews": {}
+  "previews": {},
+  // Workers Logs: logují se jen volání Workeru, tedy /api/* (statické assety Worker nespouští).
+  "observability": {
+    "logs": {
+      "enabled": true,
+      "invocation_logs": true
+    }
+  }
 }
