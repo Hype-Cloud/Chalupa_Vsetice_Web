@@ -6,7 +6,7 @@ export type AvailabilityState = { phase: 'loading' } | { phase: 'loaded'; data: 
 
 function isAvailabilityResponse(value: unknown): value is AvailabilityResponse {
   const data = value as AvailabilityResponse;
-  return !!data && typeof data === 'object' && ['ok', 'stale', 'unavailable'].includes(data.status) && Array.isArray(data.busy) && !!data.range;
+  return !!data && typeof data === 'object' && ['ok', 'partial', 'stale', 'unavailable'].includes(data.status) && Array.isArray(data.busy) && !!data.range;
 }
 
 /** Načítá obsazenost z vlastního API (/api/availability) a obnovuje ji, dokud je stránka otevřená. */

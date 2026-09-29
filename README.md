@@ -47,7 +47,12 @@ e-chalupy (iCal export, GET) → Worker /api/availability → React kalendář
 - Export parsuje knihovna [ical.js](https://github.com/kewisch/ical.js).
   - Celodenní události mají exkluzivní `DTEND`: obsazené jsou noci od příjezdu do
     dne odjezdu.
-  - Časované události se převádějí na data v pásmu Europe/Prague.
+  - Časované události v UTC nebo s definovaným `VTIMEZONE` se převádějí na data v pásmu
+    Europe/Prague. Plovoucí čas (např. `DTSTART:20261002T140000`, formát exportu e-chalup)
+    a `TZID` bez definice se berou jako místní čas chalupy.
+  - Datum bez `VALUE=DATE` (`DTSTART:20261002`) se přijme jako celodenní.
+  - Samostatné události se stejným `UID` se nesloučí, podle `UID` se párují jen výjimky
+    opakovaných událostí.
   - Opakované události (`RRULE`, `RECURRENCE-ID`) se rozvinou a zrušené
     (`STATUS:CANCELLED`) se vynechají.
   - Překrývající se a navazující intervaly se sloučí.
@@ -61,11 +66,15 @@ e-chalupy (iCal export, GET) → Worker /api/availability → React kalendář
 |---|---|---|
 | Data mladší než 10 minut | `ok` z cache (paměť izolátu + Cache API) | normální zobrazení |
 | Cache vypršela, export dostupný | `ok`, export se stáhne znovu | normální zobrazení |
+| Export načtený, ale některé události nešly převést | `partial` (`reason: skipped-events`) | data + upozornění, že obsazenost nemusí být úplná |
 | Export nedostupný nebo neplatný, poslední data < 24 h | `stale` | data + upozornění na čas poslední synchronizace |
 | Bez použitelných dat nebo bez secretu | `unavailable` | žádný den se netváří jako volný, výběr je zablokovaný, odkaz na e-chalupy |
 
 - Po neúspěšném stažení se další pokus provede nejdřív za minutu.
 - Neplatný iCal se nikdy nevyloží jako prázdný kalendář.
+- Odpověď obsahuje `source: { events, skipped }` (počet událostí v exportu a kolik z nich
+  nešlo převést). Porovnáním s počtem `BEGIN:VEVENT` v exportu lze ověřit, že Worker čte
+  stejný export.
 - Otevřená stránka obnovuje obsazenost každých 10 minut a při návratu na kartu.
 
 ## Technologie

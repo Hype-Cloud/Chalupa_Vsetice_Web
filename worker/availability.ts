@@ -23,6 +23,9 @@ export interface Snapshot {
   /** ISO 8601 čas úspěšného stažení exportu. */
   updatedAt: string;
   range: { from: string; to: string };
+  /** Počet událostí v exportu a počet událostí, které nešlo spolehlivě převést. */
+  events: number;
+  skipped: number;
 }
 
 /** Podmnožina Cache API, kterou služba používá (v testech nahrazená pamětí). */
@@ -89,15 +92,20 @@ async function download(url: string, now: Date, deps: AvailabilityDeps): Promise
   if (!response.ok) throw new UpstreamError(`http-${response.status}`);
   const text = await response.text();
   try {
-    const { busy } = parseBusyIntervals(text, range);
-    return { busy, updatedAt: now.toISOString(), range };
+    const { busy, events, skipped } = parseBusyIntervals(text, range);
+    if (skipped > 0) deps.log(`availability: ${skipped} of ${events} events could not be parsed reliably`);
+    return { busy, updatedAt: now.toISOString(), range, events, skipped };
   } catch (error) {
     throw new UpstreamError(error instanceof IcalParseError ? 'invalid-ical' : 'parse');
   }
 }
 
-function respond(status: AvailabilityResponse['status'], snapshot: Snapshot | null, now: Date, reason?: string): AvailabilityResponse {
+function respond(requested: AvailabilityResponse['status'], snapshot: Snapshot | null, now: Date, failureReason?: string): AvailabilityResponse {
   const today = todayInPrague(now);
+  // Export s nepřevedenými událostmi se nesmí tvářit jako kompletní obsazenost.
+  const incomplete = !!snapshot && (snapshot.skipped ?? 0) > 0;
+  const status = requested === 'ok' && incomplete ? 'partial' : requested;
+  const reason = failureReason ?? (incomplete ? 'skipped-events' : undefined);
   return {
     status,
     ...(reason ? { reason } : {}),
@@ -105,6 +113,7 @@ function respond(status: AvailabilityResponse['status'], snapshot: Snapshot | nu
     updatedAt: snapshot?.updatedAt ?? null,
     checkedAt: now.toISOString(),
     range: snapshot?.range ?? { from: today, to: today },
+    ...(snapshot ? { source: { events: snapshot.events ?? 0, skipped: snapshot.skipped ?? 0 } } : {}),
   };
 }
 

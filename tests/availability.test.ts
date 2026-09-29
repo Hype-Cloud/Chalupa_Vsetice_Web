@@ -183,3 +183,23 @@ test('požadavek na export má User-Agent webu', async () => {
   await t.call();
   assert.match(t.requests[0].userAgent ?? '', /^ChalupaVsetice-Availability\//);
 });
+
+test('regrese 2.–4. 10. 2026: API vrátí rezervaci z exportu ve formátu e-chalup', async () => {
+  const t = setup(ics('15-echalupy-timed.ics'));
+  t.deps.now = () => new Date('2026-09-29T20:00:00Z');
+  const result = await t.call();
+  assert.equal(result.status, 'ok');
+  assert.deepEqual(result.busy[0], { start: '2026-10-02', end: '2026-10-04' });
+  assert.equal(result.busy.length, 3);
+  assert.deepEqual(result.source, { events: 3, skipped: 0 });
+});
+
+test('neúplný export (vynechané události) se nevydává za kompletní obsazenost', async () => {
+  const t = setup(ics('19-invalid-events.ics'));
+  const result = await t.call();
+  assert.equal(result.status, 'partial');
+  assert.equal(result.reason, 'skipped-events');
+  assert.deepEqual(result.source, { events: 4, skipped: 3 });
+  assert.equal(result.busy.length, 2);
+  assert.ok(t.logs.some((m) => m === 'availability: 3 of 4 events could not be parsed reliably'));
+});
