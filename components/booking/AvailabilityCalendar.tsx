@@ -98,7 +98,8 @@ export function AvailabilityCalendar({ today, availability, occupancy, stay, mes
     if (dataStatus === 'partial') {
       return (
         <p className="bk-status is-warning" role="status">
-          Část obsazenosti z e-chalupy.cz se nepodařilo načíst, zobrazené volné termíny proto nemusí být úplné. Termín vždy potvrdí majitel.
+          Část obsazenosti z e-chalupy.cz se nepodařilo načíst, proto teď termíny nelze vybrat. Známé obsazené dny zobrazujeme, volné termíny ověříte na{' '}
+          <a href={INQUIRY_URL} target="_blank" rel="noreferrer">e-chalupy.cz ↗</a>.
         </p>
       );
     }

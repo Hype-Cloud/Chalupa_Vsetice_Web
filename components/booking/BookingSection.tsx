@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { isIsoDate, todayInPrague, type IsoDate } from '../../lib/availability/dates.ts';
-import { Occupancy } from '../../lib/availability/occupancy.ts';
+import { occupancyFromResponse } from '../../lib/availability/occupancy.ts';
 import { EMPTY_STAY, pickDay, rangeError, setArrival, setDeparture, type Stay, type StayContext, type StayUpdate } from '../../lib/availability/stay.ts';
 import { AvailabilityCalendar } from './AvailabilityCalendar.tsx';
 import { BookingPanel } from './BookingPanel.tsx';
@@ -17,10 +17,7 @@ export function BookingSection() {
   useEffect(() => setToday(todayInPrague()), []);
 
   const availability = useAvailability();
-  const occupancy = useMemo(() => {
-    if (availability.phase !== 'loaded' || availability.data.status === 'unavailable') return null;
-    return new Occupancy(availability.data.busy, availability.data.range);
-  }, [availability]);
+  const occupancy = useMemo(() => (availability.phase === 'loaded' ? occupancyFromResponse(availability.data) : null), [availability]);
 
   const [stay, setStay] = useState<Stay>(EMPTY_STAY);
   const [guests, setGuests] = useState(2);

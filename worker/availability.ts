@@ -15,8 +15,9 @@ export const HORIZON_DAYS = 400;
 // Některé servery odmítají požadavky bez User-Agent; Worker se identifikuje jako čtečka obsazenosti webu.
 const USER_AGENT = 'ChalupaVsetice-Availability/1.0 (+https://chalupavsetice.cz)';
 
-// Klíč cache neobsahuje URL exportu (ta je tajná).
-const CACHE_KEY = 'https://availability.cache.internal/v1/snapshot';
+// Klíč cache neobsahuje URL exportu (ta je tajná). Verze se zvyšuje při změně tvaru snapshotu
+// (v2: pole events a skipped), aby se po nasazení nepoužily staré snapshoty bez nich.
+const CACHE_KEY = 'https://availability.cache.internal/v2/snapshot';
 
 export interface Snapshot {
   busy: BusyInterval[];

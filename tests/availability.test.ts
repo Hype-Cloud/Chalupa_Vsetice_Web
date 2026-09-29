@@ -203,3 +203,14 @@ test('neúplný export (vynechané události) se nevydává za kompletní obsaze
   assert.equal(result.busy.length, 2);
   assert.ok(t.logs.some((m) => m === 'availability: 3 of 4 events could not be parsed reliably'));
 });
+
+test('po nasazení se nepoužije starý snapshot v1 bez diagnostických polí', async () => {
+  const t = setup(ics('15-echalupy-timed.ics'));
+  t.deps.now = () => new Date('2026-09-29T20:00:00Z');
+  // Čerstvý snapshot ve starém formátu (bez events/skipped) pod původním klíčem v1.
+  t.store.set('https://availability.cache.internal/v1/snapshot', JSON.stringify({ busy: [], updatedAt: '2026-09-29T19:59:00.000Z', range: { from: '2026-09-28', to: '2027-11-03' } }));
+  const result = await t.call();
+  assert.equal(t.requests.length, 1, 'starý snapshot se ignoruje a export se stáhne znovu');
+  assert.deepEqual(result.source, { events: 3, skipped: 0 });
+  assert.deepEqual(result.busy[0], { start: '2026-10-02', end: '2026-10-04' });
+});

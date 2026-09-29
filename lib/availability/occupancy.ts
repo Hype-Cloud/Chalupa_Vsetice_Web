@@ -1,5 +1,5 @@
 import { addDays, type IsoDate } from './dates.ts';
-import type { BusyInterval } from './types.ts';
+import type { AvailabilityResponse, BusyInterval } from './types.ts';
 
 /** Seřadí intervaly a sloučí překrývající se i na sebe navazující (end === další start). */
 export function mergeIntervals(intervals: readonly BusyInterval[]): BusyInterval[] {
@@ -32,10 +32,16 @@ export class Occupancy {
   private readonly intervals: BusyInterval[];
   /** Rozsah, pro který jsou data známá; noci mimo něj jsou `unknown`. */
   private readonly range: { from: IsoDate; to: IsoDate } | null;
+  /**
+   * false = seznam obsazených intervalů nemusí být úplný (status `partial`): známé obsazené
+   * noci zůstávají `busy`, ale ostatní noci jsou `unknown`, ne volné.
+   */
+  private readonly freeIsKnown: boolean;
 
-  constructor(busy: readonly BusyInterval[], range: { from: IsoDate; to: IsoDate } | null) {
+  constructor(busy: readonly BusyInterval[], range: { from: IsoDate; to: IsoDate } | null, options: { freeIsKnown?: boolean } = {}) {
     this.intervals = mergeIntervals(busy);
     this.range = range;
+    this.freeIsKnown = options.freeIsKnown ?? true;
   }
 
   /** Stav noci začínající dnem `date`. */
@@ -50,7 +56,7 @@ export class Occupancy {
       else if (date >= interval.end) lo = mid + 1;
       else return 'busy';
     }
-    return 'free';
+    return this.freeIsKnown ? 'free' : 'unknown';
   }
 
   day(date: IsoDate): DayKind {
@@ -69,4 +75,16 @@ export class Occupancy {
     }
     return null;
   }
+}
+
+/**
+ * Obsazenost pro výběr pobytu podle odpovědi API:
+ * - `ok`, `stale`: úplný seznam obsazených intervalů (stale s upozorněním na stáří dat),
+ * - `partial`: export nešel převést celý, známé obsazené noci se zobrazí, ostatní jsou neznámé
+ *   a výběr pobytu je tím zablokovaný,
+ * - `unavailable`: nic není známo.
+ */
+export function occupancyFromResponse(data: AvailabilityResponse): Occupancy | null {
+  if (data.status === 'unavailable') return null;
+  return new Occupancy(data.busy, data.range, { freeIsKnown: data.status !== 'partial' });
 }

@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mergeIntervals, Occupancy } from '../lib/availability/occupancy.ts';
+import { mergeIntervals, Occupancy, occupancyFromResponse } from '../lib/availability/occupancy.ts';
+import type { AvailabilityResponse } from '../lib/availability/types.ts';
 import { EMPTY_STAY, pickDay, setArrival, setDeparture, type StayContext } from '../lib/availability/stay.ts';
 
 const RANGE = { from: '2030-01-01', to: '2031-01-01' };
@@ -78,4 +79,39 @@ test('datumová pole používají stejnou validaci jako kalendář', () => {
 
 test('bez načtené obsazenosti nelze vybrat žádný termín', () => {
   assert.equal(pickDay(EMPTY_STAY, '2030-02-25', { today: '2030-02-20', occupancy: null }).error, 'unknown');
+});
+
+const response = (status: AvailabilityResponse['status']): AvailabilityResponse => ({
+  status,
+  busy: [{ start: '2030-03-01', end: '2030-03-05' }],
+  updatedAt: '2030-02-20T08:00:00.000Z',
+  checkedAt: '2030-02-20T08:00:00.000Z',
+  range: RANGE,
+});
+
+test('partial: známé obsazené noci zůstávají obsazené, ostatní dny nejsou bezpečně volné', () => {
+  const partial = occupancyFromResponse(response('partial'))!;
+  assert.equal(partial.night('2030-03-02'), 'busy');
+  assert.equal(partial.day('2030-03-03'), 'busy');
+  assert.equal(partial.night('2030-02-25'), 'unknown');
+  assert.equal(partial.day('2030-02-25'), 'unknown');
+  assert.equal(partial.day('2030-03-06'), 'unknown');
+});
+
+test('partial: výběr pobytu je zablokovaný stejně jako při unavailable', () => {
+  for (const status of ['partial', 'unavailable'] as const) {
+    const blocked: StayContext = { today: '2030-02-20', occupancy: occupancyFromResponse(response(status)) };
+    assert.equal(pickDay(EMPTY_STAY, '2030-02-25', blocked).error, 'unknown', `${status}: klik na den`);
+    assert.deepEqual(pickDay(EMPTY_STAY, '2030-02-25', blocked).stay, EMPTY_STAY);
+    assert.equal(setArrival(EMPTY_STAY, '2030-02-25', blocked).error, 'unknown', `${status}: datumové pole`);
+    assert.equal(pickDay(EMPTY_STAY, '2030-03-02', blocked).error, status === 'partial' ? 'arrival-busy' : 'unknown');
+  }
+});
+
+test('ok a stale: úplná obsazenost, volné dny lze vybrat', () => {
+  for (const status of ['ok', 'stale'] as const) {
+    const full: StayContext = { today: '2030-02-20', occupancy: occupancyFromResponse(response(status)) };
+    assert.equal(full.occupancy!.night('2030-02-25'), 'free');
+    assert.deepEqual(pickDay(EMPTY_STAY, '2030-02-25', full), { stay: { arrival: '2030-02-25', departure: null }, error: null });
+  }
 });
