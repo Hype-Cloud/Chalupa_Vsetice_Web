@@ -185,6 +185,10 @@ daty.
 - V produkci je `POST /api/reservations` vypnutý (`BOOKING_API_ENABLED` není nastavené).
   `/api/availability` z produkční D1 jen čte.
 - Testy používají výhradně smyšlené rezervace a lokální D1.
+- **Budoucí veřejný formulář:** `BOOKING_API_TOKEN` chrání jen testovací endpoint v
+  Preview a nesmí se dostat do klientského JavaScriptu. Veřejný POST nepoužije sdílený
+  Bearer token, ale potřebuje ochranu proti spamu a zneužití: Cloudflare Turnstile
+  s ověřením tokenu na serveru a rate limiting.
 
 ## Architektura
 
@@ -294,6 +298,13 @@ Nasazení zajišťuje Cloudflare Workers Builds napojené na tento repozitář:
 - Ostatní větve a pull requesty vytvoří náhledovou verzi (Worker Previews).
 - Secret pro Worker Previews se nastavuje zvlášť: `npx wrangler preview secret`.
   Bez něj Preview ukáže obsazenost jako nedostupnou.
-- Migrace D1 se při buildu nespouštějí. Před nasazením kódu, který potřebuje novou
-  migraci, je spusťte ručně (`npx wrangler d1 migrations apply <databáze> --remote`),
-  nejdřív na testovací databázi.
+- Migrace D1 se při buildu nespouštějí. Spouštějí se ručně, nejdřív na testovací
+  databázi. `d1 migrations apply` a `d1 execute` čtou jen top-level `d1_databases`
+  (ne blok `previews`), testovací databáze je proto i v `preview_database_id`:
+
+  ```bash
+  # Preview / test (--preview = preview_database_id)
+  npx wrangler d1 migrations apply chalupa-vsetice-rezervace --remote --preview
+  # Produkce
+  npx wrangler d1 migrations apply chalupa-vsetice-rezervace --remote
+  ```

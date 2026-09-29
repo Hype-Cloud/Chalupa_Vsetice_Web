@@ -22,6 +22,9 @@
       "binding": "DB",
       "database_name": "chalupa-vsetice-rezervace",
       "database_id": "DOPLNIT-ID-PRODUKCNI-DATABAZE",
+      // Stejné ID jako testovací databáze v bloku previews. `wrangler d1 migrations apply`
+      // a `d1 execute` čtou jen tento seznam; s --preview pak míří na testovací databázi.
+      "preview_database_id": "DOPLNIT-ID-TESTOVACI-DATABAZE",
       "migrations_dir": "migrations"
     }
   ],
