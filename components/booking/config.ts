@@ -1,7 +1,4 @@
-/** Orientační cena za celou chalupu a noc (Kč). */
-export const PRICE_PER_NIGHT = 3000;
-/** Kapacita chalupy. */
-export const CAPACITY = 7;
+export { CAPACITY, PRICE_PER_NIGHT } from '../../lib/booking/rules.ts';
 /** Kolik měsíců dopředu lze v kalendáři procházet (včetně aktuálního). */
 export const HORIZON_MONTHS = 12;
 /** Oficiální profil a poptávka na e-chalupy.cz. */

@@ -11,7 +11,36 @@
     "run_worker_first": ["/api/*"]
   },
   // Secret ECHALUPY_ICAL_URL se nastavuje v Cloudflare (wrangler secret put), nikdy v repozitáři.
-  "previews": {},
+  // Produkce: rezervační POST je vypnutý (BOOKING_API_ENABLED není nastavené).
+  "vars": {
+    "BOOKING_ENV": "production"
+  },
+  // Rezervační úložiště. Produkční a testovací databáze jsou oddělené; ID doplní správce
+  // po vytvoření databází (npx wrangler d1 create …).
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "chalupa-vsetice-rezervace",
+      "database_id": "DOPLNIT-ID-PRODUKCNI-DATABAZE",
+      "migrations_dir": "migrations"
+    }
+  ],
+  // Worker Previews nedědí proměnné ani bindingy z produkce: mají vlastní testovací D1
+  // a jen zde je zapnutý rezervační POST (s tokenem BOOKING_API_TOKEN).
+  "previews": {
+    "vars": {
+      "BOOKING_ENV": "preview",
+      "BOOKING_API_ENABLED": "true"
+    },
+    "d1_databases": [
+      {
+        "binding": "DB",
+        "database_name": "chalupa-vsetice-rezervace-test",
+        "database_id": "DOPLNIT-ID-TESTOVACI-DATABAZE",
+        "migrations_dir": "migrations"
+      }
+    ]
+  },
   // Workers Logs: logují se jen volání Workeru, tedy /api/* (statické assety Worker nespouští).
   "observability": {
     "logs": {
