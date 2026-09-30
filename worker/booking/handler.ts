@@ -1,0 +1,165 @@
+// POST /api/reservations – založení rezervace v D1.
+//
+// Endpoint je zapnutý jen tam, kde BOOKING_API_ENABLED = "true" (zatím jen Worker Previews),
+// a vyžaduje Bearer token BOOKING_API_TOKEN. V produkci vrací 404 jako neexistující cesta.
+// Do e-chalup, Airbnb ani Booking.com nic nezapisuje; export e-chalup jen čte.
+
+import { diffDays, todayInPrague } from '../../lib/availability/dates.ts';
+import { icalUidFor, newReservationCode } from '../../lib/booking/codes.ts';
+import type { AvailabilityDeps } from '../availability.ts';
+import { json } from '../http.ts';
+import { databaseEnvironment, DuplicateError, findByIdempotencyKey, insertReservation, NightsTakenError, type ReservationSummary } from './db.ts';
+import { checkExternalAvailability } from './external.ts';
+import { validateBooking, type ValidBooking } from './validation.ts';
+
+export interface BookingEnv {
+  ECHALUPY_ICAL_URL?: string;
+  DB?: D1Database;
+  /** Označení prostředí (production / preview); musí souhlasit s meta.environment v D1. */
+  BOOKING_ENV?: string;
+  /** "true" zapne POST /api/reservations. V produkci zatím nenastaveno. */
+  BOOKING_API_ENABLED?: string;
+  /** Secret: přístupový token pro POST /api/reservations. */
+  BOOKING_API_TOKEN?: string;
+}
+
+export interface BookingDeps extends Pick<AvailabilityDeps, 'fetch' | 'now' | 'log'> {
+  randomUUID: () => string;
+  randomBytes?: (bytes: Uint8Array) => Uint8Array;
+}
+
+const MAX_BODY_BYTES = 8 * 1024;
+const IDEMPOTENCY_KEY = /^[A-Za-z0-9_-]{16,100}$/;
+const CODE_ATTEMPTS = 3;
+
+const noStore = (status: number, body: unknown, headers?: HeadersInit) => json(body, { status, cacheControl: 'no-store', headers });
+const failure = (status: number, error: string, extra: Record<string, unknown> = {}) => noStore(status, { error, ...extra });
+
+async function sha256(value: string): Promise<Uint8Array> {
+  return new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(value)));
+}
+
+const hex = (bytes: Uint8Array) => Array.from(bytes, (b) => b.toString(16).padStart(2, '0')).join('');
+
+/** Porovnání tokenu v konstantním čase (přes otisky stejné délky). */
+async function tokenMatches(header: string | null, token: string): Promise<boolean> {
+  const presented = header?.startsWith('Bearer ') ? header.slice(7) : '';
+  const [a, b] = await Promise.all([sha256(presented), sha256(token)]);
+  let diff = 0;
+  for (let i = 0; i < a.length; i++) diff |= a[i] ^ b[i];
+  return diff === 0 && presented.length > 0;
+}
+
+/** Otisk obsahu požadavku pro opakované odeslání se stejným Idempotency-Key. */
+const requestHash = async (b: ValidBooking) =>
+  hex(await sha256(JSON.stringify([b.arrival, b.departure, b.guests, b.firstName, b.lastName, b.phone, b.email])));
+
+const created = (reservation: ReservationSummary, status = 201, replayed = false) =>
+  noStore(status, { reservation: { ...reservation, nights: diffDays(reservation.arrival, reservation.departure) }, ...(replayed ? { replayed: true } : {}) });
+
+export async function handleCreateReservation(request: Request, env: BookingEnv, deps: BookingDeps): Promise<Response> {
+  // Vypnutý endpoint se neliší od neexistující cesty.
+  if (env.BOOKING_API_ENABLED !== 'true') return failure(404, 'not-found');
+  if (request.method !== 'POST') return noStore(405, { error: 'method-not-allowed' }, { allow: 'POST' });
+
+  const token = env.BOOKING_API_TOKEN?.trim();
+  const url = env.ECHALUPY_ICAL_URL?.trim();
+  if (!token || !url || !env.DB || !env.BOOKING_ENV) {
+    deps.log('reservations: not configured');
+    return failure(503, 'not-configured');
+  }
+  if (!(await tokenMatches(request.headers.get('authorization'), token))) return failure(401, 'unauthorized');
+
+  if (!/^application\/json\b/i.test(request.headers.get('content-type') ?? '')) return failure(415, 'unsupported-media-type');
+  if (Number(request.headers.get('content-length') ?? 0) > MAX_BODY_BYTES) return failure(413, 'payload-too-large');
+  const raw = await request.text();
+  if (new TextEncoder().encode(raw).length > MAX_BODY_BYTES) return failure(413, 'payload-too-large');
+  let body: unknown;
+  try {
+    body = JSON.parse(raw);
+  } catch {
+    return failure(400, 'invalid-json');
+  }
+  const idempotencyKey = request.headers.get('idempotency-key');
+  if (idempotencyKey !== null && !IDEMPOTENCY_KEY.test(idempotencyKey)) return failure(400, 'invalid-idempotency-key');
+
+  const now = deps.now();
+  const today = todayInPrague(now);
+  const validation = validateBooking(body, today);
+  if (!validation.ok) return failure(422, 'invalid-request', { fields: validation.fields });
+  const booking = validation.value;
+  const db = env.DB;
+
+  try {
+    // Pojistka proti záměně databází: Preview nesmí zapisovat do produkční D1 ani naopak.
+    const marker = await databaseEnvironment(db);
+    if (marker !== env.BOOKING_ENV) {
+      deps.log('reservations: database environment mismatch');
+      return failure(503, 'database-environment-mismatch');
+    }
+    const hash = await requestHash(booking);
+    if (idempotencyKey) {
+      const existing = await findByIdempotencyKey(db, idempotencyKey);
+      if (existing) return replay(existing, hash);
+    }
+
+    // Cena je vždy spočítaná na serveru. Nesouhlasí-li s cenou, kterou host viděl, rezervace se nezaloží.
+    if (booking.expectedPriceCzk !== null && booking.expectedPriceCzk !== booking.priceCzk) {
+      return failure(409, 'price-mismatch', { priceCzk: booking.priceCzk });
+    }
+
+    // Čerstvá kontrola proti e-chalupám (bez cache). Selhání nebo neúplná data = odmítnutí.
+    const external = await checkExternalAvailability(url, booking, deps);
+    if (!external.ok) {
+      deps.log(`reservations: rejected (${external.reason}${'detail' in external ? `, ${external.detail}` : ''})`);
+      return external.reason === 'dates-unavailable' ? failure(409, 'dates-unavailable') : failure(503, external.reason);
+    }
+
+    for (let attempt = 1; ; attempt++) {
+      const id = deps.randomUUID();
+      try {
+        const reservation = await insertReservation(db, {
+          id,
+          publicCode: newReservationCode(deps.randomBytes),
+          icalUid: icalUidFor(id),
+          arrival: booking.arrival,
+          departure: booking.departure,
+          guests: booking.guests,
+          firstName: booking.firstName,
+          lastName: booking.lastName,
+          phone: booking.phone,
+          email: booking.email,
+          priceCzk: booking.priceCzk,
+          idempotencyKey,
+          requestHash: hash,
+          vsPrefix: today.slice(2, 4),
+          createdAt: now.toISOString(),
+        });
+        deps.log('reservations: created');
+        return created(reservation);
+      } catch (error) {
+        if (error instanceof NightsTakenError) {
+          deps.log('reservations: rejected (nights-taken)');
+          return failure(409, 'dates-unavailable');
+        }
+        if (error instanceof DuplicateError && error.column === 'idempotency_key' && idempotencyKey) {
+          // Souběžný požadavek se stejným klíčem byl rychlejší.
+          const existing = await findByIdempotencyKey(db, idempotencyKey);
+          if (existing) return replay(existing, hash);
+        }
+        if (error instanceof DuplicateError && error.column !== 'idempotency_key' && attempt < CODE_ATTEMPTS) continue;
+        throw error;
+      }
+    }
+  } catch {
+    // Do logu jde jen druh chyby, nikdy obsah požadavku.
+    deps.log('reservations: database error');
+    return failure(503, 'database-error');
+  }
+}
+
+function replay(existing: ReservationSummary & { requestHash: string | null }, hash: string): Response {
+  if (existing.requestHash !== hash) return failure(422, 'idempotency-key-reused');
+  const { requestHash: _, ...reservation } = existing;
+  return created(reservation, 200, true);
+}

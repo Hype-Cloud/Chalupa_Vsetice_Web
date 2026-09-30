@@ -1,18 +1,12 @@
 // Cloudflare Worker: obsluhuje pouze /api/* (assets.run_worker_first ve wrangler.jsonc).
 // Všechny ostatní požadavky obsluhují statické assety z dist/client bez spuštění Workeru.
-import { getAvailability, type AvailabilityEnv } from './availability.ts';
+import { getAvailability } from './availability.ts';
+import { listReservedNights } from './booking/db.ts';
+import { handleCreateReservation, type BookingEnv } from './booking/handler.ts';
+import { json } from './http.ts';
 
-interface Env extends AvailabilityEnv {
+interface Env extends BookingEnv {
   ASSETS: Fetcher;
-}
-
-const SECURITY_HEADERS = { 'x-content-type-options': 'nosniff', 'referrer-policy': 'no-referrer' };
-
-function json(body: unknown, init: ResponseInit & { cacheControl: string }): Response {
-  return new Response(JSON.stringify(body), {
-    status: init.status ?? 200,
-    headers: { 'content-type': 'application/json; charset=utf-8', 'cache-control': init.cacheControl, ...SECURITY_HEADERS, ...init.headers },
-  });
 }
 
 async function handleAvailability(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
@@ -26,6 +20,8 @@ async function handleAvailability(request: Request, env: Env, ctx: ExecutionCont
     cache: typeof caches !== 'undefined' ? (caches as unknown as { default: Cache }).default : null,
     defer: (promise) => ctx.waitUntil(promise),
     log: (message) => console.warn(message),
+    // Vlastní rezervace z D1 (pokud je databáze připojená) se přidají k obsazenosti z e-chalup.
+    reservedNights: env.DB ? (range) => listReservedNights(env.DB!, range) : undefined,
   });
   // Krátká cache v prohlížeči; neúplná data se necachují.
   return json(data, { cacheControl: data.status === 'ok' ? 'public, max-age=60' : 'no-store' });
@@ -35,6 +31,14 @@ export default {
   async fetch(request, env, ctx): Promise<Response> {
     const { pathname } = new URL(request.url);
     if (pathname === '/api/availability') return handleAvailability(request, env, ctx);
+    if (pathname === '/api/reservations') {
+      return handleCreateReservation(request, env, {
+        fetch: (input, init) => fetch(input, init),
+        now: () => new Date(),
+        randomUUID: () => crypto.randomUUID(),
+        log: (message) => console.warn(message),
+      });
+    }
     if (pathname.startsWith('/api/')) return json({ error: 'not-found' }, { status: 404, cacheControl: 'no-store' });
     return env.ASSETS.fetch(request);
   },

@@ -2,3 +2,10 @@
 # Adresa iCal exportu obsazenosti. Pro vývoj použijte syntetický .ics soubor,
 # soukromý export z e-chalup sem nepatří (v Cloudflare je uložený jako secret).
 ECHALUPY_ICAL_URL=
+
+# Rezervační POST /api/reservations (lokálně nad lokální D1, nikdy nad produkční).
+# Lokální databázi označte: npx wrangler d1 execute chalupa-vsetice-rezervace --local \
+#   --command "INSERT INTO meta (key, value) VALUES ('environment', 'local')"
+BOOKING_ENV=local
+BOOKING_API_ENABLED=true
+BOOKING_API_TOKEN=

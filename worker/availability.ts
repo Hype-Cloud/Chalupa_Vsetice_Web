@@ -1,4 +1,5 @@
 import { addDays, todayInPrague } from '../lib/availability/dates.ts';
+import { mergeIntervals } from '../lib/availability/occupancy.ts';
 import type { AvailabilityResponse, BusyInterval } from '../lib/availability/types.ts';
 import { IcalParseError, parseBusyIntervals } from './ical.ts';
 
@@ -42,6 +43,11 @@ export interface AvailabilityDeps {
   /** Odložené operace (ctx.waitUntil ve Workeru). */
   defer: (promise: Promise<unknown>) => void;
   log: (message: string) => void;
+  /**
+   * Obsazené noci vlastních rezervací z D1 (jen pokud je databáze připojená). Přidávají se
+   * k obsazenosti z e-chalup, aby nová rezervace byla vidět hned, ne až po importu do e-chalup.
+   */
+  reservedNights?: (range: { from: string; to: string }) => Promise<BusyInterval[]>;
 }
 
 export interface AvailabilityEnv {
@@ -62,7 +68,7 @@ export function resetAvailabilityMemory() {
   lastFailureReason = 'upstream-unknown';
 }
 
-class UpstreamError extends Error {
+export class UpstreamError extends Error {
   readonly kind: string;
   constructor(kind: string) {
     super(kind);
@@ -80,9 +86,11 @@ async function readCache(cache: SnapshotCache | null): Promise<Snapshot | null> 
   }
 }
 
-async function download(url: string, now: Date, deps: AvailabilityDeps): Promise<Snapshot> {
-  const today = todayInPrague(now);
-  const range = { from: addDays(today, -1), to: addDays(today, HORIZON_DAYS) };
+/**
+ * Stáhne iCal export e-chalup (vždy čerstvě, bez cache). Pouze čtení: GET bez těla.
+ * @throws UpstreamError s druhem chyby (timeout, network, http-<kód>); nikdy s URL
+ */
+export async function fetchExportText(url: string, deps: Pick<AvailabilityDeps, 'fetch'>): Promise<string> {
   let response: Response;
   try {
     // Pouze čtení: GET bez těla a bez přihlašovacích údajů.
@@ -91,7 +99,17 @@ async function download(url: string, now: Date, deps: AvailabilityDeps): Promise
     throw new UpstreamError(error instanceof Error && error.name === 'TimeoutError' ? 'timeout' : 'network');
   }
   if (!response.ok) throw new UpstreamError(`http-${response.status}`);
-  const text = await response.text();
+  try {
+    return await response.text();
+  } catch {
+    throw new UpstreamError('network');
+  }
+}
+
+async function download(url: string, now: Date, deps: AvailabilityDeps): Promise<Snapshot> {
+  const today = todayInPrague(now);
+  const range = { from: addDays(today, -1), to: addDays(today, HORIZON_DAYS) };
+  const text = await fetchExportText(url, deps);
   try {
     const { busy, events, skipped } = parseBusyIntervals(text, range);
     if (skipped > 0) deps.log(`availability: ${skipped} of ${events} events could not be parsed reliably`);
@@ -101,18 +119,25 @@ async function download(url: string, now: Date, deps: AvailabilityDeps): Promise
   }
 }
 
-function respond(requested: AvailabilityResponse['status'], snapshot: Snapshot | null, now: Date, failureReason?: string): AvailabilityResponse {
+/** Vlastní rezervace z D1: obsazené noci, nebo `failed`, když se je nepodařilo načíst. */
+type OwnNights = { busy: BusyInterval[] } | { failed: true };
+
+function respond(requested: AvailabilityResponse['status'], snapshot: Snapshot | null, now: Date, failureReason?: string, own?: OwnNights): AvailabilityResponse {
   const today = todayInPrague(now);
   // Export s nepřevedenými událostmi se nesmí tvářit jako kompletní obsazenost – ani když se
   // jako záloha (stale) vrací starší neúplný snapshot. Příznak incomplete proto nese každá odpověď.
-  const incomplete = !!snapshot && (snapshot.skipped ?? 0) > 0;
+  // Totéž platí, když nešly načíst vlastní rezervace z D1.
+  const skipped = !!snapshot && (snapshot.skipped ?? 0) > 0;
+  const ownFailed = !!snapshot && !!own && 'failed' in own;
+  const incomplete = skipped || ownFailed;
   const status = requested === 'ok' && incomplete ? 'partial' : requested;
-  const reason = failureReason ?? (incomplete ? 'skipped-events' : undefined);
+  const reason = failureReason ?? (skipped ? 'skipped-events' : ownFailed ? 'reservations-unavailable' : undefined);
+  const busy = snapshot ? mergeIntervals([...snapshot.busy, ...(own && 'busy' in own ? own.busy : [])]) : [];
   return {
     status,
     incomplete,
     ...(reason ? { reason } : {}),
-    busy: snapshot ? snapshot.busy.filter((i) => i.end > addDays(today, -1)) : [],
+    busy: busy.filter((i) => i.end > addDays(today, -1)),
     updatedAt: snapshot?.updatedAt ?? null,
     checkedAt: now.toISOString(),
     range: snapshot?.range ?? { from: today, to: today },
@@ -127,15 +152,36 @@ export async function getAvailability(env: AvailabilityEnv, deps: AvailabilityDe
     deps.log('availability: ECHALUPY_ICAL_URL is not configured');
     return respond('unavailable', null, now, 'not-configured');
   }
+  const { status, snapshot, reason } = await externalAvailability(url, now, deps);
+  return respond(status, snapshot, now, reason, snapshot ? await ownNights(snapshot.range, deps) : undefined);
+}
 
+async function ownNights(range: Snapshot['range'], deps: AvailabilityDeps): Promise<OwnNights | undefined> {
+  if (!deps.reservedNights) return undefined;
+  try {
+    return { busy: await deps.reservedNights(range) };
+  } catch {
+    deps.log('availability: reservations read failed');
+    return { failed: true };
+  }
+}
+
+interface External {
+  status: AvailabilityResponse['status'];
+  snapshot: Snapshot | null;
+  reason?: string;
+}
+
+async function externalAvailability(url: string, now: Date, deps: AvailabilityDeps): Promise<External> {
   const cached = memory ?? (await readCache(deps.cache));
   const age = (snapshot: Snapshot) => now.getTime() - Date.parse(snapshot.updatedAt);
   if (cached && age(cached) < FRESH_MS) {
     memory = cached;
-    return respond('ok', cached, now);
+    return { status: 'ok', snapshot: cached };
   }
 
-  const fallback = () => (cached && age(cached) < STALE_MAX_MS ? respond('stale', cached, now, lastFailureReason) : respond('unavailable', null, now, lastFailureReason));
+  const fallback = (): External =>
+    cached && age(cached) < STALE_MAX_MS ? { status: 'stale', snapshot: cached, reason: lastFailureReason } : { status: 'unavailable', snapshot: null, reason: lastFailureReason };
   if (now.getTime() - lastFailureAt < RETRY_AFTER_FAILURE_MS) return fallback();
 
   try {
@@ -150,7 +196,7 @@ export async function getAvailability(env: AvailabilityEnv, deps: AvailabilityDe
       const body = new Response(JSON.stringify(fresh), { headers: { 'content-type': 'application/json', 'cache-control': `max-age=${STALE_MAX_MS / 1000}` } });
       deps.defer(deps.cache.put(CACHE_KEY, body).catch(() => undefined));
     }
-    return respond('ok', fresh, now);
+    return { status: 'ok', snapshot: fresh };
   } catch (error) {
     // Do logu jde jen druh chyby, nikdy URL exportu.
     const kind = error instanceof UpstreamError ? error.kind : 'unknown';

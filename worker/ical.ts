@@ -2,6 +2,7 @@ import ICAL from 'ical.js';
 import { addDays, isIsoDate, isoDateInZone, isoFromParts, TIME_ZONE, type IsoDate } from '../lib/availability/dates.ts';
 import { mergeIntervals } from '../lib/availability/occupancy.ts';
 import type { BusyInterval } from '../lib/availability/types.ts';
+import { RESERVATION_CODE } from '../lib/booking/codes.ts';
 
 /** Export není platný iCalendar – nesmí se vyložit jako prázdný kalendář. */
 export class IcalParseError extends Error {
@@ -64,6 +65,28 @@ function toNights(start: Time | null, end: Time | null): { interval: BusyInterva
   return { interval: { start: from, end: addDays(from, 1) }, suspicious: !!invalidEnd };
 }
 
+/**
+ * Událost exportu převedená na obsazené noci. Kromě intervalu nese jen údaje potřebné
+ * k rozpoznání vlastní rezervace vrácené exportem e-chalup (UID a kódy rezervace
+ * z SUMMARY/DESCRIPTION), žádná jména ani kontakty. Do odpovědí API se nepředává.
+ */
+export interface CalendarEvent extends BusyInterval {
+  uid: string | null;
+  codes: string[];
+}
+
+export interface ParsedEvents {
+  events: CalendarEvent[];
+  /** Počet VEVENT v exportu. */
+  total: number;
+  skipped: number;
+}
+
+function reservationCodes(component: Component): string[] {
+  const text = ['summary', 'description'].map((name) => String(component.getFirstPropertyValue(name) ?? '')).join('\n');
+  return [...new Set(text.match(RESERVATION_CODE) ?? [])];
+}
+
 const isCancelled = (component: Component) => String(component.getFirstPropertyValue('status') ?? '').toUpperCase() === 'CANCELLED';
 
 /**
@@ -71,6 +94,16 @@ const isCancelled = (component: Component) => String(component.getFirstPropertyV
  * @throws IcalParseError pokud text není platný VCALENDAR
  */
 export function parseBusyIntervals(text: string, range: { from: IsoDate; to: IsoDate }): ParsedCalendar {
+  const { events, total, skipped } = parseCalendarEvents(text, range);
+  return { busy: mergeIntervals(events.map(({ start, end }) => ({ start, end }))), events: total, skipped };
+}
+
+/**
+ * Jednotlivé události exportu (nesloučené), oříznuté na rozsah. Slouží ke kontrole kolize při
+ * vytváření rezervace a k rozpoznání vlastních rezervací v exportu.
+ * @throws IcalParseError pokud text není platný VCALENDAR
+ */
+export function parseCalendarEvents(text: string, range: { from: IsoDate; to: IsoDate }): ParsedEvents {
   if (typeof text !== 'string' || !/BEGIN:VCALENDAR/i.test(text)) throw new IcalParseError('Missing VCALENDAR');
   let root: Component;
   try {
@@ -117,12 +150,19 @@ export function parseBusyIntervals(text: string, range: { from: IsoDate; to: Iso
     else events.push(exception); // výjimka bez opakované události: vyhodnotí se samostatně
   }
 
-  const intervals: BusyInterval[] = [];
-  const add = (start: Time | null, end: Time | null) => {
+  const found: CalendarEvent[] = [];
+  const add = (event: Event, start: Time | null, end: Time | null) => {
     const nights = toNights(start, end);
     if (!nights) return false;
     const { interval } = nights;
-    if (interval.end > range.from && interval.start < range.to) intervals.push(interval);
+    if (interval.end > range.from && interval.start < range.to) {
+      found.push({
+        start: interval.start < range.from ? range.from : interval.start,
+        end: interval.end > range.to ? range.to : interval.end,
+        uid: event.uid || null,
+        codes: reservationCodes(event.component),
+      });
+    }
     return !nights.suspicious;
   };
 
@@ -134,7 +174,7 @@ export function parseBusyIntervals(text: string, range: { from: IsoDate; to: Iso
       }
       if (isCancelled(event.component)) continue;
       if (!event.isRecurring()) {
-        if (!add(event.startDate, event.endDate)) skipped++;
+        if (!add(event, event.startDate, event.endDate)) skipped++;
         continue;
       }
       const iterator = event.iterator();
@@ -145,7 +185,7 @@ export function parseBusyIntervals(text: string, range: { from: IsoDate; to: Iso
         const startIso = toIsoDate(details.startDate);
         if (startIso && startIso >= range.to) break;
         if (isCancelled(details.item.component)) continue;
-        if (!add(details.startDate, details.endDate)) {
+        if (!add(details.item, details.startDate, details.endDate)) {
           skipped++;
           break;
         }
@@ -155,6 +195,5 @@ export function parseBusyIntervals(text: string, range: { from: IsoDate; to: Iso
     }
   }
 
-  const clipped = intervals.map((i) => ({ start: i.start < range.from ? range.from : i.start, end: i.end > range.to ? range.to : i.end }));
-  return { busy: mergeIntervals(clipped), events: vevents.length, skipped };
+  return { events: found, total: vevents.length, skipped };
 }

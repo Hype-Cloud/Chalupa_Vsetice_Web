@@ -1,0 +1,16 @@
+// Jen pro migrace a údržbu testovací D1 (Worker Previews), nikdy pro deploy:
+//   npx wrangler d1 migrations apply chalupa-vsetice-rezervace-test --remote --config wrangler.preview-migrations.jsonc
+// `wrangler d1` čte jen top-level d1_databases, ne blok previews ve wrangler.jsonc.
+// database_id musí odpovídat previews.d1_databases ve wrangler.jsonc.
+{
+  "name": "chalupa-vsetice-web",
+  "compatibility_date": "2026-09-28",
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "chalupa-vsetice-rezervace-test",
+      "database_id": "b6269d5f-4705-4b4c-a52c-e5030a020605",
+      "migrations_dir": "migrations"
+    }
+  ]
+}
