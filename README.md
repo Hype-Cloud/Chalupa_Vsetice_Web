@@ -115,7 +115,7 @@ Produkční endpoint pro vytváření rezervací zůstává vypnutý. Testovací
 
 Projekt využívá Node.js Test Runner. Databázové testy probíhají nad lokální Cloudflare D1 prostřednictvím Miniflare/workerd. Testovací údaje jsou syntetické.
 
-**Výsledek posledního vývojového běhu: 87/87 úspěšných testů.**
+**Výsledek posledního vývojového běhu: 103/103 úspěšných testů.**
 
 | Testovací soubor | Počet | Zaměření |
 |---|---:|---|
@@ -125,7 +125,8 @@ Projekt využívá Node.js Test Runner. Databázové testy probíhají nad loká
 | booking.test.ts | 9 | Validace rezervací, ceny, kontakty, vlastní iCal UID a propojení D1 s kalendářem. |
 | reservations-api.test.ts | 16 | Rezervační API, autorizace, idempotence, souběh požadavků a chybové stavy. |
 | reservations-db.test.ts | 11 | Databázová omezení, atomické transakce, rollback a ochrana proti kolizím. |
-| **Celkem** | **87** | |
+| ical-export.test.ts | 16 | Výstupní iCal: formát RFC 5545, escaping, stabilita UID, zrušení, autorizace, chyby D1 a prostředí, únik osobních údajů. |
+| **Celkem** | **103** | |
 
 ### Testované scénáře
 
@@ -206,6 +207,7 @@ Aktualizace poznámky již importované rezervace nebyla spolehlivě potvrzena. 
 - Testovací D1: připravená, integrační testy úspěšné.
 - Produkční D1: migrace úspěšně provedena, databáze připravená a bez rezervací.
 - Produkční rezervační POST: vypnutý.
+- Výstupní iCal `/api/reservations.ics`: implementovaný, zapnutý jen ve Worker Previews, v produkci vypnutý. K živým e-chalupám zatím není připojený.
 - Stávající způsob poptávky prostřednictvím e-chalup: zachován.
 
 ## Navazující vývoj
@@ -213,7 +215,7 @@ Aktualizace poznámky již importované rezervace nebyla spolehlivě potvrzena. 
 Dosud nejsou implementovány:
 
 - Veřejný rezervační formulář.
-- Výstupní iCalendar pro automatický import webových rezervací do e-chalup.
+- Připojení výstupního iCalu k živým e-chalupám (po schválení, viz [bezpečný postup](#bezpečný-postup-nasazení-exportu)).
 - Generování platebních QR kódů.
 - Automatické odesílání e-mailových oznámení.
 - Veřejná ochrana formuláře pomocí Cloudflare Turnstile a rate limitingu.
@@ -304,6 +306,75 @@ Pro novou rezervaci je každá událost exportu obsazený termín, tedy i ozvěn
 rezervace. Shoda samotného termínu nestačí, jinak by se skryla cizí rezervace se stejnými
 daty.
 
+### Výstupní iCal pro e-chalupy (`GET /api/reservations.ics`)
+
+Soukromý iCal feed vlastních rezervací z D1, určený k automatickému importu do e-chalup přes URL:
+
+```
+D1 (reservations) → GET /api/reservations.ics?token=… → import v e-chalupách
+```
+
+- **Jen rezervace z D1.** Export nikdy nečte ani nepřebírá události z exportu e-chalup, takže
+  nevzniká synchronizační smyčka. Rezervace, kterou e-chalupy vrátí ve svém exportu,
+  se na webu rozpozná podle UID.
+- **Formát (RFC 5545):**
+  - UTF-8, CRLF, řádky zalomené na 75 oktetů bez dělení vícebajtových znaků,
+  - escapování `\ ; ,` a konců řádků.
+- **Každá rezervace = jedna celodenní událost:**
+  - stabilní `UID` (`rezervace-<uuid>@chalupavsetice.cz`),
+  - `DTSTART;VALUE=DATE` = příjezd, exkluzivní `DTEND;VALUE=DATE` = den odjezdu, bez časového pásma,
+  - `DTSTAMP` a `LAST-MODIFIED` = poslední změna rezervace, takže nezměněná rezervace dává
+    stále stejný text; dále `SEQUENCE`,
+  - `SUMMARY` `Web CV-XXXXXX – Jméno Příjmení`,
+  - `DESCRIPTION` s kódem rezervace, hostem, telefonem, e-mailem, počtem hostů, cenou, VS
+    a stavem platby. Tyto údaje se do e-chalup přenesou v poznámce rezervace (ověřeno
+    testem importu).
+- **Zrušené rezervace** (`cancelled`) ve feedu nejsou. E-chalupy podle ověřeného chování
+  rezervaci zruší, když událost z feedu zmizí. Proto feed nemá ani časový limit do minulosti:
+  odebrání starých pobytů by je v e-chalupách zrušilo.
+- **Mimo produkci** mají název kalendáře, `SUMMARY` i `DESCRIPTION` prefix `[TEST]`.
+- **Chyby:**
+  - chyba D1 nebo nesoulad `meta.environment` s `BOOKING_ENV` vrátí 503 (`text/plain`)
+    bez kalendáře. Importér tak nedostane prázdný ani neúplný VCALENDAR, podle kterého
+    by rezervace zrušil,
+  - neplatný záznam zastaví celý export, nikdy se nevynechá.
+- **Hlavičky:** `text/calendar; charset=utf-8`, `Cache-Control: private, no-store`,
+  `X-Robots-Tag: noindex`.
+
+**Přístup a secrets:**
+- Export je zapnutý jen při `BOOKING_ICAL_EXPORT_ENABLED = "true"`. Zatím je to jen
+  v bloku `previews` ve `wrangler.jsonc`; v produkci vrací 404.
+- Token je secret `BOOKING_ICAL_EXPORT_TOKEN`, nejméně 32 znaků (doporučeno
+  `openssl rand -hex 32`). Kratší nebo chybějící token znamená 503.
+- Token je v **query stringu** (`?token=`), ne v cestě. Worker Logs i Traces mají
+  `observability.redact_query_string: true`, takže se URL s tokenem v Cloudflare
+  Observability neukládá.
+- Kód Workeru token, URL ani osobní údaje neloguje; loguje jen `ical-export: served (N events)`,
+  `unauthorized`, `failed` apod.
+- Chybný nebo chybějící token vrací 404, aby šlo existenci feedu ověřit jen se správným tokenem.
+  Token se porovnává v konstantním čase.
+- Hlavička `Authorization` se nepoužívá, importéry ICS umí jen URL.
+- **Celá URL feedu je secret:** nesdílet, nevkládat do repozitáře, tiketů ani screenshotů.
+  Při podezření na únik vygenerovat nový token a URL v e-chalupách vyměnit.
+
+#### Bezpečný postup nasazení exportu
+
+1. **Preview:**
+   - nastavit `npx wrangler preview base-config secret put BOOKING_ICAL_EXPORT_TOKEN`,
+   - ověřit feed na Preview URL: 200, `[TEST]` prefix, platný iCal,
+   - **nepřidávat ho do živých e-chalup.** Testovací D1 obsahuje syntetickou rezervaci.
+2. **Test importu:** feed Preview případně vyzkoušet jen na izolovaném importu a
+   po testu import v e-chalupách smazat.
+3. **Produkce (až po výslovném schválení):**
+   - nastavit produkční secret `npx wrangler secret put BOOKING_ICAL_EXPORT_TOKEN`
+     (jiný token než v Preview),
+   - v PR přidat `BOOKING_ICAL_EXPORT_ENABLED = "true"` do top-level `vars`,
+   - po nasazení ověřit, že produkční D1 obsahuje jen skutečné rezervace (žádné testovací),
+   - teprve potom zadat URL do importu e-chalup.
+4. **Vypnutí:** export odstraněním `BOOKING_ICAL_EXPORT_ENABLED` vypnete. Import
+   v e-chalupách nejdřív odpojte, jinak by e-chalupy mohly podle nedostupného nebo
+   prázdného feedu rezervace rušit.
+
 ### Bezpečnost prostředí
 
 - Produkce a Worker Previews mají **oddělené databáze**:
@@ -352,7 +423,10 @@ worker/
     handler.ts          POST /api/reservations
     validation.ts       serverová validace termínu, kapacity, kontaktů a ceny
     external.ts         čerstvá kontrola proti exportu e-chalup, rozpoznání vlastní rezervace
-    db.ts               D1: atomické založení rezervace, obsazené noci
+    db.ts               D1: atomické založení rezervace, obsazené noci, data pro export
+    export.ts           GET /api/reservations.ics (soukromý iCal feed)
+    ics.ts              serializace iCalendar (escaping, zalamování, CRLF)
+  secrets.ts            porovnání tokenů v konstantním čase
 migrations/             SQL migrace D1
 tests/                  unit testy + syntetické fixtures (smyšlené rezervace), lokální D1 (Miniflare)
 public/                 fotografie, favicon
@@ -413,7 +487,9 @@ npx wrangler d1 execute chalupa-vsetice-rezervace --local \
 - **Proměnné rezervací:**
   - `BOOKING_ENV` (`production` / `preview`),
   - `BOOKING_API_ENABLED` (jen `previews`),
-  - secret `BOOKING_API_TOKEN` (jen Preview).
+  - secret `BOOKING_API_TOKEN` (jen Preview),
+  - `BOOKING_ICAL_EXPORT_ENABLED` (jen `previews`) a secret `BOOKING_ICAL_EXPORT_TOKEN`
+    (min. 32 znaků) pro výstupní iCal.
 - **Cena a kapacita:** `lib/booking/rules.ts`. Odkaz na poptávku: `components/booking/config.ts`.
 
 ## Nasazení

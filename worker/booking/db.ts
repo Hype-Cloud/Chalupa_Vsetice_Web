@@ -151,3 +151,34 @@ export async function databaseEnvironment(db: D1Database): Promise<string | null
   return row?.value ?? null;
 }
 
+
+/** Rezervace pro výstupní iCal: všechny nezrušené, včetně kontaktů (jen pro autorizovaný export). */
+export interface ExportReservation {
+  code: string;
+  icalUid: string;
+  icalSequence: number;
+  arrival: IsoDate;
+  departure: IsoDate;
+  guests: number;
+  firstName: string;
+  lastName: string;
+  phone: string;
+  email: string;
+  priceCzk: number;
+  variableSymbol: string;
+  status: Exclude<ReservationStatus, 'cancelled'>;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export async function listExportReservations(db: D1Database): Promise<ExportReservation[]> {
+  const { results } = await db
+    .prepare(
+      `SELECT public_code AS code, ical_uid AS icalUid, ical_sequence AS icalSequence, arrival, departure, guests,
+         first_name AS firstName, last_name AS lastName, phone, email, price_czk AS priceCzk,
+         variable_symbol AS variableSymbol, status, created_at AS createdAt, updated_at AS updatedAt
+       FROM reservations WHERE status <> 'cancelled' ORDER BY arrival, ical_uid`,
+    )
+    .all<ExportReservation>();
+  return results;
+}
