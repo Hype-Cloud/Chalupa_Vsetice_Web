@@ -333,7 +333,7 @@ D1 (reservations) → GET /api/reservations.ics?token=… → import v e-chalup�
   aktuální (zvýšené) `SEQUENCE`, původní `DTSTART`/`DTEND` a `STATUS:CANCELLED`, bez osobních
   a platebních údajů. Podle ověřeného chování e-chalupy rezervaci zruší právě takto; pouhé
   vynechání události ji **nezruší**. `SEQUENCE` zvyšuje `cancelReservation()`, proto rezervace
-  ruště přes ni (ruční `UPDATE` stavu `SEQUENCE` nezvýší). Aktivní rezervace mají
+  rušte přes ni (ruční `UPDATE` stavu `SEQUENCE` nezvýší). Aktivní rezervace mají
   `STATUS:CONFIRMED`.
 - **Mimo produkci** mají název kalendáře, `SUMMARY` i `DESCRIPTION` prefix `[TEST]`.
 - **Chyby:**
