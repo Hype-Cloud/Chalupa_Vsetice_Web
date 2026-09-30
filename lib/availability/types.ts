@@ -22,7 +22,8 @@ export interface AvailabilityResponse {
   /**
    * Důvod stavu `partial` / `stale` / `unavailable` pro diagnostiku, bez citlivých údajů:
    * `skipped-events`, `not-configured`, `upstream-http-<kód>`, `upstream-timeout`,
-   * `upstream-network`, `upstream-invalid-ical`, `upstream-parse`.
+   * `upstream-network`, `upstream-too-large`, `upstream-too-many-events`, `upstream-invalid-ical`,
+   * `upstream-parse`, `reservations-unavailable`.
    */
   reason?: string;
   /**

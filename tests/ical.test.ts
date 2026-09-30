@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { IcalParseError, parseBusyIntervals } from '../worker/ical.ts';
+import { IcalLimitError, IcalParseError, MAX_EVENTS, parseBusyIntervals } from '../worker/ical.ts';
 import { fixture, RANGE_2030 } from './helpers.ts';
 
 const busy = (name: string, range = RANGE_2030) => parseBusyIntervals(fixture(name), range).busy;
@@ -125,4 +125,11 @@ test('chybné události se spočítají jako vynechané a platné zůstanou', ()
     { start: '2030-03-01', end: '2030-03-03' },
     { start: '2030-03-10', end: '2030-03-11' },
   ]);
+});
+
+test('limit počtu událostí: export nad limitem se odmítne celý', () => {
+  const event = (i: number) => `BEGIN:VEVENT\r\nUID:e${i}@test.invalid\r\nDTSTART;VALUE=DATE:20300101\r\nDTEND;VALUE=DATE:20300102\r\nEND:VEVENT\r\n`;
+  const calendar = (n: number) => `BEGIN:VCALENDAR\r\nVERSION:2.0\r\nPRODID:-//Test//CS\r\n${Array.from({ length: n }, (_, i) => event(i)).join('')}END:VCALENDAR\r\n`;
+  assert.throws(() => parseBusyIntervals(calendar(MAX_EVENTS + 1), RANGE_2030), IcalLimitError);
+  assert.equal(parseBusyIntervals(calendar(MAX_EVENTS), RANGE_2030).events, MAX_EVENTS);
 });

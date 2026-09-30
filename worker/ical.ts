@@ -12,6 +12,17 @@ export class IcalParseError extends Error {
   }
 }
 
+/** Export má víc událostí, než se bezpečně zpracuje – nesmí se vyložit jako (částečně) volno. */
+export class IcalLimitError extends IcalParseError {
+  constructor(message: string) {
+    super(message);
+    this.name = 'IcalLimitError';
+  }
+}
+
+/** Nejvyšší počet VEVENT v exportu. Skutečný export chalupy jich má jednotky až desítky. */
+export const MAX_EVENTS = 2000;
+
 export interface ParsedCalendar {
   /** Obsazené noci [start, end), sloučené a oříznuté na požadovaný rozsah. */
   busy: BusyInterval[];
@@ -105,6 +116,8 @@ export function parseBusyIntervals(text: string, range: { from: IsoDate; to: Iso
  */
 export function parseCalendarEvents(text: string, range: { from: IsoDate; to: IsoDate }): ParsedEvents {
   if (typeof text !== 'string' || !/BEGIN:VCALENDAR/i.test(text)) throw new IcalParseError('Missing VCALENDAR');
+  // Levná kontrola před parsováním, aby obří export nezahltil Worker.
+  if ((text.match(/^BEGIN:VEVENT\s*$/gim)?.length ?? 0) > MAX_EVENTS) throw new IcalLimitError('Too many events');
   let root: Component;
   try {
     root = new ICAL.Component(ICAL.parse(text.replace(BARE_DATE, '$1$2;VALUE=DATE:$3$4')) as unknown[]);
@@ -122,6 +135,7 @@ export function parseCalendarEvents(text: string, range: { from: IsoDate; to: Is
   }
 
   const vevents = root.getAllSubcomponents('vevent');
+  if (vevents.length > MAX_EVENTS) throw new IcalLimitError('Too many events');
   const events: Event[] = [];
   const exceptions: Event[] = [];
   let skipped = 0;

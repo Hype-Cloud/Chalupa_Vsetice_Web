@@ -182,3 +182,20 @@ export async function listExportReservations(db: D1Database): Promise<ExportRese
     .all<ExportReservation>();
   return results;
 }
+
+/**
+ * Zruší rezervaci (podle interního ID) a uvolní její noci. Oboje proběhne atomicky: noci maže
+ * trigger `reservations_cancel_release_nights` ve stejné transakci jako změnu stavu. Řádek
+ * rezervace zůstává kvůli historii; SEQUENCE se zvýší kvůli iCal exportu.
+ * @returns false, pokud rezervace neexistuje nebo už je zrušená (opakované zrušení nic nemění)
+ */
+export async function cancelReservation(db: D1Database, id: string, now: string): Promise<boolean> {
+  const result = await db
+    .prepare(
+      `UPDATE reservations SET status = 'cancelled', ical_sequence = ical_sequence + 1, updated_at = ?2
+       WHERE id = ?1 AND status <> 'cancelled'`,
+    )
+    .bind(id, now)
+    .run();
+  return result.meta.changes > 0;
+}

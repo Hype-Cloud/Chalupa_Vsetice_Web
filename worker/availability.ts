@@ -1,13 +1,15 @@
 import { addDays, todayInPrague } from '../lib/availability/dates.ts';
 import { mergeIntervals } from '../lib/availability/occupancy.ts';
 import type { AvailabilityResponse, BusyInterval } from '../lib/availability/types.ts';
-import { IcalParseError, parseBusyIntervals } from './ical.ts';
+import { IcalLimitError, IcalParseError, parseBusyIntervals } from './ical.ts';
 
 /** Data jsou čerstvá 5 minut, pak se export stáhne znovu (při další návštěvě). */
 export const FRESH_MS = 5 * 60_000;
 /** Při výpadku e-chalup se poslední úspěšná data zobrazují nejdéle 24 hodin (stav `stale`). */
 export const STALE_MAX_MS = 24 * 60 * 60_000;
 export const FETCH_TIMEOUT_MS = 8_000;
+/** Nejvyšší velikost exportu (skutečně přijaté bajty). Větší export se odmítne celý. */
+export const MAX_EXPORT_BYTES = 2 * 1024 * 1024;
 /** Po neúspěšném stažení se další pokus provede nejdřív za minutu (ochrana e-chalup při výpadku). */
 export const RETRY_AFTER_FAILURE_MS = 60_000;
 /** Rozsah dat v odpovědi: od včerejška na 400 dní dopředu. */
@@ -99,11 +101,36 @@ export async function fetchExportText(url: string, deps: Pick<AvailabilityDeps, 
     throw new UpstreamError(error instanceof Error && error.name === 'TimeoutError' ? 'timeout' : 'network');
   }
   if (!response.ok) throw new UpstreamError(`http-${response.status}`);
-  try {
-    return await response.text();
-  } catch {
-    throw new UpstreamError('network');
+  // Content-Length jen urychlí odmítnutí; rozhodují skutečně přijaté bajty (hlavička může chybět nebo lhát).
+  if (Number(response.headers.get('content-length') ?? 0) > MAX_EXPORT_BYTES) {
+    await response.body?.cancel().catch(() => undefined);
+    throw new UpstreamError('too-large');
   }
+  return readLimited(response);
+}
+
+async function readLimited(response: Response): Promise<string> {
+  if (!response.body) return '';
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder('utf-8');
+  let received = 0;
+  let text = '';
+  try {
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      received += value.byteLength;
+      if (received > MAX_EXPORT_BYTES) {
+        await reader.cancel().catch(() => undefined);
+        throw new UpstreamError('too-large');
+      }
+      text += decoder.decode(value, { stream: true });
+    }
+  } catch (error) {
+    if (error instanceof UpstreamError) throw error;
+    throw new UpstreamError(error instanceof Error && error.name === 'TimeoutError' ? 'timeout' : 'network');
+  }
+  return text + decoder.decode();
 }
 
 async function download(url: string, now: Date, deps: AvailabilityDeps): Promise<Snapshot> {
@@ -115,7 +142,7 @@ async function download(url: string, now: Date, deps: AvailabilityDeps): Promise
     if (skipped > 0) deps.log(`availability: ${skipped} of ${events} events could not be parsed reliably`);
     return { busy, updatedAt: now.toISOString(), range, events, skipped };
   } catch (error) {
-    throw new UpstreamError(error instanceof IcalParseError ? 'invalid-ical' : 'parse');
+    throw new UpstreamError(error instanceof IcalLimitError ? 'too-many-events' : error instanceof IcalParseError ? 'invalid-ical' : 'parse');
   }
 }
 

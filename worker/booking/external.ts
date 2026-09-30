@@ -2,7 +2,7 @@
 
 import type { IsoDate } from '../../lib/availability/dates.ts';
 import { fetchExportText, UpstreamError, type AvailabilityDeps } from '../availability.ts';
-import { IcalParseError, parseCalendarEvents, type CalendarEvent } from '../ical.ts';
+import { IcalLimitError, IcalParseError, parseCalendarEvents, type CalendarEvent } from '../ical.ts';
 
 /** Vlastní rezervace, jak ji lze poznat v exportu e-chalup. */
 export interface OwnIdentity {
@@ -54,7 +54,7 @@ export async function checkExternalAvailability(
   try {
     parsed = parseCalendarEvents(text, { from: stay.arrival, to: stay.departure });
   } catch (error) {
-    return { ok: false, reason: 'availability-check-failed', detail: error instanceof IcalParseError ? 'upstream-invalid-ical' : 'upstream-parse' };
+    return { ok: false, reason: 'availability-check-failed', detail: error instanceof IcalLimitError ? 'upstream-too-many-events' : error instanceof IcalParseError ? 'upstream-invalid-ical' : 'upstream-parse' };
   }
   // Nepřevedená událost může ležet právě v požadovaném termínu.
   if (parsed.skipped > 0) return { ok: false, reason: 'availability-incomplete', detail: 'skipped-events' };

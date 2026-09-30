@@ -1,7 +1,7 @@
 import test, { after, before, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
 import { handleCreateReservation, type BookingDeps, type BookingEnv } from '../worker/booking/handler.ts';
-import { getAvailability, resetAvailabilityMemory } from '../worker/availability.ts';
+import { getAvailability, MAX_EXPORT_BYTES, resetAvailabilityMemory } from '../worker/availability.ts';
 import { listReservedNights } from '../worker/booking/db.ts';
 import { createTestDatabase, failingDatabase } from './d1.ts';
 import { fixture } from './helpers.ts';
@@ -242,4 +242,13 @@ test('/api/availability zahrne vlastní rezervace z D1 hned po založení', asyn
     { start: '2030-02-10', end: '2030-02-13' },
   ]);
   assert.ok(!JSON.stringify(availability).includes('CV-'), 'API obsazenosti nevrací kódy ani UID');
+});
+
+test('příliš velký export e-chalup → 503, rezervace se nezaloží', async () => {
+  const s = setup(async () => new Response(fixture('01-single-and-multi.ics').replace('END:VCALENDAR', `X-PADDING:${'x'.repeat(MAX_EXPORT_BYTES)}\r\nEND:VCALENDAR`)));
+  const response = await s.post(stay('2030-02-01', '2030-02-03'));
+  assert.equal(response.status, 503);
+  assert.deepEqual(await response.json(), { error: 'availability-check-failed' });
+  assert.ok(s.logs.some((m) => m.includes('upstream-too-large')));
+  assert.equal(await t.count('reservations'), 0);
 });
