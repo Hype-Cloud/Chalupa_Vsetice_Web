@@ -11,8 +11,8 @@
     "run_worker_first": ["/api/*"]
   },
   // Secret ECHALUPY_ICAL_URL se nastavuje v Cloudflare (wrangler secret put), nikdy v repozitáři.
-  // Produkce: rezervační POST i výstupní iCal /api/reservations.ics jsou vypnuté
-  // (BOOKING_API_ENABLED ani BOOKING_ICAL_EXPORT_ENABLED nejsou nastavené).
+  // Produkce: rezervační POST zůstává vypnutý.
+  // Výstupní iCal /api/reservations.ics je zapnutý a chráněný BOOKING_ICAL_EXPORT_TOKEN.
   "vars": {
     "BOOKING_ENV": "production",
     "BOOKING_ICAL_EXPORT_ENABLED": "true"
