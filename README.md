@@ -58,7 +58,7 @@ e-chalupy (iCal export, GET) → Worker /api/availability → React kalendář
   - Překrývající se a navazující intervaly se sloučí.
   - Den odjezdu jedněch hostů zůstává volný pro příjezd dalších.
 - K obsazenosti z exportu se přidávají noci vlastních rezervací z D1 (viz
-  [Rezervační backend](#rezervační-backend-cloudflare-d1)).
+  [Rezervační backend](#rezervační-backend--technický-popis)).
 - API vrací jen obsazené intervaly (data), čas poslední synchronizace a stav.
   Jména, kontakty, popisy, kódy ani UID rezervací se nepředávají.
 
@@ -90,7 +90,140 @@ e-chalupy (iCal export, GET) → Worker /api/availability → React kalendář
 | Testy | `node:test` (bez dalších závislostí), syntetické `.ics` fixtures |
 | Balíčky | pnpm 11 (`pnpm-lock.yaml`), Node.js 24 (`.node-version`) |
 
-## Rezervační backend (Cloudflare D1)
+## Rezervační backend nad Cloudflare D1
+
+Backend pro budoucí přímé rezervace prostřednictvím webu Chalupa Všetice. Databáze D1 slouží jako technické úložiště rezervací a zajišťuje okamžitou blokaci obsazených termínů. Provozní administrací zůstávají e-chalupy.
+
+### Implementované funkce
+
+- Databázové tabulky pro rezervace, obsazené noci, variabilní symboly a konfiguraci prostředí.
+- Atomické vytvoření rezervace prostřednictvím D1 batch transakce.
+- Databázová ochrana proti dvojité rezervaci pomocí unikátního záznamu každé obsazené noci.
+- Serverová validace termínů, kapacity, kontaktních údajů a ceny.
+- Kontrola aktuální obsazenosti proti externímu iCal exportu před vytvořením rezervace.
+- Odmítnutí rezervace při nedostupném nebo neúplném exportu.
+- Podpora Idempotency-Key proti nechtěnému opakovanému vytvoření rezervace.
+- Okamžité promítnutí vlastních rezervací z D1 do veřejného kalendáře.
+- Rozpoznání vlastní rezervace vrácené externím kalendářem podle stabilního UID nebo veřejného kódu.
+- Oddělené databáze pro produkční a testovací prostředí.
+- Kontrola prostředí prostřednictvím meta.environment.
+- Cloudflare Observability: Logs a Traces s oddělenou konfigurací produkčního a testovacího prostředí.
+
+Produkční endpoint pro vytváření rezervací zůstává vypnutý. Testovací endpoint je chráněn autentizací a slouží výhradně k vývojovým účelům.
+
+## Automatické testování
+
+Projekt využívá Node.js Test Runner. Databázové testy probíhají nad lokální Cloudflare D1 prostřednictvím Miniflare/workerd. Testovací údaje jsou syntetické.
+
+**Výsledek posledního vývojového běhu: 87/87 úspěšných testů.**
+
+| Testovací soubor | Počet | Zaměření |
+|---|---:|---|
+| ical.test.ts | 19 | Parsování iCalendar, časová pásma, opakované a zrušené události, chybné exporty. |
+| availability.test.ts | 17 | Načítání obsazenosti, cache, výpadky externí služby a neúplná data. |
+| occupancy.test.ts | 15 | Slučování obsazených intervalů, kontrola termínů a chování kalendáře. |
+| booking.test.ts | 9 | Validace rezervací, ceny, kontakty, vlastní iCal UID a propojení D1 s kalendářem. |
+| reservations-api.test.ts | 16 | Rezervační API, autorizace, idempotence, souběh požadavků a chybové stavy. |
+| reservations-db.test.ts | 11 | Databázová omezení, atomické transakce, rollback a ochrana proti kolizím. |
+| **Celkem** | **87** | |
+
+### Testované scénáře
+
+- Úspěšné vytvoření rezervace a přidělení variabilního symbolu.
+- Souběžné vytváření 20 rezervací stejného termínu – uspěje pouze jedna.
+- Odmítnutí úplných i částečných překryvů rezervací.
+- Povolení navazujících pobytů se společným dnem příjezdu a odjezdu.
+- Atomické vrácení neúspěšné transakce včetně čítače variabilních symbolů.
+- Kontrola unikátnosti veřejných kódů, UID a idempotency klíčů.
+- Opakované a souběžné odeslání identického požadavku.
+- Odmítnutí neplatných osobních údajů, termínů a kapacity.
+- Výpočet ceny výhradně na serveru.
+- Odmítnutí rezervace při výpadku databáze nebo externího kalendáře.
+- Odmítnutí rezervace při neúplných datech z externího kalendáře.
+- Zamezení zápisu do databáze nesprávného prostředí.
+- Vypnutý rezervační endpoint v produkčním prostředí.
+- Okamžité přidání rezervace do obsazenosti kalendáře.
+- Přepnutí kalendáře do bezpečného režimu při výpadku D1.
+- Kontrola, že API obsazenosti nevrací osobní údaje hostů.
+
+## Ruční integrační testování
+
+Vedle automatických testů proběhly integrační testy na skutečné infrastruktuře Cloudflare Workers a vzdálené testovací D1.
+
+### 1. Databáze a infrastruktura
+
+- Úspěšné vytvoření oddělené produkční a testovací D1.
+- Úspěšné provedení databázové migrace v obou prostředích.
+- Ověření správného environment markeru.
+- Kontrola počátečního stavu databází.
+- Úspěšný Cloudflare Workers Preview build.
+- Ověření dostupnosti potřebných Preview secrets bez zveřejnění jejich hodnot.
+
+### 2. API a autorizace
+
+- GET /api/availability správně vrací aktuální obsazenost.
+- Export e-chalup je načten bez chybných nebo vynechaných událostí.
+- POST /api/reservations bez přístupového tokenu je odmítnut (HTTP 401).
+- Autorizovaný POST se syntetickými údaji úspěšně vytvořil rezervaci (HTTP 201).
+- Rezervace dostala veřejný kód, variabilní symbol, správnou cenu a stav pending_payment.
+
+### 3. Okamžitá synchronizace kalendáře
+
+- Nově vytvořená rezervace se okamžitě objevila v GET /api/availability.
+- Existující rezervace z e-chalup zůstaly zachované.
+- Obsazenost byla vizuálně ověřena také na testovací verzi webu.
+- Změna nevyžadovala čekání na synchronizaci e-chalup.
+
+### 4. Ochrana proti dvojité rezervaci
+
+- Druhý požadavek na již rezervovaný termín byl odmítnut (HTTP 409).
+- Následná kontrola D1 potvrdila jedinou vytvořenou rezervaci.
+- Počet obsazených nocí odpovídal původní rezervaci.
+- Neúspěšný požadavek nespotřeboval další variabilní symbol.
+
+### 5. Idempotence
+
+- Opakované odeslání původního požadavku se stejným Idempotency-Key vrátilo původní rezervaci.
+- API správně nastavilo replayed: true.
+- Veřejný kód a variabilní symbol zůstaly nezměněné.
+- Nevznikla žádná duplicitní rezervace.
+
+## Integrační testy e-chalup
+
+Na syntetickém iCalendar feedu byla ověřena také zpětná integrace s e-chalupami:
+
+- Import nové rezervace z externího ICS.
+- Vytvoření editovatelné rezervace v administraci e-chalup.
+- Přenos doplňujících informací prostřednictvím DESCRIPTION.
+- Zachování UID rezervace při zpětném exportu obsazenosti.
+- Zahrnutí importované rezervace do exportovaného kalendáře.
+- Úspěšné odstranění testovací rezervace z exportu po nahrazení zdrojového ICS prázdným platným VCALENDAR.
+
+Aktualizace poznámky již importované rezervace nebyla spolehlivě potvrzena. Budoucí implementace na této funkcionalitě nezávisí.
+
+## Stav nasazení
+
+- Testovací D1: připravená, integrační testy úspěšné.
+- Produkční D1: migrace úspěšně provedena, databáze připravená a bez rezervací.
+- Produkční rezervační POST: vypnutý.
+- Stávající způsob poptávky prostřednictvím e-chalup: zachován.
+
+## Navazující vývoj
+
+Dosud nejsou implementovány:
+
+- Veřejný rezervační formulář.
+- Výstupní iCalendar pro automatický import webových rezervací do e-chalup.
+- Generování platebních QR kódů.
+- Automatické odesílání e-mailových oznámení.
+- Veřejná ochrana formuláře pomocí Cloudflare Turnstile a rate limitingu.
+- Detekce případných kolizí vzniklých během prodlevy synchronizace externích kalendářů.
+
+Před napojením výstupního iCalu na živé e-chalupy musí být syntetická testovací rezervace odstraněna nebo vyloučena z exportu.
+
+Před veřejným spuštěním rezervačního systému proběhne také závěrečná kontrola oprávnění, přístupových údajů, starých testovacích deploymentů a nastavení diagnostických záznamů.
+
+## Rezervační backend – technický popis
 
 Připravená databázová a serverová část budoucí rezervace z webu. Formulář na webu,
 platby, e-maily ani výstupní iCal pro e-chalupy zatím neexistují. D1 je jen
