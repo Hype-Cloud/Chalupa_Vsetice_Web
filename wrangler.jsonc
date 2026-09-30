@@ -14,7 +14,8 @@
   // Produkce: rezervační POST i výstupní iCal /api/reservations.ics jsou vypnuté
   // (BOOKING_API_ENABLED ani BOOKING_ICAL_EXPORT_ENABLED nejsou nastavené).
   "vars": {
-    "BOOKING_ENV": "production"
+    "BOOKING_ENV": "production",
+    "BOOKING_ICAL_EXPORT_ENABLED": "true"
   },
   // Rezervační úložiště. Produkční a testovací databáze jsou oddělené; ID doplní správce
   // po vytvoření databází (npx wrangler d1 create …).
