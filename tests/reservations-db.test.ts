@@ -1,6 +1,6 @@
 import test, { after, before, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
-import { DuplicateError, insertReservation, listReservedNights, NightsTakenError, nightsOf, type NewReservation } from '../worker/booking/db.ts';
+import { cancelReservation, DuplicateError, insertReservation, listReservedNights, NightsTakenError, nightsOf, type NewReservation } from '../worker/booking/db.ts';
 import { icalUidFor } from '../lib/booking/codes.ts';
 import { createTestDatabase, failingDatabase } from './d1.ts';
 
@@ -146,4 +146,61 @@ test('obsazenost pro /api/availability: sloučené intervaly, bez zrušených re
   await t.db.prepare(`UPDATE reservations SET status = 'cancelled' WHERE id = ?1`).bind(cancelled.id).run();
   assert.deepEqual(await listReservedNights(t.db, { from: '2030-01-01', to: '2031-01-01' }), [{ start: '2030-03-01', end: '2030-03-06' }]);
   assert.deepEqual(await listReservedNights(t.db, { from: '2030-03-02', to: '2030-03-03' }), [{ start: '2030-03-02', end: '2030-03-03' }]);
+});
+
+const nightsOfReservation = async (id: string) =>
+  (await t.db.prepare('SELECT count(*) AS n FROM reserved_nights WHERE reservation_id = ?1').bind(id).first<{ n: number }>())!.n;
+const statusOf = async (id: string) =>
+  (await t.db.prepare('SELECT status, ical_sequence AS seq FROM reservations WHERE id = ?1').bind(id).first<{ status: string; seq: number }>())!;
+
+test('zrušení: noci se atomicky uvolní, rezervace zůstane v historii, SEQUENCE +1', async () => {
+  const r = reservation('2030-11-01', '2030-11-04');
+  await insertReservation(t.db, r);
+  assert.equal(await cancelReservation(t.db, r.id, '2030-01-11T10:00:00.000Z'), true);
+  assert.equal(await nightsOfReservation(r.id), 0);
+  assert.deepEqual(await statusOf(r.id), { status: 'cancelled', seq: 1 });
+  assert.equal(await t.count('reservations'), 1, 'historie zůstává');
+});
+
+test('opakované zrušení nic nemění; neexistující rezervace vrátí false', async () => {
+  const r = reservation('2030-11-01', '2030-11-04');
+  await insertReservation(t.db, r);
+  await cancelReservation(t.db, r.id, '2030-01-11T10:00:00.000Z');
+  assert.equal(await cancelReservation(t.db, r.id, '2030-01-12T10:00:00.000Z'), false);
+  assert.deepEqual(await statusOf(r.id), { status: 'cancelled', seq: 1 });
+  assert.equal(await cancelReservation(t.db, 'neexistuje', '2030-01-12T10:00:00.000Z'), false);
+});
+
+test('uvolněný termín lze znovu rezervovat; zrušenou rezervaci nelze znovu aktivovat', async () => {
+  const r = reservation('2030-11-01', '2030-11-04');
+  await insertReservation(t.db, r);
+  await assert.rejects(insertReservation(t.db, reservation('2030-11-02', '2030-11-03')), NightsTakenError);
+  await cancelReservation(t.db, r.id, '2030-01-11T10:00:00.000Z');
+  const next = reservation('2030-11-02', '2030-11-05');
+  await insertReservation(t.db, next);
+  assert.equal(await nightsOfReservation(next.id), 3);
+  await assert.rejects(t.db.prepare(`UPDATE reservations SET status = 'pending_payment' WHERE id = ?1`).bind(r.id).run(), /cannot be reactivated/);
+  assert.deepEqual(await listReservedNights(t.db, { from: '2030-01-01', to: '2031-01-01' }), [{ start: '2030-11-02', end: '2030-11-05' }]);
+});
+
+test('zrušení je atomické: při selhání transakce zůstane stav i noci beze změny (rollback)', async () => {
+  const r = reservation('2030-11-01', '2030-11-04');
+  await insertReservation(t.db, r);
+  await assert.rejects(
+    t.db.batch([
+      t.db.prepare(`UPDATE reservations SET status = 'cancelled' WHERE id = ?1`).bind(r.id),
+      t.db.prepare(`INSERT INTO reserved_nights (night, reservation_id) VALUES ('2030-11-20', 'neexistuje')`),
+    ]),
+    /FOREIGN KEY constraint failed/,
+  );
+  assert.equal((await statusOf(r.id)).status, 'pending_payment');
+  assert.equal(await nightsOfReservation(r.id), 3);
+  await assert.rejects(insertReservation(t.db, reservation('2030-11-01', '2030-11-02')), NightsTakenError);
+});
+
+test('ruční zrušení přes UPDATE (wrangler d1 execute) noci také uvolní', async () => {
+  const r = reservation('2030-11-01', '2030-11-04');
+  await insertReservation(t.db, r);
+  await t.db.prepare(`UPDATE reservations SET status = 'cancelled' WHERE id = ?1`).bind(r.id).run();
+  assert.equal(await nightsOfReservation(r.id), 0);
 });

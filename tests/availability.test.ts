@@ -1,6 +1,6 @@
 import test, { beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
-import { FRESH_MS, getAvailability, resetAvailabilityMemory, RETRY_AFTER_FAILURE_MS, STALE_MAX_MS, type AvailabilityDeps, type SnapshotCache } from '../worker/availability.ts';
+import { FRESH_MS, getAvailability, MAX_EXPORT_BYTES, resetAvailabilityMemory, RETRY_AFTER_FAILURE_MS, STALE_MAX_MS, type AvailabilityDeps, type SnapshotCache } from '../worker/availability.ts';
 import { fixture } from './helpers.ts';
 import { occupancyFromResponse } from '../lib/availability/occupancy.ts';
 import { EMPTY_STAY, pickDay, setArrival } from '../lib/availability/stay.ts';
@@ -254,4 +254,53 @@ test('stale fallback z úplného snapshotu zůstává použitelný (incomplete: 
   assert.equal(fallback.incomplete, false);
   const ctx = { today: '2030-01-10', occupancy: occupancyFromResponse(fallback) };
   assert.equal(pickDay(EMPTY_STAY, '2030-02-01', ctx).error, null);
+});
+
+/** Tělo odpovědi po částech a bez Content-Length (hlavička může chybět nebo lhát). */
+function streamed(text: string, chunk = 64 * 1024, headers: Record<string, string> = {}) {
+  const bytes = new TextEncoder().encode(text);
+  let offset = 0;
+  const body = new ReadableStream<Uint8Array>({
+    pull(controller) {
+      if (offset >= bytes.length) return controller.close();
+      controller.enqueue(bytes.slice(offset, (offset += chunk)));
+    },
+  });
+  return new Response(body, { headers });
+}
+
+const bigExport = (bytes: number) =>
+  fixture('01-single-and-multi.ics').replace('END:VCALENDAR', `X-PADDING:${'x'.repeat(bytes)}\r\nEND:VCALENDAR`);
+
+test('limit velikosti: počítají se skutečně přijaté bajty, ne Content-Length', async () => {
+  const t = setup(async () => streamed(bigExport(MAX_EXPORT_BYTES), 64 * 1024, { 'content-length': '100' }));
+  const result = await t.call();
+  assert.equal(result.status, 'unavailable');
+  assert.equal(result.reason, 'upstream-too-large');
+  assert.deepEqual(result.busy, []);
+});
+
+test('limit velikosti: Content-Length nad limitem se odmítne hned', async () => {
+  const t = setup(async () => new Response('BEGIN:VCALENDAR', { headers: { 'content-length': String(MAX_EXPORT_BYTES + 1) } }));
+  assert.equal((await t.call()).reason, 'upstream-too-large');
+});
+
+test('limit velikosti: export pod limitem po částech projde', async () => {
+  const t = setup(async () => streamed(bigExport(MAX_EXPORT_BYTES - 10_000), 7_777));
+  const result = await t.call();
+  assert.equal(result.status, 'ok');
+  assert.equal(result.busy.length, 2);
+});
+
+test('limit velikosti: při výpadku zůstanou poslední platná data (stale), nikdy falešné volno', async () => {
+  let big = false;
+  const t = setup(async () => (big ? streamed(bigExport(MAX_EXPORT_BYTES)) : new Response(fixture('01-single-and-multi.ics'))));
+  await t.call();
+  await t.flush();
+  big = true;
+  t.advance(FRESH_MS + 1000);
+  const result = await t.call();
+  assert.equal(result.status, 'stale');
+  assert.equal(result.reason, 'upstream-too-large');
+  assert.equal(result.busy.length, 2);
 });
