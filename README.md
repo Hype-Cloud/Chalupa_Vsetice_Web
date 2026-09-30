@@ -115,18 +115,18 @@ Produkční endpoint pro vytváření rezervací zůstává vypnutý. Testovací
 
 Projekt využívá Node.js Test Runner. Databázové testy probíhají nad lokální Cloudflare D1 prostřednictvím Miniflare/workerd. Testovací údaje jsou syntetické.
 
-**Výsledek posledního vývojového běhu: 103/103 úspěšných testů.**
+**Výsledek posledního vývojového běhu: 116/116 úspěšných testů.**
 
 | Testovací soubor | Počet | Zaměření |
 |---|---:|---|
-| ical.test.ts | 19 | Parsování iCalendar, časová pásma, opakované a zrušené události, chybné exporty. |
-| availability.test.ts | 17 | Načítání obsazenosti, cache, výpadky externí služby a neúplná data. |
+| ical.test.ts | 20 | Parsování iCalendar, časová pásma, opakované a zrušené události, chybné exporty. |
+| availability.test.ts | 21 | Načítání obsazenosti, cache, výpadky externí služby a neúplná data. |
 | occupancy.test.ts | 15 | Slučování obsazených intervalů, kontrola termínů a chování kalendáře. |
 | booking.test.ts | 9 | Validace rezervací, ceny, kontakty, vlastní iCal UID a propojení D1 s kalendářem. |
-| reservations-api.test.ts | 16 | Rezervační API, autorizace, idempotence, souběh požadavků a chybové stavy. |
-| reservations-db.test.ts | 11 | Databázová omezení, atomické transakce, rollback a ochrana proti kolizím. |
-| ical-export.test.ts | 16 | Výstupní iCal: formát RFC 5545, escaping, stabilita UID, zrušení, autorizace, chyby D1 a prostředí, únik osobních údajů. |
-| **Celkem** | **103** | |
+| reservations-api.test.ts | 17 | Rezervační API, autorizace, idempotence, souběh požadavků a chybové stavy. |
+| reservations-db.test.ts | 16 | Databázová omezení, atomické transakce, rollback a ochrana proti kolizím. |
+| ical-export.test.ts | 18 | Výstupní iCal: formát RFC 5545, escaping, stabilita UID, zrušení (STATUS:CANCELLED), autorizace, chyby D1 a prostředí, únik osobních údajů. |
+| **Celkem** | **116** | |
 
 ### Testované scénáře
 
@@ -329,9 +329,12 @@ D1 (reservations) → GET /api/reservations.ics?token=… → import v e-chalup�
   - `DESCRIPTION` s kódem rezervace, hostem, telefonem, e-mailem, počtem hostů, cenou, VS
     a stavem platby. Tyto údaje se do e-chalup přenesou v poznámce rezervace (ověřeno
     testem importu).
-- **Zrušené rezervace** (`cancelled`) ve feedu nejsou. E-chalupy podle ověřeného chování
-  rezervaci zruší, když událost z feedu zmizí. Proto feed nemá ani časový limit do minulosti:
-  odebrání starých pobytů by je v e-chalupách zrušilo.
+- **Zrušené rezervace** (`cancelled`) zůstávají ve feedu jako „tombstone“: stejné `UID`,
+  aktuální (zvýšené) `SEQUENCE`, původní `DTSTART`/`DTEND` a `STATUS:CANCELLED`, bez osobních
+  a platebních údajů. Podle ověřeného chování e-chalupy rezervaci zruší právě takto; pouhé
+  vynechání události ji **nezruší**. `SEQUENCE` zvyšuje `cancelReservation()`, proto rezervace
+  rušte přes ni (ruční `UPDATE` stavu `SEQUENCE` nezvýší). Aktivní rezervace mají
+  `STATUS:CONFIRMED`.
 - **Mimo produkci** mají název kalendáře, `SUMMARY` i `DESCRIPTION` prefix `[TEST]`.
 - **Chyby:**
   - chyba D1 nebo nesoulad `meta.environment` s `BOOKING_ENV` vrátí 503 (`text/plain`)
