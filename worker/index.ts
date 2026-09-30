@@ -2,10 +2,11 @@
 // Všechny ostatní požadavky obsluhují statické assety z dist/client bez spuštění Workeru.
 import { getAvailability } from './availability.ts';
 import { listReservedNights } from './booking/db.ts';
+import { handleIcalExport, type ExportEnv } from './booking/export.ts';
 import { handleCreateReservation, type BookingEnv } from './booking/handler.ts';
 import { json } from './http.ts';
 
-interface Env extends BookingEnv {
+interface Env extends BookingEnv, ExportEnv {
   ASSETS: Fetcher;
 }
 
@@ -39,6 +40,7 @@ export default {
         log: (message) => console.warn(message),
       });
     }
+    if (pathname === '/api/reservations.ics') return handleIcalExport(request, env, { log: (message) => console.warn(message) });
     if (pathname.startsWith('/api/')) return json({ error: 'not-found' }, { status: 404, cacheControl: 'no-store' });
     return env.ASSETS.fetch(request);
   },

@@ -8,6 +8,7 @@ import { diffDays, todayInPrague } from '../../lib/availability/dates.ts';
 import { icalUidFor, newReservationCode } from '../../lib/booking/codes.ts';
 import type { AvailabilityDeps } from '../availability.ts';
 import { json } from '../http.ts';
+import { secretEquals, sha256 } from '../secrets.ts';
 import { databaseEnvironment, DuplicateError, findByIdempotencyKey, insertReservation, NightsTakenError, type ReservationSummary } from './db.ts';
 import { checkExternalAvailability } from './external.ts';
 import { validateBooking, type ValidBooking } from './validation.ts';
@@ -35,20 +36,10 @@ const CODE_ATTEMPTS = 3;
 const noStore = (status: number, body: unknown, headers?: HeadersInit) => json(body, { status, cacheControl: 'no-store', headers });
 const failure = (status: number, error: string, extra: Record<string, unknown> = {}) => noStore(status, { error, ...extra });
 
-async function sha256(value: string): Promise<Uint8Array> {
-  return new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(value)));
-}
-
 const hex = (bytes: Uint8Array) => Array.from(bytes, (b) => b.toString(16).padStart(2, '0')).join('');
 
-/** Porovnání tokenu v konstantním čase (přes otisky stejné délky). */
-async function tokenMatches(header: string | null, token: string): Promise<boolean> {
-  const presented = header?.startsWith('Bearer ') ? header.slice(7) : '';
-  const [a, b] = await Promise.all([sha256(presented), sha256(token)]);
-  let diff = 0;
-  for (let i = 0; i < a.length; i++) diff |= a[i] ^ b[i];
-  return diff === 0 && presented.length > 0;
-}
+/** Bearer token z hlavičky Authorization. */
+const tokenMatches = (header: string | null, token: string) => secretEquals(header?.startsWith('Bearer ') ? header.slice(7) : '', token);
 
 /** Otisk obsahu požadavku pro opakované odeslání se stejným Idempotency-Key. */
 const requestHash = async (b: ValidBooking) =>
