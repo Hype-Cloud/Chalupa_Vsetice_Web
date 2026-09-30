@@ -6,7 +6,8 @@
 //   token proto nesmí být v cestě URL. Kód Workeru token ani URL nikdy neloguje.
 // - Chybný nebo chybějící token vrací 404, aby se existence feedu nedala ověřit.
 // - Chyba databáze nebo nesoulad prostředí vrací 503 bez kalendáře: importér nesmí dostat
-//   prázdný nebo neúplný VCALENDAR, protože by rezervace, které v něm chybí, zrušil.
+//   prázdný nebo neúplný VCALENDAR.
+// - Zrušené rezervace zůstávají ve feedu jako STATUS:CANCELLED se stejným UID a vyšším SEQUENCE.
 
 import { secretEquals } from '../secrets.ts';
 import { databaseEnvironment, listExportReservations } from './db.ts';

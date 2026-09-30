@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import ICAL from 'ical.js';
 import { handleIcalExport, type ExportEnv } from '../worker/booking/export.ts';
 import { escapeText, foldLine } from '../worker/booking/ics.ts';
-import { insertReservation, type NewReservation } from '../worker/booking/db.ts';
+import { cancelReservation, insertReservation, type NewReservation } from '../worker/booking/db.ts';
 import { icalUidFor } from '../lib/booking/codes.ts';
 import { createTestDatabase, failingDatabase } from './d1.ts';
 
@@ -141,16 +141,45 @@ test('stabilita: nezměněné rezervace dávají stejné UID i stejný text expo
   for (const block of first.split('BEGIN:VEVENT').slice(1)) assert.ok(third.raw.includes(block.replace('END:VCALENDAR\r\n', '')));
 });
 
-test('zrušená rezervace z exportu zmizí (importér ji zruší), ostatní zůstanou beze změny', async () => {
-  const keep = await reserve('2030-03-01', '2030-03-04');
-  const cancel = await reserve('2030-03-10', '2030-03-12');
+const prop = (event: InstanceType<typeof ICAL.Event>, name: string) => event.component.getFirstPropertyValue(name);
+
+test('aktivní rezervace (čeká na platbu i zaplacená) má STATUS:CONFIRMED', async () => {
+  const pending = await reserve('2030-03-01', '2030-03-04');
   const paid = await reserve('2030-03-20', '2030-03-22');
   await t.db.prepare(`UPDATE reservations SET status = 'paid' WHERE id = ?1`).bind(paid.id).run();
-  await t.db.prepare(`UPDATE reservations SET status = 'cancelled' WHERE id = ?1`).bind(cancel.id).run();
-  const { raw, events } = await parse(await setup().get());
-  assert.deepEqual(events.map((e) => e.uid), [keep.icalUid, paid.icalUid]);
-  assert.ok(!raw.includes(cancel.publicCode));
+  const { events } = await parse(await setup().get());
+  assert.deepEqual(events.map((e) => [e.uid, prop(e, 'status')]), [[pending.icalUid, 'CONFIRMED'], [paid.icalUid, 'CONFIRMED']]);
   assert.ok(events[1].description.includes('Stav platby: zaplaceno'));
+});
+
+test('po zrušení: stejné UID, vyšší SEQUENCE, původní DTSTART/DTEND a STATUS:CANCELLED', async () => {
+  const r = await reserve('2030-03-10', '2030-03-12');
+  const s = setup();
+  const [before] = (await parse(await s.get())).events;
+  assert.equal(await cancelReservation(t.db, r.id, '2030-01-11T10:00:00.000Z'), true);
+  const [after] = (await parse(await s.get())).events;
+  assert.equal(after.uid, before.uid);
+  assert.equal(after.sequence, before.sequence + 1);
+  assert.equal(after.startDate.toString(), '2030-03-10');
+  assert.equal(after.endDate.toString(), '2030-03-12');
+  assert.equal(prop(after, 'status'), 'CANCELLED');
+  assert.equal(prop(before, 'status'), 'CONFIRMED');
+});
+
+test('zrušená rezervace zůstává ve feedu jako tombstone bez osobních a platebních údajů', async () => {
+  const keep = await reserve('2030-03-01', '2030-03-04');
+  const cancel = await reserve('2030-03-10', '2030-03-12', { firstName: 'Zrušený', email: 'zruseny@example.invalid', phone: '+420 111 111 111' });
+  await cancelReservation(t.db, cancel.id, '2030-01-11T10:00:00.000Z');
+  const s = setup();
+  const first = await s.get();
+  const { raw, events } = await parse(first);
+  assert.deepEqual(events.map((e) => [e.uid, prop(e, 'status')]), [[keep.icalUid, 'CONFIRMED'], [cancel.icalUid, 'CANCELLED']]);
+  const tombstone = raw.slice(raw.indexOf(`UID:${cancel.icalUid}`), raw.indexOf('END:VEVENT', raw.indexOf(`UID:${cancel.icalUid}`)));
+  for (const secret of ['Zrušený', 'zruseny@example.invalid', '111 111', 'Kč', 'Variabilní symbol', 'Telefon', 'E-mail']) assert.ok(!tombstone.includes(secret), secret);
+  assert.ok(tombstone.includes(cancel.publicCode));
+  // Tombstone zůstává i v dalších exportech, beze změny (opakované zrušení nic nezmění).
+  assert.equal(await cancelReservation(t.db, cancel.id, '2030-01-12T10:00:00.000Z'), false);
+  assert.equal(await (await s.get()).text(), raw);
 });
 
 test('prázdná databáze: platný VCALENDAR bez událostí', async () => {

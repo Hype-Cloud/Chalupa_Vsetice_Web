@@ -56,7 +56,7 @@ function icsUtc(iso: string): string {
 
 const formatCzk = (value: number) => `${String(value).replace(/\B(?=(\d{3})+(?!\d))/g, ' ')} Kč`;
 
-const PAYMENT_STATUS: Record<ExportReservation['status'], string> = {
+const PAYMENT_STATUS: Record<Exclude<ExportReservation['status'], 'cancelled'>, string> = {
   pending_payment: 'čeká na platbu (ověřit ručně)',
   paid: 'zaplaceno',
 };
@@ -66,7 +66,42 @@ export interface CalendarOptions {
   test: boolean;
 }
 
+/** Společné vlastnosti aktivní i zrušené události (stejné UID, termín a aktuální SEQUENCE). */
+function identityLines(r: ExportReservation): string[] {
+  if (!(r.departure > r.arrival)) throw new Error('invalid-range');
+  return [
+    `UID:${escapeText(r.icalUid)}`,
+    // DTSTAMP/LAST-MODIFIED = poslední změna rezervace: nezměněná rezervace dává stále stejný text.
+    `DTSTAMP:${icsUtc(r.updatedAt)}`,
+    `CREATED:${icsUtc(r.createdAt)}`,
+    `LAST-MODIFIED:${icsUtc(r.updatedAt)}`,
+    `SEQUENCE:${r.icalSequence}`,
+    // Celodenní události: DTEND je exkluzivní (den odjezdu), bez časového pásma.
+    `DTSTART;VALUE=DATE:${icsDate(r.arrival)}`,
+    `DTEND;VALUE=DATE:${icsDate(r.departure)}`,
+  ];
+}
+
+/**
+ * Zrušená rezervace zůstává ve feedu jako „tombstone“: stejné UID, vyšší SEQUENCE (zvýší ho
+ * cancelReservation) a STATUS:CANCELLED. E-chalupy podle ověřeného chování rezervaci zruší jen
+ * takto – pouhé vynechání události ji nezruší. Bez osobních a platebních údajů.
+ */
+function cancelledLines(r: ExportReservation, options: CalendarOptions): string[] {
+  const prefix = options.test ? '[TEST] ' : '';
+  return [
+    'BEGIN:VEVENT',
+    ...identityLines(r),
+    `SUMMARY:${escapeText(`${prefix}ZRUŠENO – Web ${r.code}`)}`,
+    `DESCRIPTION:${escapeText(`${prefix}Rezervace z webu ${r.code} byla zrušena.`)}`,
+    'STATUS:CANCELLED',
+    'TRANSP:TRANSPARENT',
+    'END:VEVENT',
+  ];
+}
+
 function eventLines(r: ExportReservation, options: CalendarOptions): string[] {
+  if (r.status === 'cancelled') return cancelledLines(r, options);
   const prefix = options.test ? '[TEST] ' : '';
   const guest = `${r.firstName} ${r.lastName}`;
   const description = [
@@ -80,18 +115,9 @@ function eventLines(r: ExportReservation, options: CalendarOptions): string[] {
     `Variabilní symbol: ${r.variableSymbol}`,
     `Stav platby: ${PAYMENT_STATUS[r.status]}`,
   ].join('\n');
-  if (!(r.departure > r.arrival)) throw new Error('invalid-range');
   return [
     'BEGIN:VEVENT',
-    `UID:${escapeText(r.icalUid)}`,
-    // DTSTAMP/LAST-MODIFIED = poslední změna rezervace: nezměněná rezervace dává stále stejný text.
-    `DTSTAMP:${icsUtc(r.updatedAt)}`,
-    `CREATED:${icsUtc(r.createdAt)}`,
-    `LAST-MODIFIED:${icsUtc(r.updatedAt)}`,
-    `SEQUENCE:${r.icalSequence}`,
-    // Celodenní události: DTEND je exkluzivní (den odjezdu), bez časového pásma.
-    `DTSTART;VALUE=DATE:${icsDate(r.arrival)}`,
-    `DTEND;VALUE=DATE:${icsDate(r.departure)}`,
+    ...identityLines(r),
     `SUMMARY:${escapeText(`${prefix}Web ${r.code} – ${guest}`)}`,
     `DESCRIPTION:${escapeText(description)}`,
     'STATUS:CONFIRMED',
