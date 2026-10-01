@@ -115,7 +115,7 @@ Produkční endpoint pro vytváření rezervací zůstává vypnutý. Testovací
 
 Projekt využívá Node.js Test Runner. Databázové testy probíhají nad lokální Cloudflare D1 prostřednictvím Miniflare/workerd. Testovací údaje jsou syntetické.
 
-**Výsledek posledního vývojového běhu: 116/116 úspěšných testů.**
+**Výsledek posledního vývojového běhu: 120/120 úspěšných testů.**
 
 | Testovací soubor | Počet | Zaměření |
 |---|---:|---|
@@ -124,9 +124,9 @@ Projekt využívá Node.js Test Runner. Databázové testy probíhají nad loká
 | occupancy.test.ts | 15 | Slučování obsazených intervalů, kontrola termínů a chování kalendáře. |
 | booking.test.ts | 9 | Validace rezervací, ceny, kontakty, vlastní iCal UID a propojení D1 s kalendářem. |
 | reservations-api.test.ts | 17 | Rezervační API, autorizace, idempotence, souběh požadavků a chybové stavy. |
-| reservations-db.test.ts | 16 | Databázová omezení, atomické transakce, rollback a ochrana proti kolizím. |
-| ical-export.test.ts | 18 | Výstupní iCal: formát RFC 5545, escaping, stabilita UID, zrušení (STATUS:CANCELLED), autorizace, chyby D1 a prostředí, únik osobních údajů. |
-| **Celkem** | **116** | |
+| reservations-db.test.ts | 19 | Databázová omezení, atomické transakce, rollback a ochrana proti kolizím. |
+| ical-export.test.ts | 19 | Výstupní iCal: formát RFC 5545, escaping, stabilita UID, zrušení (STATUS:CANCELLED), autorizace, chyby D1 a prostředí, únik osobních údajů. |
+| **Celkem** | **120** | |
 
 ### Testované scénáře
 
@@ -332,8 +332,9 @@ D1 (reservations) → GET /api/reservations.ics?token=… → import v e-chalup�
 - **Zrušené rezervace** (`cancelled`) zůstávají ve feedu jako „tombstone“: stejné `UID`,
   aktuální (zvýšené) `SEQUENCE`, původní `DTSTART`/`DTEND` a `STATUS:CANCELLED`, bez osobních
   a platebních údajů. Podle ověřeného chování e-chalupy rezervaci zruší právě takto; pouhé
-  vynechání události ji **nezruší**. `SEQUENCE` zvyšuje `cancelReservation()`, proto rezervace
-  rušte přes ni (ruční `UPDATE` stavu `SEQUENCE` nezvýší). Aktivní rezervace mají
+  vynechání události ji **nezruší**. `SEQUENCE` a čas změny zvyšuje `cancelReservation()`;
+  při ručním `UPDATE` stavu (např. `wrangler d1 execute`) je doplní trigger z migrace 0003,
+  bez dvojího navýšení. Aktivní rezervace mají
   `STATUS:CONFIRMED`.
 - **Mimo produkci** mají název kalendáře, `SUMMARY` i `DESCRIPTION` prefix `[TEST]`.
 - **Chyby:**
