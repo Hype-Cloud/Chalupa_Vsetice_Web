@@ -204,3 +204,31 @@ test('ruční zrušení přes UPDATE (wrangler d1 execute) noci také uvolní', 
   await t.db.prepare(`UPDATE reservations SET status = 'cancelled' WHERE id = ?1`).bind(r.id).run();
   assert.equal(await nightsOfReservation(r.id), 0);
 });
+
+test('ruční zrušení přes UPDATE zvýší SEQUENCE i čas změny (trigger 0003)', async () => {
+  const r = reservation('2030-12-01', '2030-12-03');
+  await insertReservation(t.db, r);
+  await t.db.prepare(`UPDATE reservations SET status = 'cancelled' WHERE id = ?1`).bind(r.id).run();
+  const row = (await t.db.prepare('SELECT status, ical_sequence AS seq, updated_at FROM reservations WHERE id = ?1').bind(r.id).first<{ status: string; seq: number; updated_at: string }>())!;
+  assert.equal(row.status, 'cancelled');
+  assert.equal(row.seq, 1);
+  assert.notEqual(row.updated_at, r.createdAt);
+  assert.match(row.updated_at, /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/);
+  assert.equal(await nightsOfReservation(r.id), 0);
+});
+
+test('cancelReservation zvýší SEQUENCE právě o 1 (trigger nepřičte podruhé)', async () => {
+  const r = reservation('2030-12-10', '2030-12-12');
+  await insertReservation(t.db, r);
+  await cancelReservation(t.db, r.id, '2030-01-11T10:00:00.000Z');
+  assert.deepEqual(await statusOf(r.id), { status: 'cancelled', seq: 1 });
+  const updated = (await t.db.prepare('SELECT updated_at FROM reservations WHERE id = ?1').bind(r.id).first<{ updated_at: string }>())!.updated_at;
+  assert.equal(updated, '2030-01-11T10:00:00.000Z');
+});
+
+test('změna stavu mimo zrušení SEQUENCE nemění', async () => {
+  const r = reservation('2030-12-20', '2030-12-22');
+  await insertReservation(t.db, r);
+  await t.db.prepare(`UPDATE reservations SET status = 'paid' WHERE id = ?1`).bind(r.id).run();
+  assert.deepEqual(await statusOf(r.id), { status: 'paid', seq: 0 });
+});

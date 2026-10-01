@@ -287,3 +287,14 @@ test('ochrana osobních údajů: logy ani chybové odpovědi neobsahují kontakt
   for (const secret of ['Testovací', 'test@example.invalid', '000 000', TOKEN, 'token=', 'CV-']) assert.ok(!everything.includes(secret), secret);
   assert.deepEqual(s.logs, ['ical-export: served (1 events)', 'ical-export: unauthorized']);
 });
+
+test('ruční zrušení (UPDATE stavu) dá ve feedu vyšší SEQUENCE a STATUS:CANCELLED', async () => {
+  const r = await reserve('2030-08-10', '2030-08-12');
+  const s = setup();
+  const [before] = (await parse(await s.get())).events;
+  await t.db.prepare(`UPDATE reservations SET status = 'cancelled' WHERE id = ?1`).bind(r.id).run();
+  const [after] = (await parse(await s.get())).events;
+  assert.equal(after.uid, before.uid);
+  assert.equal(after.sequence, before.sequence + 1);
+  assert.equal(prop(after, 'status'), 'CANCELLED');
+});
