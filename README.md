@@ -32,9 +32,10 @@ Cloudflare Workers.
 
 ## Rezervace a obsazenost
 
-Skutečné rezervace se spravují výhradně v aplikaci **e-chalupy**. Ta je
-centrálním kalendářem a synchronizuje obsazenost s Airbnb a Booking.com. Web
-obsazenost pouze **čte**:
+Aktuální zákaznické rezervace se stále přijímají přes **e-chalupy**. Ta jsou
+centrálním kalendářem a synchronizují obsazenost s Airbnb a Booking.com. Web jejich
+obsazenost čte a zároveň má připravený vlastní rezervační backend; rezervace uložené
+v D1 se exportují zpět do e-chalup přes soukromý iCal feed:
 
 ```
 e-chalupy (iCal export, GET) → Worker /api/availability → React kalendář
@@ -198,7 +199,8 @@ Na syntetickém iCalendar feedu byla ověřena také zpětná integrace s e-chal
 - Přenos doplňujících informací prostřednictvím DESCRIPTION.
 - Zachování UID rezervace při zpětném exportu obsazenosti.
 - Zahrnutí importované rezervace do exportovaného kalendáře.
-- Úspěšné odstranění testovací rezervace z exportu po nahrazení zdrojového ICS prázdným platným VCALENDAR.
+- Pouhé odstranění VEVENT z feedu importovanou rezervaci nezrušilo.
+- Zrušení bylo úspěšně ověřeno pomocí stejného UID, vyššího SEQUENCE a STATUS:CANCELLED.
 
 Aktualizace poznámky již importované rezervace nebyla spolehlivě potvrzena. Budoucí implementace na této funkcionalitě nezávisí.
 
@@ -220,14 +222,13 @@ Dosud nejsou implementovány:
 - Veřejná ochrana formuláře pomocí Cloudflare Turnstile a rate limitingu.
 - Detekce případných kolizí vzniklých během prodlevy synchronizace externích kalendářů.
 
-Před napojením výstupního iCalu na živé e-chalupy musí být syntetická testovací rezervace odstraněna nebo vyloučena z exportu.
-
 Před veřejným spuštěním rezervačního systému proběhne také závěrečná kontrola oprávnění, přístupových údajů, starých testovacích deploymentů a nastavení diagnostických záznamů.
 
 ## Rezervační backend – technický popis
 
 Připravená databázová a serverová část budoucí rezervace z webu. Formulář na webu,
-platby, e-maily ani výstupní iCal pro e-chalupy zatím neexistují. D1 je jen
+platby a e-maily zatím neexistují. Výstupní iCal pro e-chalupy je implementovaný
+a aktivní v produkci. D1 je jen
 technické úložiště, provozní administrací zůstávají e-chalupy.
 
 ```
