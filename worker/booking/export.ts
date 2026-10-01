@@ -1,6 +1,6 @@
 // GET /api/reservations.ics?token=… – soukromý iCal feed vlastních rezervací pro import do e-chalup.
 //
-// - Zapnutý jen při BOOKING_ICAL_EXPORT_ENABLED = "true" (zatím jen Worker Previews); jinak 404.
+// - Zapnutý jen při BOOKING_ICAL_EXPORT_ENABLED = "true" (produkce i Worker Previews); jinak 404.
 // - Přístup přes neuhodnutelný token v query stringu. Query string je v logách a traces
 //   Cloudflare Observability skrytý (observability.redact_query_string ve wrangler.jsonc);
 //   token proto nesmí být v cestě URL. Kód Workeru token ani URL nikdy neloguje.
@@ -15,7 +15,7 @@ import { buildCalendar } from './ics.ts';
 import type { BookingEnv } from './handler.ts';
 
 export interface ExportEnv extends Pick<BookingEnv, 'DB' | 'BOOKING_ENV'> {
-  /** "true" zapne export. V produkci zatím nenastaveno. */
+  /** "true" zapne export. */
   BOOKING_ICAL_EXPORT_ENABLED?: string;
   /** Secret: přístupový token feedu (min. 32 znaků). */
   BOOKING_ICAL_EXPORT_TOKEN?: string;

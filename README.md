@@ -207,7 +207,7 @@ Aktualizace poznámky již importované rezervace nebyla spolehlivě potvrzena. 
 - Testovací D1: připravená, integrační testy úspěšné.
 - Produkční D1: migrace úspěšně provedena, databáze připravená a bez rezervací.
 - Produkční rezervační POST: vypnutý.
-- Výstupní iCal `/api/reservations.ics`: implementovaný, zapnutý jen ve Worker Previews, v produkci vypnutý. K živým e-chalupám zatím není připojený.
+- Výstupní iCal `/api/reservations.ics`: zapnutý v produkci i ve Worker Previews a připojený k importu v e-chalupách. Celý tok (import, zrušení přes `STATUS:CANCELLED`) je ověřený na produkci syntetickou rezervací, která byla následně odstraněna.
 - Stávající způsob poptávky prostřednictvím e-chalup: zachován.
 
 ## Navazující vývoj
@@ -215,7 +215,6 @@ Aktualizace poznámky již importované rezervace nebyla spolehlivě potvrzena. 
 Dosud nejsou implementovány:
 
 - Veřejný rezervační formulář.
-- Připojení výstupního iCalu k živým e-chalupám (po schválení, viz [bezpečný postup](#bezpečný-postup-nasazení-exportu)).
 - Generování platebních QR kódů.
 - Automatické odesílání e-mailových oznámení.
 - Veřejná ochrana formuláře pomocí Cloudflare Turnstile a rate limitingu.
@@ -346,8 +345,8 @@ D1 (reservations) → GET /api/reservations.ics?token=… → import v e-chalup�
   `X-Robots-Tag: noindex`.
 
 **Přístup a secrets:**
-- Export je zapnutý jen při `BOOKING_ICAL_EXPORT_ENABLED = "true"`. Zatím je to jen
-  v bloku `previews` ve `wrangler.jsonc`; v produkci vrací 404.
+- Export je zapnutý jen při `BOOKING_ICAL_EXPORT_ENABLED = "true"`. Je nastavené v top-level
+  `vars` (produkce) i v bloku `previews` ve `wrangler.jsonc`; bez něj vrací 404.
 - Token je secret `BOOKING_ICAL_EXPORT_TOKEN`, nejméně 32 znaků (doporučeno
   `openssl rand -hex 32`). Kratší nebo chybějící token znamená 503.
 - Token je v **query stringu** (`?token=`), ne v cestě. Worker Logs i Traces mají
@@ -369,15 +368,17 @@ D1 (reservations) → GET /api/reservations.ics?token=… → import v e-chalup�
    - **nepřidávat ho do živých e-chalup.** Testovací D1 obsahuje syntetickou rezervaci.
 2. **Test importu:** feed Preview případně vyzkoušet jen na izolovaném importu a
    po testu import v e-chalupách smazat.
-3. **Produkce (až po výslovném schválení):**
+3. **Produkce (provedeno):**
    - nastavit produkční secret `npx wrangler secret put BOOKING_ICAL_EXPORT_TOKEN`
      (jiný token než v Preview),
    - v PR přidat `BOOKING_ICAL_EXPORT_ENABLED = "true"` do top-level `vars`,
    - po nasazení ověřit, že produkční D1 obsahuje jen skutečné rezervace (žádné testovací),
    - teprve potom zadat URL do importu e-chalup.
 4. **Vypnutí:** export odstraněním `BOOKING_ICAL_EXPORT_ENABLED` vypnete. Import
-   v e-chalupách nejdřív odpojte, jinak by e-chalupy mohly podle nedostupného nebo
-   prázdného feedu rezervace rušit.
+   v e-chalupách nejdřív odpojte, jinak bude hlásit chybu importu.
+5. **Výměna tokenu** (např. po úniku URL): `openssl rand -hex 32`,
+   `npx wrangler secret put BOOKING_ICAL_EXPORT_TOKEN` a novou adresu zadat do importu
+   v e-chalupách. Starý token přestane platit okamžitě.
 
 ### Bezpečnost prostředí
 
@@ -492,7 +493,7 @@ npx wrangler d1 execute chalupa-vsetice-rezervace --local \
   - `BOOKING_ENV` (`production` / `preview`),
   - `BOOKING_API_ENABLED` (jen `previews`),
   - secret `BOOKING_API_TOKEN` (jen Preview),
-  - `BOOKING_ICAL_EXPORT_ENABLED` (jen `previews`) a secret `BOOKING_ICAL_EXPORT_TOKEN`
+  - `BOOKING_ICAL_EXPORT_ENABLED` (produkce i `previews`) a secret `BOOKING_ICAL_EXPORT_TOKEN`
     (min. 32 znaků) pro výstupní iCal.
 - **Cena a kapacita:** `lib/booking/rules.ts`. Odkaz na poptávku: `components/booking/config.ts`.
 
