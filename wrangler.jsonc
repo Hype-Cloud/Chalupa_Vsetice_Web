@@ -20,6 +20,15 @@
   "triggers": {
     "crons": ["*/5 * * * *"]
   },
+  // Rate limit veřejného POST /api/reservations podle IP: 5 požadavků za 60 s v lokalitě Cloudflare.
+  // Chrání proti spamu; dvojí rezervaci téže noci brání D1, ne tento limit.
+  "ratelimits": [
+    {
+      "name": "BOOKING_RATE_LIMITER",
+      "namespace_id": "1001",
+      "simple": { "limit": 5, "period": 60 }
+    }
+  ],
   "vars": {
     "BOOKING_ENV": "production",
     "BOOKING_ICAL_EXPORT_ENABLED": "true"
@@ -35,7 +44,7 @@
     }
   ],
   // Worker Previews nedědí proměnné ani bindingy z produkce: mají vlastní testovací D1
-  // a jen zde je zapnutý rezervační POST (token BOOKING_API_TOKEN) a výstupní iCal
+  // a jen zde je zapnutý rezervační POST (Turnstile + rate limit, volitelně BOOKING_API_TOKEN) a výstupní iCal
   // (token BOOKING_ICAL_EXPORT_TOKEN v query stringu, skrytý přes redact_query_string).
   "previews": {
     "observability": {
@@ -56,6 +65,14 @@
       "BOOKING_API_ENABLED": "true",
       "BOOKING_ICAL_EXPORT_ENABLED": "true"
     },
+    // Vlastní namespace, aby se Preview a produkce nepočítaly dohromady.
+    "ratelimits": [
+      {
+        "name": "BOOKING_RATE_LIMITER",
+        "namespace_id": "1002",
+        "simple": { "limit": 5, "period": 60 }
+      }
+    ],
     "d1_databases": [
       {
         "binding": "DB",

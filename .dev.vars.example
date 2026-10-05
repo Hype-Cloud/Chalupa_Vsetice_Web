@@ -8,7 +8,11 @@ ECHALUPY_ICAL_URL=
 #   --command "INSERT INTO meta (key, value) VALUES ('environment', 'local')"
 BOOKING_ENV=local
 BOOKING_API_ENABLED=true
+# Volitelný Bearer token (jen neveřejné prostředí). Prázdný = nevyžaduje se.
 BOOKING_API_TOKEN=
+# Turnstile: lokálně testovací secret Cloudflare (vždy projde) s tokenem XXXX.DUMMY.TOKEN.XXXX.
+# Produkce testovací secret odmítne.
+TURNSTILE_SECRET_KEY=1x0000000000000000000000000000000AA
 
 # Upozornění správci na kolize rezervací (Cron, worker/booking/cron.ts). V Cloudflare jako secrets.
 RESEND_API_KEY=
