@@ -106,8 +106,11 @@ const isCancelled = (component: Component) => String(component.getFirstPropertyV
  */
 export function parseBusyIntervals(text: string, range: { from: IsoDate; to: IsoDate }): ParsedCalendar {
   const { events, total, skipped } = parseCalendarEvents(text, range);
-  return { busy: mergeIntervals(events.map(({ start, end }) => ({ start, end }))), events: total, skipped };
+  return { busy: busyFromEvents(events), events: total, skipped };
 }
+
+/** Sloučené obsazené intervaly z jednotlivých událostí (bez UID a kódů). */
+export const busyFromEvents = (events: readonly CalendarEvent[]): BusyInterval[] => mergeIntervals(events.map(({ start, end }) => ({ start, end })));
 
 /**
  * Jednotlivé události exportu (nesloučené), oříznuté na rozsah. Slouží ke kontrole kolize při

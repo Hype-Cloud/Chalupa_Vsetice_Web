@@ -116,7 +116,7 @@ Produkční endpoint pro vytváření rezervací zůstává vypnutý. Testovací
 
 Projekt využívá Node.js Test Runner. Databázové testy probíhají nad lokální Cloudflare D1 prostřednictvím Miniflare/workerd. Testovací údaje jsou syntetické.
 
-**Výsledek posledního vývojového běhu: 120/120 úspěšných testů.**
+**Výsledek posledního vývojového běhu: 137/137 úspěšných testů.**
 
 | Testovací soubor | Počet | Zaměření |
 |---|---:|---|
@@ -127,7 +127,8 @@ Projekt využívá Node.js Test Runner. Databázové testy probíhají nad loká
 | reservations-api.test.ts | 17 | Rezervační API, autorizace, idempotence, souběh požadavků a chybové stavy. |
 | reservations-db.test.ts | 19 | Databázová omezení, atomické transakce, rollback a ochrana proti kolizím. |
 | ical-export.test.ts | 19 | Výstupní iCal: formát RFC 5545, escaping, stabilita UID, zrušení (STATUS:CANCELLED), autorizace, chyby D1 a prostředí, únik osobních údajů. |
-| **Celkem** | **120** | |
+| conflicts.test.ts | 17 | Detekce kolizí během zpoždění synchronizace: překryvy a hranice, ozvěny, idempotence, souběh, úplný/neúplný snapshot, výpadek e-chalup, upozornění. |
+| **Celkem** | **137** | |
 
 ### Testované scénáře
 
@@ -220,7 +221,7 @@ Dosud nejsou implementovány:
 - Generování platebních QR kódů.
 - Automatické odesílání e-mailových oznámení.
 - Veřejná ochrana formuláře pomocí Cloudflare Turnstile a rate limitingu.
-- Detekce případných kolizí vzniklých během prodlevy synchronizace externích kalendářů.
+- Odesílání upozornění na kolize e-mailem (detekce je hotová, viz [Kolize během zpoždění synchronizace](#kolize-během-zpoždění-synchronizace)).
 
 Před veřejným spuštěním rezervačního systému proběhne také závěrečná kontrola oprávnění, přístupových údajů, starých testovacích deploymentů a nastavení diagnostických záznamů.
 
@@ -305,6 +306,34 @@ za kolizi se sebou samotnou, pokud nese stejné iCal UID nebo veřejný kód rez
 Pro novou rezervaci je každá událost exportu obsazený termín, tedy i ozvěna jiné vlastní
 rezervace. Shoda samotného termínu nestačí, jinak by se skryla cizí rezervace se stejnými
 daty.
+
+### Kolize během zpoždění synchronizace
+
+Rezervace z webu se před uložením ověří proti čerstvému exportu e-chalup. Airbnb nebo Booking.com
+ale mohou stejný termín prodat dřív, než se jejich rezervace v exportu e-chalup objeví. Této
+situaci nejde zabránit, jen ji rychle odhalit (`worker/booking/conflicts.ts`):
+
+- **Kdy:** po každém čerstvém a čitelném stažení exportu v `GET /api/availability` (nejvýš
+  jednou za 5 minut díky cache), odloženě přes `ctx.waitUntil`. Odpověď kalendáře na detekci
+  nečeká a její chyba ho neovlivní (do logu jde jen `conflicts: reconciliation failed`).
+- **Co:** nezrušené vlastní rezervace celé ležící v rozsahu exportu se porovnají s jednotlivými
+  událostmi exportu. Ozvěna vlastní rezervace (stejné UID nebo kód) se ignoruje. Kolize =
+  společná noc; navazující pobyty kolizí nejsou.
+- **Kde:** tabulka `reservation_conflicts` (migrace 0004), oddělená od platebního stavu
+  rezervace. Nejvýš jedna aktivní kolize na dvojici rezervace × otisk cizí události (SHA-256 z UID,
+  bez UID z kolidujících nocí), zajištěno částečným UNIQUE indexem i při souběžných bězích.
+  Opakovaná detekce jen aktualizuje `last_seen_at`.
+- **Vyřešení:** jen z úplného exportu (žádná vynechaná událost), ve kterém už kolize není.
+  Výpadek e-chalup (`stale`/`unavailable`) detekci nespustí, neúplný export (`partial`) kolize
+  jen přidává. Zrušená vlastní rezervace kolizi uzavře. Vyřešené kolize zůstávají v historii.
+- **Nic se automaticky neruší** – kolizi řeší majitel ručně v e-chalupách.
+- **Upozornění:** `notified_at IS NULL` = upozornění čeká na odeslání (`pendingConflictNotifications`,
+  `markConflictsNotified`). Odesílání e-mailem zatím není; stav je vidět v D1:
+
+  ```bash
+  npx wrangler d1 execute chalupa-vsetice-rezervace --remote --command "SELECT r.public_code, c.conflict_start, c.conflict_end, c.detected_at, c.last_seen_at FROM reservation_conflicts c JOIN reservations r ON r.id = c.reservation_id WHERE c.resolved_at IS NULL"
+  ```
+- Detekce běží jen při návštěvě webu (čtení `/api/availability`); bez návštěv se nespouští.
 
 ### Výstupní iCal pro e-chalupy (`GET /api/reservations.ics`)
 
@@ -430,6 +459,7 @@ worker/
     validation.ts       serverová validace termínu, kapacity, kontaktů a ceny
     external.ts         čerstvá kontrola proti exportu e-chalup, rozpoznání vlastní rezervace
     db.ts               D1: atomické založení rezervace, obsazené noci, data pro export
+    conflicts.ts        detekce kolizí vlastních rezervací s cizími událostmi exportu
     export.ts           GET /api/reservations.ics (soukromý iCal feed)
     ics.ts              serializace iCalendar (escaping, zalamování, CRLF)
   secrets.ts            porovnání tokenů v konstantním čase
