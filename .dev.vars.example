@@ -9,3 +9,9 @@ ECHALUPY_ICAL_URL=
 BOOKING_ENV=local
 BOOKING_API_ENABLED=true
 BOOKING_API_TOKEN=
+
+# Upozornění správci na kolize rezervací (Cron, worker/booking/cron.ts). V Cloudflare jako secrets.
+RESEND_API_KEY=
+CONFLICT_ALERT_EMAIL=
+# Doporučený produkční odesílatel (interní adresa pro alerty): Chalupa Všetice <admin@chalupavsetice.cz>
+CONFLICT_ALERT_FROM=
