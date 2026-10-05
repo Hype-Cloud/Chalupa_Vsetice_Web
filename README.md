@@ -116,7 +116,7 @@ Produkční endpoint pro vytváření rezervací zůstává vypnutý. Testovací
 
 Projekt využívá Node.js Test Runner. Databázové testy probíhají nad lokální Cloudflare D1 prostřednictvím Miniflare/workerd. Testovací údaje jsou syntetické.
 
-**Výsledek posledního vývojového běhu: 150/150 úspěšných testů.**
+**Výsledek posledního vývojového běhu: 166/166 úspěšných testů.**
 
 | Testovací soubor | Počet | Zaměření |
 |---|---:|---|
@@ -129,7 +129,8 @@ Projekt využívá Node.js Test Runner. Databázové testy probíhají nad loká
 | ical-export.test.ts | 19 | Výstupní iCal: formát RFC 5545, escaping, stabilita UID, zrušení (STATUS:CANCELLED), autorizace, chyby D1 a prostředí, únik osobních údajů. |
 | conflicts.test.ts | 18 | Detekce kolizí během zpoždění synchronizace: překryvy a hranice, ozvěny, idempotence, souběh, úplný/neúplný snapshot, výpadek e-chalup, upozornění. |
 | conflict-cron.test.ts | 12 | Cron detekce a e-mailové upozornění: odeslání a notified_at, žádný druhý e-mail, retry po chybě providera, nesoulad prostředí, výpadek a neúplný export, souběh s /api/availability, bez osobních údajů. |
-| **Celkem** | **150** | |
+| booking-public.test.ts | 16 | Veřejný POST: Turnstile (platný, neplatný, chybějící, nedostupný), rate limit, idempotentní retry a dvojklik, chybové kódy, bez úniku osobních údajů a secrets. |
+| **Celkem** | **166** | |
 
 ### Testované scénáře
 
@@ -221,7 +222,6 @@ Dosud nejsou implementovány:
 - Veřejný rezervační formulář.
 - Generování platebních QR kódů.
 - Automatické odesílání e-mailových oznámení.
-- Veřejná ochrana formuláře pomocí Cloudflare Turnstile a rate limitingu.
 
 Před veřejným spuštěním rezervačního systému proběhne také závěrečná kontrola oprávnění, přístupových údajů, starých testovacích deploymentů a nastavení diagnostických záznamů.
 
@@ -273,9 +273,20 @@ VS se nespotřebuje. Kolize se neověřuje dotazem před zápisem, ten by nebyl 
 
 ### Postup `POST /api/reservations`
 
-1. Endpoint funguje jen při `BOOKING_API_ENABLED = "true"` (zatím jen Worker Previews)
-   a s hlavičkou `Authorization: Bearer <BOOKING_API_TOKEN>`. Jinak vrací 404 jako
-   neexistující cesta.
+1. Endpoint funguje jen při `BOOKING_API_ENABLED = "true"` (zatím jen Worker Previews),
+   jinak vrací 404 jako neexistující cesta. Pokud je nastavený `BOOKING_API_TOKEN` (jen neveřejné
+   prostředí), vyžaduje navíc `Authorization: Bearer <token>`.
+   - **Rate limit** (Workers Rate Limiting binding `BOOKING_RATE_LIMITER`, `ratelimits` ve
+     `wrangler.jsonc`): 5 požadavků za 60 s na IP (`CF-Connecting-IP`) v rámci lokality Cloudflare,
+     mimo paměť izolátu, sdílený všemi instancemi Workeru. Překročení = 429 `rate-limited`
+     s `Retry-After: 60`; selhání limiteru = 503 (fail-closed). Produkce a Preview mají oddělené
+     namespace. Zvolen jako nejjednodušší varianta bez další infrastruktury (žádná KV, D1 ani Durable
+     Object kvůli počítání). Chrání proti spamu; dvojí rezervaci téže noci brání D1, ne rate limit.
+   - **Turnstile:** tělo požadavku nese `turnstileToken` (token z widgetu). Worker ho ověří přes
+     Siteverify s `TURNSTILE_SECRET_KEY` (a IP hosta). Chybějící token = 400 `turnstile-required`,
+     neplatný = 403 `turnstile-failed`, nedostupné Siteverify nebo chybný secret = 503
+     `turnstile-unavailable` (fail-closed). Token ani odpověď Siteverify se nelogují.
+     V produkci se testovací secret Cloudflare odmítne (503 `not-configured`).
 2. Validace (`worker/booking/validation.ts`):
    - datum příjezdu není v minulosti a je nejvýš 365 dní dopředu,
    - 1–30 nocí,
@@ -291,7 +302,33 @@ VS se nespotřebuje. Kolize se neověřuje dotazem před zápisem, ten by nebyl 
    - kolize 409 `dates-unavailable`.
 6. Atomický zápis do D1. Kolize nocí vrátí 409, jiná chyba databáze 503 `database-error`.
 7. Odpověď 201 obsahuje kód, termín, počet hostů, cenu, VS a stav, ale žádné kontaktní
-   údaje. Stejný `Idempotency-Key` se stejným obsahem vrátí původní rezervaci (200).
+   údaje. Stejný `Idempotency-Key` se stejným obsahem vrátí původní rezervaci (200,
+   `replayed: true`) – ještě před ověřením Turnstile, protože token je jednorázový. Siteverify
+   dostává `idempotency_key` odvozený z `Idempotency-Key`, takže souběžný dvojklik se stejným
+   klíčem a tokenem skončí jednou rezervací. Bez klíče druhý požadavek odmítne Turnstile
+   (použitý token) nebo D1 (obsazené noci). Frontend má posílat náhodný `Idempotency-Key`
+   (16–100 znaků `A–Z a–z 0–9 _ -`) jednou na odeslání formuláře; klíč nesmí obsahovat osobní údaje.
+
+#### Chybové kódy (`{ "error": "<kód>" }`)
+
+| HTTP | `error` | Význam pro frontend |
+|---|---|---|
+| 400 | `invalid-json`, `invalid-idempotency-key` | chybný požadavek (chyba klienta) |
+| 413 / 415 | `payload-too-large` / `unsupported-media-type` | chybný požadavek |
+| 422 | `invalid-request` (+ `fields`: názvy chybných polí, bez hodnot) | neplatné údaje ve formuláři |
+| 422 | `idempotency-key-reused` | stejný klíč s jiným obsahem – vygenerovat nový klíč |
+| 400 | `turnstile-required` | chybí ověření Turnstile |
+| 403 | `turnstile-failed` | ověření Turnstile neprošlo – obnovit widget a odeslat znovu |
+| 429 | `rate-limited` | příliš mnoho pokusů, `Retry-After` v sekundách |
+| 409 | `dates-unavailable` | termín je obsazený |
+| 409 | `price-mismatch` (+ `priceCzk`) | cena se změnila – zobrazit novou cenu |
+| 503 | `availability-check-failed`, `availability-incomplete` | dostupnost teď nejde bezpečně ověřit – zkusit později |
+| 503 | `turnstile-unavailable` | ověření Turnstile je dočasně nedostupné – zkusit později |
+| 503 | `not-configured`, `service-unavailable`, `database-environment-mismatch`, `database-error` | interní chyba / výpadek |
+| 500 | `internal-error` | neočekávaná interní chyba |
+| 404 / 405 | `not-found` / `method-not-allowed` | endpoint vypnutý / jiná metoda |
+
+Odpovědi nikdy neobsahují stack trace, secrets, adresu exportu ani detaily databáze.
 
 Logy obsahují jen druh události (`reservations: created`, `rejected (…)`), nikdy osobní
 údaje ani adresu exportu.
@@ -457,10 +494,21 @@ D1 (reservations) → GET /api/reservations.ics?token=… → import v e-chalup�
 - V produkci je `POST /api/reservations` vypnutý (`BOOKING_API_ENABLED` není nastavené).
   `/api/availability` z produkční D1 jen čte.
 - Testy používají výhradně smyšlené rezervace a lokální D1.
-- **Budoucí veřejný formulář:** `BOOKING_API_TOKEN` chrání jen testovací endpoint v
-  Preview a nesmí se dostat do klientského JavaScriptu. Veřejný POST nepoužije sdílený
-  Bearer token, ale potřebuje ochranu proti spamu a zneužití: Cloudflare Turnstile
-  s ověřením tokenu na serveru a rate limiting.
+- **Veřejný formulář:** `BOOKING_API_TOKEN` je volitelná pojistka jen pro neveřejné prostředí
+  a nesmí se dostat do klientského JavaScriptu. Veřejný POST chrání Turnstile a rate limit.
+- **Testování Preview / lokálně bez oslabení produkce:** Turnstile se ověřuje vždy (žádný bypass
+  v kódu). Preview a lokální vývoj používají testovací klíče Cloudflare: secret
+  `1x0000000000000000000000000000000AA` (vždy projde) s testovacím tokenem
+  `XXXX.DUMMY.TOKEN.XXXX`, popř. `2x…AA` (vždy selže). Produkce testovací secret odmítne.
+
+  ```bash
+  # Preview (testovací secret Cloudflare)
+  npx wrangler preview base-config secret put TURNSTILE_SECRET_KEY
+  # Produkce (skutečný secret z Cloudflare Turnstile widgetu, až se bude zapínat POST)
+  npx wrangler secret put TURNSTILE_SECRET_KEY
+  ```
+
+  Site key widgetu je veřejný a doplní ho až frontend formuláře.
 
 ## Architektura
 
@@ -558,7 +606,9 @@ npx wrangler d1 execute chalupa-vsetice-rezervace --local \
 - **Proměnné rezervací:**
   - `BOOKING_ENV` (`production` / `preview`),
   - `BOOKING_API_ENABLED` (jen `previews`),
-  - secret `BOOKING_API_TOKEN` (jen Preview),
+  - volitelný secret `BOOKING_API_TOKEN` (jen neveřejné prostředí),
+  - secret `TURNSTILE_SECRET_KEY` (Preview testovací, produkce skutečný) a binding
+    `BOOKING_RATE_LIMITER` (`ratelimits`, produkce namespace 1001, Preview 1002),
   - secrets `RESEND_API_KEY`, `CONFLICT_ALERT_EMAIL` a volitelně `CONFLICT_ALERT_FROM` pro e-mailové
     upozornění na kolize (Cron každých 5 minut),
   - `BOOKING_ICAL_EXPORT_ENABLED` (produkce i `previews`) a secret `BOOKING_ICAL_EXPORT_TOKEN`

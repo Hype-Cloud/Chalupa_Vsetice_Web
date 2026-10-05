@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { handleCreateReservation, type BookingDeps, type BookingEnv } from '../worker/booking/handler.ts';
 import { getAvailability, MAX_EXPORT_BYTES, resetAvailabilityMemory } from '../worker/availability.ts';
 import { listReservedNights } from '../worker/booking/db.ts';
+import { SITEVERIFY_URL } from '../worker/booking/turnstile.ts';
 import { createTestDatabase, failingDatabase } from './d1.ts';
 import { fixture } from './helpers.ts';
 
@@ -12,6 +13,9 @@ const SECRET_URL = 'https://ical.test.invalid/api/calendar/0/SECRET-TOKEN-123/de
 const TOKEN = 'testovaci-token-0123456789';
 const NOW = new Date('2030-01-10T10:00:00Z');
 const GUEST = { firstName: 'Jan', lastName: 'Testovací', phone: '+420 000 000 000', email: 'test@example.invalid' };
+// Testovací klíče Cloudflare Turnstile (veřejně dokumentované, ne secrets).
+const TURNSTILE_TEST_SECRET = '1x0000000000000000000000000000000AA';
+const DUMMY_TOKEN = 'XXXX.DUMMY.TOKEN.XXXX';
 
 let t: Awaited<ReturnType<typeof createTestDatabase>>;
 before(async () => (t = await createTestDatabase('preview')));
@@ -22,9 +26,15 @@ function setup(upstream: () => Promise<Response> = async () => new Response(fixt
   const logs: string[] = [];
   const requests: string[] = [];
   let uuid = 0;
-  const env: BookingEnv = { ECHALUPY_ICAL_URL: SECRET_URL, DB: t.db, BOOKING_ENV: 'preview', BOOKING_API_ENABLED: 'true', BOOKING_API_TOKEN: TOKEN, ...envOverrides };
+  const env: BookingEnv = {
+    ECHALUPY_ICAL_URL: SECRET_URL, DB: t.db, BOOKING_ENV: 'preview', BOOKING_API_ENABLED: 'true', BOOKING_API_TOKEN: TOKEN,
+    TURNSTILE_SECRET_KEY: TURNSTILE_TEST_SECRET, BOOKING_RATE_LIMITER: { limit: async () => ({ success: true }) },
+    ...envOverrides,
+  };
   const deps: BookingDeps = {
     fetch: (async (input: RequestInfo | URL) => {
+      // Siteverify: falešná odpověď „úspěch“ (vlastní testy Turnstile jsou v booking-public.test.ts).
+      if (String(input) === SITEVERIFY_URL) return Response.json({ success: true });
       requests.push(String(input));
       return upstream();
     }) as typeof fetch,
@@ -48,7 +58,7 @@ function setup(upstream: () => Promise<Response> = async () => new Response(fixt
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 const read = (response: Response): Promise<any> => response.json();
 
-const stay = (arrival: string, departure: string, extra: Record<string, unknown> = {}) => ({ arrival, departure, guests: 2, ...GUEST, ...extra });
+const stay = (arrival: string, departure: string, extra: Record<string, unknown> = {}) => ({ arrival, departure, guests: 2, ...GUEST, turnstileToken: DUMMY_TOKEN, ...extra });
 
 test('úspěšná rezervace: 201, cena ze serveru, VS, bez kontaktních údajů v odpovědi', async () => {
   const s = setup();
@@ -185,7 +195,8 @@ test('selhání databáze: 503 bez detailů, bez osobních údajů v logu', asyn
 });
 
 test('Preview nezapíše do databáze jiného prostředí (meta.environment ≠ BOOKING_ENV)', async () => {
-  const s = setup(undefined, { BOOKING_ENV: 'production' });
+  // Neprázdný netestovací secret, aby se uplatnila kontrola prostředí D1 (testovací klíč produkce odmítne dřív).
+  const s = setup(undefined, { BOOKING_ENV: 'production', TURNSTILE_SECRET_KEY: '0x-falesny-produkcni-secret' });
   const response = await s.post(stay('2030-02-01', '2030-02-03'));
   assert.equal(response.status, 503);
   assert.deepEqual(await response.json(), { error: 'database-environment-mismatch' });
@@ -203,13 +214,14 @@ test('produkce: bez BOOKING_API_ENABLED je endpoint 404 a na nic nesahá', async
   assert.equal(await t.count('reservations'), 0);
 });
 
-test('přístup jen s tokenem; bez nastaveného tokenu endpoint nefunguje', async () => {
+test('volitelný Bearer token: je-li nastavený, je povinný; bez D1 endpoint nefunguje', async () => {
   const s = setup();
   assert.equal((await s.post(stay('2030-02-01', '2030-02-03'), { authorization: 'Bearer spatny-token' })).status, 401);
   assert.equal((await s.post(stay('2030-02-01', '2030-02-03'), { authorization: '' })).status, 401);
-  assert.equal((await setup(undefined, { BOOKING_API_TOKEN: undefined }).post(stay('2030-02-01', '2030-02-03'))).status, 503);
+  // Bearer token je volitelný (jen neveřejné prostředí); bez něj chrání endpoint Turnstile a rate limit.
+  assert.equal((await setup(undefined, { BOOKING_API_TOKEN: undefined }).post(stay('2030-02-01', '2030-02-03'), { authorization: '' })).status, 201);
   assert.equal((await setup(undefined, { DB: undefined }).post(stay('2030-02-01', '2030-02-03'))).status, 503);
-  assert.equal(await t.count('reservations'), 0);
+  assert.equal(await t.count('reservations'), 1);
 });
 
 test('neplatné požadavky: 4xx s názvy polí, bez hodnot', async () => {

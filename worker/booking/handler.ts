@@ -1,8 +1,14 @@
-// POST /api/reservations – založení rezervace v D1.
+// POST /api/reservations – založení rezervace v D1 (veřejný rezervační formulář).
 //
-// Endpoint je zapnutý jen tam, kde BOOKING_API_ENABLED = "true" (zatím jen Worker Previews),
-// a vyžaduje Bearer token BOOKING_API_TOKEN. V produkci vrací 404 jako neexistující cesta.
+// Endpoint je zapnutý jen tam, kde BOOKING_API_ENABLED = "true" (zatím jen Worker Previews);
+// jinak vrací 404 jako neexistující cesta. Ochrana veřejného požadavku:
+// 1. rate limit podle IP (Workers Rate Limiting binding BOOKING_RATE_LIMITER),
+// 2. Cloudflare Turnstile ověřený na serveru (TURNSTILE_SECRET_KEY), fail-closed,
+// 3. volitelný Bearer token BOOKING_API_TOKEN – jen pro neveřejné prostředí (Preview).
+// Dvojí rezervaci téže noci brání D1 (reserved_nights), ne rate limit.
 // Do e-chalup, Airbnb ani Booking.com nic nezapisuje; export e-chalup jen čte.
+//
+// Stabilní chybové kódy (`{ "error": "<kód>" }`) – viz README, sekce Chybové kódy.
 
 import { diffDays, todayInPrague } from '../../lib/availability/dates.ts';
 import { icalUidFor, newReservationCode } from '../../lib/booking/codes.ts';
@@ -11,6 +17,7 @@ import { json } from '../http.ts';
 import { secretEquals, sha256 } from '../secrets.ts';
 import { databaseEnvironment, DuplicateError, findByIdempotencyKey, insertReservation, NightsTakenError, type ReservationSummary } from './db.ts';
 import { checkExternalAvailability } from './external.ts';
+import { isTestTurnstileSecret, MAX_TOKEN_LENGTH, verifyTurnstile } from './turnstile.ts';
 import { validateBooking, type ValidBooking } from './validation.ts';
 
 export interface BookingEnv {
@@ -20,8 +27,17 @@ export interface BookingEnv {
   BOOKING_ENV?: string;
   /** "true" zapne POST /api/reservations. V produkci zatím nenastaveno. */
   BOOKING_API_ENABLED?: string;
-  /** Secret: přístupový token pro POST /api/reservations. */
+  /** Secret (volitelný): dodatečný Bearer token pro neveřejné prostředí. Nikdy ne do klientského JS. */
   BOOKING_API_TOKEN?: string;
+  /** Secret: Turnstile secret key. V produkci nesmí být testovací klíč. */
+  TURNSTILE_SECRET_KEY?: string;
+  /** Workers Rate Limiting binding (wrangler.jsonc → ratelimits). */
+  BOOKING_RATE_LIMITER?: RateLimiter;
+}
+
+/** Podmnožina Workers Rate Limiting API. */
+export interface RateLimiter {
+  limit(options: { key: string }): Promise<{ success: boolean }>;
 }
 
 export interface BookingDeps extends Pick<AvailabilityDeps, 'fetch' | 'now' | 'log'> {
@@ -30,6 +46,8 @@ export interface BookingDeps extends Pick<AvailabilityDeps, 'fetch' | 'now' | 'l
 }
 
 const MAX_BODY_BYTES = 8 * 1024;
+/** Perioda rate limitu ve wrangler.jsonc (s) – pro hlavičku Retry-After. */
+const RATE_LIMIT_PERIOD_S = 60;
 const IDEMPOTENCY_KEY = /^[A-Za-z0-9_-]{16,100}$/;
 const CODE_ATTEMPTS = 3;
 
@@ -49,17 +67,47 @@ const created = (reservation: ReservationSummary, status = 201, replayed = false
   noStore(status, { reservation: { ...reservation, nights: diffDays(reservation.arrival, reservation.departure) }, ...(replayed ? { replayed: true } : {}) });
 
 export async function handleCreateReservation(request: Request, env: BookingEnv, deps: BookingDeps): Promise<Response> {
+  try {
+    return await createReservation(request, env, deps);
+  } catch {
+    // Neočekávaná chyba: žádné detaily klientovi ani do logu.
+    deps.log('reservations: internal error');
+    return failure(500, 'internal-error');
+  }
+}
+
+async function createReservation(request: Request, env: BookingEnv, deps: BookingDeps): Promise<Response> {
   // Vypnutý endpoint se neliší od neexistující cesty.
   if (env.BOOKING_API_ENABLED !== 'true') return failure(404, 'not-found');
   if (request.method !== 'POST') return noStore(405, { error: 'method-not-allowed' }, { allow: 'POST' });
 
   const token = env.BOOKING_API_TOKEN?.trim();
   const url = env.ECHALUPY_ICAL_URL?.trim();
-  if (!token || !url || !env.DB || !env.BOOKING_ENV) {
+  const turnstileSecret = env.TURNSTILE_SECRET_KEY?.trim();
+  if (!url || !env.DB || !env.BOOKING_ENV || !turnstileSecret || !env.BOOKING_RATE_LIMITER) {
     deps.log('reservations: not configured');
     return failure(503, 'not-configured');
   }
-  if (!(await tokenMatches(request.headers.get('authorization'), token))) return failure(401, 'unauthorized');
+  // Testovací Turnstile klíč by v produkci propustil každého – produkce se s ním nespustí.
+  if (env.BOOKING_ENV === 'production' && isTestTurnstileSecret(turnstileSecret)) {
+    deps.log('reservations: turnstile test key in production');
+    return failure(503, 'not-configured');
+  }
+  if (token && !(await tokenMatches(request.headers.get('authorization'), token))) return failure(401, 'unauthorized');
+
+  // Rate limit před čímkoli dražším. Klíč = IP (Workers Rate Limiting, sdílené napříč instancemi
+  // v rámci lokality Cloudflare). Selhání limiteru = odmítnutí.
+  const remoteIp = request.headers.get('cf-connecting-ip');
+  try {
+    const { success } = await env.BOOKING_RATE_LIMITER.limit({ key: `reservations:${remoteIp ?? 'unknown'}` });
+    if (!success) {
+      deps.log('reservations: rate limited');
+      return noStore(429, { error: 'rate-limited' }, { 'retry-after': String(RATE_LIMIT_PERIOD_S) });
+    }
+  } catch {
+    deps.log('reservations: rate limiter unavailable');
+    return failure(503, 'service-unavailable');
+  }
 
   if (!/^application\/json\b/i.test(request.headers.get('content-type') ?? '')) return failure(415, 'unsupported-media-type');
   if (Number(request.headers.get('content-length') ?? 0) > MAX_BODY_BYTES) return failure(413, 'payload-too-large');
@@ -79,6 +127,10 @@ export async function handleCreateReservation(request: Request, env: BookingEnv,
   const validation = validateBooking(body, today);
   if (!validation.ok) return failure(422, 'invalid-request', { fields: validation.fields });
   const booking = validation.value;
+  const turnstileToken = (body as { turnstileToken?: unknown }).turnstileToken;
+  if (typeof turnstileToken !== 'string' || turnstileToken.length === 0 || turnstileToken.length > MAX_TOKEN_LENGTH) {
+    return failure(400, 'turnstile-required');
+  }
   const db = env.DB;
 
   try {
@@ -89,9 +141,21 @@ export async function handleCreateReservation(request: Request, env: BookingEnv,
       return failure(503, 'database-environment-mismatch');
     }
     const hash = await requestHash(booking);
+    // Opakování už úspěšného požadavku (retry po timeoutu, dvojklik) vrátí původní rezervaci –
+    // ještě před Turnstile, protože token je jednorázový.
     if (idempotencyKey) {
       const existing = await findByIdempotencyKey(db, idempotencyKey);
       if (existing) return replay(existing, hash);
+    }
+
+    const human = await verifyTurnstile(turnstileSecret, turnstileToken, { remoteIp, idempotencyKey }, deps.fetch);
+    if (!human.ok) {
+      if (human.reason === 'unavailable') {
+        deps.log(`reservations: turnstile unavailable (${human.detail})`);
+        return failure(503, 'turnstile-unavailable');
+      }
+      deps.log(`reservations: turnstile rejected (${human.codes.join(',') || 'unknown'})`);
+      return failure(403, 'turnstile-failed');
     }
 
     // Cena je vždy spočítaná na serveru. Nesouhlasí-li s cenou, kterou host viděl, rezervace se nezaloží.
