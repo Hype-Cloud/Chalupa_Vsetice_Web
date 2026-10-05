@@ -2,12 +2,13 @@
 // Všechny ostatní požadavky obsluhují statické assety z dist/client bez spuštění Workeru.
 import { getAvailability } from './availability.ts';
 import { runConflictReconciliation } from './booking/conflicts.ts';
+import { runScheduledConflictCheck, type CronEnv } from './booking/cron.ts';
 import { listReservedNights } from './booking/db.ts';
 import { handleIcalExport, type ExportEnv } from './booking/export.ts';
 import { handleCreateReservation, type BookingEnv } from './booking/handler.ts';
 import { json } from './http.ts';
 
-interface Env extends BookingEnv, ExportEnv {
+interface Env extends BookingEnv, ExportEnv, CronEnv {
   ASSETS: Fetcher;
 }
 
@@ -46,5 +47,16 @@ export default {
     if (pathname === '/api/reservations.ics') return handleIcalExport(request, env, { log: (message) => console.warn(message) });
     if (pathname.startsWith('/api/')) return json({ error: 'not-found' }, { status: 404, cacheControl: 'no-store' });
     return env.ASSETS.fetch(request);
+  },
+
+  // Cron Trigger: detekce kolizí a upozornění správci nezávisle na návštěvě webu (viz booking/cron.ts).
+  async scheduled(_controller, env, ctx): Promise<void> {
+    ctx.waitUntil(
+      runScheduledConflictCheck(env, {
+        fetch: (input, init) => fetch(input, init),
+        now: () => new Date(),
+        log: (message) => console.warn(message),
+      }),
+    );
   },
 } satisfies ExportedHandler<Env>;

@@ -139,21 +139,39 @@ async function readLimited(response: Response): Promise<string> {
   return text + decoder.decode();
 }
 
-async function download(url: string, now: Date, deps: AvailabilityDeps): Promise<Snapshot> {
+/** Čerstvě stažený a převedený export e-chalup (jednotlivé události, bez cache). */
+export interface FreshExternalSnapshot {
+  events: CalendarEvent[];
+  range: { from: string; to: string };
+  /** Počet VEVENT v exportu a kolik z nich nešlo spolehlivě převést. */
+  total: number;
+  skipped: number;
+}
+
+/**
+ * Stáhne export e-chalup bez cache a převede ho na události v rozsahu od včerejška na
+ * HORIZON_DAYS dopředu. Sdílí ho GET /api/availability i Cron detekce kolizí.
+ * @throws UpstreamError (stažení, neplatný iCal, limity) – nikdy nevrací prázdný snapshot místo chyby
+ */
+export async function fetchFreshExternalSnapshot(url: string, now: Date, deps: Pick<AvailabilityDeps, 'fetch'>): Promise<FreshExternalSnapshot> {
   const today = todayInPrague(now);
   const range = { from: addDays(today, -1), to: addDays(today, HORIZON_DAYS) };
   const text = await fetchExportText(url, deps);
   try {
-    const { events, total, skipped } = parseCalendarEvents(text, range);
-    if (skipped > 0) deps.log(`availability: ${skipped} of ${total} events could not be parsed reliably`);
-    if (deps.onFreshSnapshot) {
-      const hook = deps.onFreshSnapshot({ events, range, complete: skipped === 0 }, now);
-      deps.defer(hook.catch(() => deps.log('conflicts: reconciliation failed')));
-    }
-    return { busy: busyFromEvents(events), updatedAt: now.toISOString(), range, events: total, skipped };
+    return { range, ...parseCalendarEvents(text, range) };
   } catch (error) {
     throw new UpstreamError(error instanceof IcalLimitError ? 'too-many-events' : error instanceof IcalParseError ? 'invalid-ical' : 'parse');
   }
+}
+
+async function download(url: string, now: Date, deps: AvailabilityDeps): Promise<Snapshot> {
+  const { events, range, total, skipped } = await fetchFreshExternalSnapshot(url, now, deps);
+  if (skipped > 0) deps.log(`availability: ${skipped} of ${total} events could not be parsed reliably`);
+  if (deps.onFreshSnapshot) {
+    const hook = deps.onFreshSnapshot({ events, range, complete: skipped === 0 }, now);
+    deps.defer(hook.catch(() => deps.log('conflicts: reconciliation failed')));
+  }
+  return { busy: busyFromEvents(events), updatedAt: now.toISOString(), range, events: total, skipped };
 }
 
 /** Vlastní rezervace z D1: obsazené noci, nebo `failed`, když se je nepodařilo načíst. */

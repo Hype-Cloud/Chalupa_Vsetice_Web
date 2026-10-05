@@ -116,7 +116,7 @@ Produkční endpoint pro vytváření rezervací zůstává vypnutý. Testovací
 
 Projekt využívá Node.js Test Runner. Databázové testy probíhají nad lokální Cloudflare D1 prostřednictvím Miniflare/workerd. Testovací údaje jsou syntetické.
 
-**Výsledek posledního vývojového běhu: 138/138 úspěšných testů.**
+**Výsledek posledního vývojového běhu: 150/150 úspěšných testů.**
 
 | Testovací soubor | Počet | Zaměření |
 |---|---:|---|
@@ -128,7 +128,8 @@ Projekt využívá Node.js Test Runner. Databázové testy probíhají nad loká
 | reservations-db.test.ts | 19 | Databázová omezení, atomické transakce, rollback a ochrana proti kolizím. |
 | ical-export.test.ts | 19 | Výstupní iCal: formát RFC 5545, escaping, stabilita UID, zrušení (STATUS:CANCELLED), autorizace, chyby D1 a prostředí, únik osobních údajů. |
 | conflicts.test.ts | 18 | Detekce kolizí během zpoždění synchronizace: překryvy a hranice, ozvěny, idempotence, souběh, úplný/neúplný snapshot, výpadek e-chalup, upozornění. |
-| **Celkem** | **138** | |
+| conflict-cron.test.ts | 12 | Cron detekce a e-mailové upozornění: odeslání a notified_at, žádný druhý e-mail, retry po chybě providera, nesoulad prostředí, výpadek a neúplný export, souběh s /api/availability, bez osobních údajů. |
+| **Celkem** | **150** | |
 
 ### Testované scénáře
 
@@ -221,7 +222,6 @@ Dosud nejsou implementovány:
 - Generování platebních QR kódů.
 - Automatické odesílání e-mailových oznámení.
 - Veřejná ochrana formuláře pomocí Cloudflare Turnstile a rate limitingu.
-- Odesílání upozornění na kolize e-mailem (detekce je hotová, viz [Kolize během zpoždění synchronizace](#kolize-během-zpoždění-synchronizace)).
 
 Před veřejným spuštěním rezervačního systému proběhne také závěrečná kontrola oprávnění, přístupových údajů, starých testovacích deploymentů a nastavení diagnostických záznamů.
 
@@ -313,9 +313,14 @@ Rezervace z webu se před uložením ověří proti čerstvému exportu e-chalup
 ale mohou stejný termín prodat dřív, než se jejich rezervace v exportu e-chalup objeví. Této
 situaci nejde zabránit, jen ji rychle odhalit (`worker/booking/conflicts.ts`):
 
-- **Kdy:** po každém čerstvém a čitelném stažení exportu v `GET /api/availability` (nejvýš
-  jednou za 5 minut díky cache), odloženě přes `ctx.waitUntil`. Odpověď kalendáře na detekci
-  nečeká a její chyba ho neovlivní (do logu jde jen `conflicts: reconciliation failed`).
+- **Kdy:**
+  - **Cron Trigger každých 10 minut** (`triggers.crons` ve `wrangler.jsonc`, `worker/booking/cron.ts`),
+    nezávisle na návštěvě webu: ověří prostředí D1, stáhne čerstvý export (stejná funkce
+    `fetchFreshExternalSnapshot` a parser jako `/api/availability`), spustí detekci a odešle
+    čekající upozornění.
+  - navíc po každém čerstvém stažení exportu v `GET /api/availability` (nejvýš jednou za 5 minut
+    díky cache), odloženě přes `ctx.waitUntil`. Odpověď kalendáře na detekci nečeká a její chyba
+    ho neovlivní. Obě cesty můžou běžet souběžně (UNIQUE index a `last_seen_at`).
 - **Co:** nezrušené vlastní rezervace celé ležící v rozsahu exportu se porovnají s jednotlivými
   událostmi exportu. Ozvěna vlastní rezervace (stejné UID nebo kód) se ignoruje. Kolize =
   společná noc; navazující pobyty kolizí nejsou.
@@ -328,13 +333,38 @@ situaci nejde zabránit, jen ji rychle odhalit (`worker/booking/conflicts.ts`):
   Výpadek e-chalup (`stale`/`unavailable`) detekci nespustí, neúplný export (`partial`) kolize
   jen přidává. Zrušená vlastní rezervace kolizi uzavře. Vyřešené kolize zůstávají v historii.
 - **Nic se automaticky neruší** – kolizi řeší majitel ručně v e-chalupách.
-- **Upozornění:** `notified_at IS NULL` = upozornění čeká na odeslání (`pendingConflictNotifications`,
-  `markConflictsNotified`). Odesílání e-mailem zatím není; stav je vidět v D1:
+- **Upozornění e-mailem** (`worker/booking/alerts.ts`, jen Cron): na každou trvající kolizi s
+  `notified_at IS NULL` přijde správci interní e-mail `POZOR: kolize rezervace CV-XXXXXX` s kódem
+  rezervace, kolidujícím termínem a časem zjištění – bez jména, kontaktů hosta, cizího UID
+  a adresy exportu. Mimo produkci s prefixem `[TEST]`.
+  - `notified_at` se nastaví až po úspěšné odpovědi providera. Při chybě zůstane NULL a další Cron
+    to zkusí znovu (at-least-once); trvající kolize další e-mail nevyvolá.
+  - Duplicity při souběhu nebo opakování potlačuje `Idempotency-Key: conflict-alert-<BOOKING_ENV>-<id>`
+    (Resend ho drží 24 h).
+  - Provider: [Resend](https://resend.com) přes jeden `fetch` POST, bez SDK.
+- **Nastavení e-mailu** (Cloudflare secrets, nikdy v repozitáři):
 
   ```bash
-  npx wrangler d1 execute chalupa-vsetice-rezervace --remote --command "SELECT r.public_code, c.conflict_start, c.conflict_end, c.detected_at, c.last_seen_at FROM reservation_conflicts c JOIN reservations r ON r.id = c.reservation_id WHERE c.resolved_at IS NULL"
+  npx wrangler secret put RESEND_API_KEY          # API klíč Resend (oprávnění Sending access)
+  npx wrangler secret put CONFLICT_ALERT_EMAIL    # adresa správce, kam chodí upozornění
+  npx wrangler secret put CONFLICT_ALERT_FROM     # volitelné, např. "Chalupa Všetice <upozorneni@chalupavsetice.cz>"
   ```
-- Detekce běží jen při návštěvě webu (čtení `/api/availability`); bez návštěv se nespouští.
+
+  - `CONFLICT_ALERT_EMAIL` je secret, ne `vars`: je to osobní adresa a repozitář je veřejný.
+  - Bez `CONFLICT_ALERT_FROM` se použije testovací odesílatel Resend `onboarding@resend.dev`, který
+    doručí jen na e-mail účtu Resend. Pro jinou adresu příjemce je potřeba v Resend ověřit doménu
+    (DNS záznamy) a nastavit `CONFLICT_ALERT_FROM`.
+  - Bez `RESEND_API_KEY` nebo `CONFLICT_ALERT_EMAIL` se nic neodesílá a log hlásí
+    `conflicts-mail: not configured (N pending)`.
+- **Logy:** jen `conflicts-cron: N new, M active`, `conflicts-cron: upstream unavailable (…)`,
+  `conflicts-cron: incomplete snapshot`, `conflicts-cron: database environment mismatch`,
+  `conflicts-mail: N sent`, `conflicts-mail: send failed (…)`.
+- **Kontrola v D1** (trvající kolize; `notified_at` prázdné = upozornění ještě neodešlo):
+
+  ```bash
+  npx wrangler d1 execute chalupa-vsetice-rezervace --remote --command "SELECT r.public_code, c.conflict_start, c.conflict_end, c.detected_at, c.last_seen_at, c.notified_at FROM reservation_conflicts c JOIN reservations r ON r.id = c.reservation_id WHERE c.resolved_at IS NULL"
+  ```
+- Cron Trigger běží jen u produkčního Workeru, Worker Previews ho nespouštějí.
 
 ### Výstupní iCal pro e-chalupy (`GET /api/reservations.ics`)
 
@@ -461,6 +491,8 @@ worker/
     external.ts         čerstvá kontrola proti exportu e-chalup, rozpoznání vlastní rezervace
     db.ts               D1: atomické založení rezervace, obsazené noci, data pro export
     conflicts.ts        detekce kolizí vlastních rezervací s cizími událostmi exportu
+    cron.ts             Cron Trigger: čerstvý export → detekce kolizí → upozornění
+    alerts.ts           e-mailové upozornění správci (Resend), outbox notified_at
     export.ts           GET /api/reservations.ics (soukromý iCal feed)
     ics.ts              serializace iCalendar (escaping, zalamování, CRLF)
   secrets.ts            porovnání tokenů v konstantním čase
@@ -525,6 +557,8 @@ npx wrangler d1 execute chalupa-vsetice-rezervace --local \
   - `BOOKING_ENV` (`production` / `preview`),
   - `BOOKING_API_ENABLED` (jen `previews`),
   - secret `BOOKING_API_TOKEN` (jen Preview),
+  - secrets `RESEND_API_KEY`, `CONFLICT_ALERT_EMAIL` a volitelně `CONFLICT_ALERT_FROM` pro e-mailové
+    upozornění na kolize (Cron každých 10 minut),
   - `BOOKING_ICAL_EXPORT_ENABLED` (produkce i `previews`) a secret `BOOKING_ICAL_EXPORT_TOKEN`
     (min. 32 znaků) pro výstupní iCal.
 - **Cena a kapacita:** `lib/booking/rules.ts`. Odkaz na poptávku: `components/booking/config.ts`.

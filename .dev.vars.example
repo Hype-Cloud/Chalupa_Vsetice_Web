@@ -9,3 +9,8 @@ ECHALUPY_ICAL_URL=
 BOOKING_ENV=local
 BOOKING_API_ENABLED=true
 BOOKING_API_TOKEN=
+
+# Upozornění správci na kolize rezervací (Cron, worker/booking/cron.ts). V Cloudflare jako secrets.
+RESEND_API_KEY=
+CONFLICT_ALERT_EMAIL=
+CONFLICT_ALERT_FROM=
