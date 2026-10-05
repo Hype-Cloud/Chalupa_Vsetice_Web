@@ -1,6 +1,7 @@
 {
   "name": "chalupa-vsetice-web",
-  // Worker obsluhuje jen /api/* (obsazenost z iCal exportu e-chalup); vše ostatní jsou statické assety.
+  // Worker obsluhuje jen /api/* (/api/availability, /api/reservations, /api/reservations.ics);
+  // vše ostatní jsou statické assety.
   "main": "./worker/index.ts",
   "compatibility_date": "2026-09-28",
   "assets": {
