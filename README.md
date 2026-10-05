@@ -421,7 +421,7 @@ lib/availability/       sdílená logika (klient i Worker)
   stay.ts               jediná validace výběru pobytu
   types.ts              typy odpovědi API
 worker/
-  index.ts              vstup Workeru: /api/availability, ostatní → statické assety
+  index.ts              vstup Workeru: /api/availability, /api/reservations, /api/reservations.ics; ostatní → statické assety
   availability.ts       stažení exportu, cache, stavy ok / stale / unavailable
   ical.ts               převod iCal na obsazené intervaly a události (UID, kódy rezervací)
   http.ts               JSON odpovědi s bezpečnostními hlavičkami
@@ -437,7 +437,7 @@ migrations/             SQL migrace D1
 tests/                  unit testy + syntetické fixtures (smyšlené rezervace), lokální D1 (Miniflare)
 public/                 fotografie, favicon
 scripts/finalize-static.mjs   úklid po buildu, ponechá statický výstup
-components/ui/, lib/utils.ts, vendor/   knihovna shadcn/ui (zatím nepoužitá)
+vendor/                 základní styly shadcn/Tailwind importované z app/globals.css
 ```
 
 ### Build a nasazení Workeru
