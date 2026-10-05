@@ -14,11 +14,11 @@
   // Secret ECHALUPY_ICAL_URL se nastavuje v Cloudflare (wrangler secret put), nikdy v repozitáři.
   // Produkce: rezervační POST zůstává vypnutý.
   // Výstupní iCal /api/reservations.ics je zapnutý a chráněný BOOKING_ICAL_EXPORT_TOKEN.
-  // Detekce kolizí rezervací a e-mailové upozornění správci (worker/booking/cron.ts) každých 10 minut.
+  // Detekce kolizí rezervací a e-mailové upozornění správci (worker/booking/cron.ts) každých 5 minut.
   // Secrets RESEND_API_KEY a CONFLICT_ALERT_EMAIL (volitelně CONFLICT_ALERT_FROM) se nastavují
   // přes wrangler secret put, nikdy zde.
   "triggers": {
-    "crons": ["*/10 * * * *"]
+    "crons": ["*/5 * * * *"]
   },
   "vars": {
     "BOOKING_ENV": "production",

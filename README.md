@@ -314,7 +314,7 @@ ale mohou stejný termín prodat dřív, než se jejich rezervace v exportu e-ch
 situaci nejde zabránit, jen ji rychle odhalit (`worker/booking/conflicts.ts`):
 
 - **Kdy:**
-  - **Cron Trigger každých 10 minut** (`triggers.crons` ve `wrangler.jsonc`, `worker/booking/cron.ts`),
+  - **Cron Trigger každých 5 minut** (`triggers.crons` ve `wrangler.jsonc`, `worker/booking/cron.ts`),
     nezávisle na návštěvě webu: ověří prostředí D1, stáhne čerstvý export (stejná funkce
     `fetchFreshExternalSnapshot` a parser jako `/api/availability`), spustí detekci a odešle
     čekající upozornění.
@@ -347,13 +347,15 @@ situaci nejde zabránit, jen ji rychle odhalit (`worker/booking/conflicts.ts`):
   ```bash
   npx wrangler secret put RESEND_API_KEY          # API klíč Resend (oprávnění Sending access)
   npx wrangler secret put CONFLICT_ALERT_EMAIL    # adresa správce, kam chodí upozornění
-  npx wrangler secret put CONFLICT_ALERT_FROM     # volitelné, např. "Chalupa Všetice <upozorneni@chalupavsetice.cz>"
+  npx wrangler secret put CONFLICT_ALERT_FROM     # doporučeno: Chalupa Všetice <admin@chalupavsetice.cz>
   ```
 
   - `CONFLICT_ALERT_EMAIL` je secret, ne `vars`: je to osobní adresa a repozitář je veřejný.
+  - Produkční odesílatel: `Chalupa Všetice <admin@chalupavsetice.cz>` (doména `chalupavsetice.cz`
+    je v Resend ověřená). `admin@chalupavsetice.cz` je interní provozní adresa pro správce a alerty,
+    ne veřejná adresa pro hosty.
   - Bez `CONFLICT_ALERT_FROM` se použije testovací odesílatel Resend `onboarding@resend.dev`, který
-    doručí jen na e-mail účtu Resend. Pro jinou adresu příjemce je potřeba v Resend ověřit doménu
-    (DNS záznamy) a nastavit `CONFLICT_ALERT_FROM`.
+    doručí jen na e-mail účtu Resend.
   - Bez `RESEND_API_KEY` nebo `CONFLICT_ALERT_EMAIL` se nic neodesílá a log hlásí
     `conflicts-mail: not configured (N pending)`.
 - **Logy:** jen `conflicts-cron: N new, M active`, `conflicts-cron: upstream unavailable (…)`,
@@ -558,7 +560,7 @@ npx wrangler d1 execute chalupa-vsetice-rezervace --local \
   - `BOOKING_API_ENABLED` (jen `previews`),
   - secret `BOOKING_API_TOKEN` (jen Preview),
   - secrets `RESEND_API_KEY`, `CONFLICT_ALERT_EMAIL` a volitelně `CONFLICT_ALERT_FROM` pro e-mailové
-    upozornění na kolize (Cron každých 10 minut),
+    upozornění na kolize (Cron každých 5 minut),
   - `BOOKING_ICAL_EXPORT_ENABLED` (produkce i `previews`) a secret `BOOKING_ICAL_EXPORT_TOKEN`
     (min. 32 znaků) pro výstupní iCal.
 - **Cena a kapacita:** `lib/booking/rules.ts`. Odkaz na poptávku: `components/booking/config.ts`.
