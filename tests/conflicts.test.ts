@@ -165,6 +165,28 @@ test('událost bez UID: kolize podle nocí, deterministický otisk i při posunu
   assert.equal((await rows()).length, 1);
 });
 
+test('opakovaná cizí událost: každý výskyt je samostatná kolize bez roztažení přes volné noci', async () => {
+  const a = await reserve('2030-06-01', '2030-06-12');
+  // Dva výskyty se stejným UID (2.–4. 6. a 9.–11. 6.), mezi nimi volné noci 4.–8. 6.
+  const text = 'BEGIN:VCALENDAR\r\nVERSION:2.0\r\nPRODID:-//T//CS\r\nBEGIN:VEVENT\r\nUID:opakovana@test.invalid\r\nDTSTART;VALUE=DATE:20300602\r\nDTEND;VALUE=DATE:20300604\r\nRRULE:FREQ=WEEKLY;COUNT=2\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n';
+  const { events } = parseCalendarEvents(text, RANGE);
+  assert.deepEqual(events.map((e) => [e.uid, e.recurrenceId, e.start, e.end]), [
+    ['opakovana@test.invalid', '2030-06-02', '2030-06-02', '2030-06-04'],
+    ['opakovana@test.invalid', '2030-06-09', '2030-06-09', '2030-06-11'],
+  ]);
+  const first = await reconcileConflicts(t.db, snap(events), T1);
+  assert.deepEqual([...first.newConflicts].sort((x, y) => (x.start < y.start ? -1 : 1)), [
+    { reservationCode: a.publicCode, start: '2030-06-02', end: '2030-06-04' },
+    { reservationCode: a.publicCode, start: '2030-06-09', end: '2030-06-11' },
+  ]);
+  assert.equal(first.active, 2);
+  assert.deepEqual(await reconcileConflicts(t.db, snap(events), T2), { newConflicts: [], active: 2 });
+  assert.deepEqual((await rows()).map((r) => [r.conflict_start, r.conflict_end, r.detected_at, r.last_seen_at]).sort(), [
+    ['2030-06-02', '2030-06-04', T1.toISOString(), T2.toISOString()],
+    ['2030-06-09', '2030-06-11', T1.toISOString(), T2.toISOString()],
+  ]);
+});
+
 test('rezervace mimo celý rozsah snapshotu se nevyhodnocují ani neuzavírají', async () => {
   await reserve('2030-01-05', '2030-01-12'); // začala před rozsahem
   await t.db.prepare(`INSERT INTO reservation_conflicts (reservation_id, external_fingerprint, conflict_start, conflict_end, detected_at, last_seen_at) SELECT id, 'x', '2030-01-10', '2030-01-11', 'a', 'a' FROM reservations`).run();

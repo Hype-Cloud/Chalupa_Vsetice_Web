@@ -51,12 +51,17 @@ interface OwnReservation {
 const hex = (bytes: Uint8Array) => Array.from(bytes, (b) => b.toString(16).padStart(2, '0')).join('');
 
 /**
- * Otisk cizí události: podle UID, bez UID podle kolidujících nocí (průnik s rezervací, ne
- * oříznutý interval události – ten se s posunem rozsahu mění). Hash, aby se v D1 neukládala
- * cizí UID.
+ * Otisk cizí události: podle UID (u výskytu opakované události UID + RECURRENCE-ID, protože
+ * výskyty sdílejí UID), bez UID podle kolidujících nocí (průnik s rezervací, ne oříznutý
+ * interval události – ten se s posunem rozsahu mění). Hash, aby se v D1 neukládala cizí UID.
  */
 export async function conflictFingerprint(event: CalendarEvent, nights: { start: IsoDate; end: IsoDate }): Promise<string> {
-  return hex(await sha256(event.uid ? `uid:${event.uid}` : `nights:${nights.start}/${nights.end}`));
+  const identity = !event.uid
+    ? `nights:${nights.start}/${nights.end}`
+    : event.recurrenceId
+      ? `uid:${event.uid}|recurrence:${event.recurrenceId}`
+      : `uid:${event.uid}`;
+  return hex(await sha256(identity));
 }
 
 /**
@@ -92,7 +97,7 @@ export async function reconcileConflicts(db: D1Database, snapshot: ExternalSnaps
       const fingerprint = await conflictFingerprint(event, { start, end });
       const key = `${reservation.id}|${fingerprint}`;
       const existing = desired.get(key);
-      // Více výskytů téže události (RRULE) se sloučí do jednoho rozsahu nocí.
+      // Stejný otisk = stejná událost (např. duplicitní VEVENT) → jeden záznam.
       if (existing) {
         if (start < existing.start) existing.start = start;
         if (end > existing.end) existing.end = end;

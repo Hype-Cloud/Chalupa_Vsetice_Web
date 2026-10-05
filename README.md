@@ -116,7 +116,7 @@ Produkční endpoint pro vytváření rezervací zůstává vypnutý. Testovací
 
 Projekt využívá Node.js Test Runner. Databázové testy probíhají nad lokální Cloudflare D1 prostřednictvím Miniflare/workerd. Testovací údaje jsou syntetické.
 
-**Výsledek posledního vývojového běhu: 137/137 úspěšných testů.**
+**Výsledek posledního vývojového běhu: 138/138 úspěšných testů.**
 
 | Testovací soubor | Počet | Zaměření |
 |---|---:|---|
@@ -127,8 +127,8 @@ Projekt využívá Node.js Test Runner. Databázové testy probíhají nad loká
 | reservations-api.test.ts | 17 | Rezervační API, autorizace, idempotence, souběh požadavků a chybové stavy. |
 | reservations-db.test.ts | 19 | Databázová omezení, atomické transakce, rollback a ochrana proti kolizím. |
 | ical-export.test.ts | 19 | Výstupní iCal: formát RFC 5545, escaping, stabilita UID, zrušení (STATUS:CANCELLED), autorizace, chyby D1 a prostředí, únik osobních údajů. |
-| conflicts.test.ts | 17 | Detekce kolizí během zpoždění synchronizace: překryvy a hranice, ozvěny, idempotence, souběh, úplný/neúplný snapshot, výpadek e-chalup, upozornění. |
-| **Celkem** | **137** | |
+| conflicts.test.ts | 18 | Detekce kolizí během zpoždění synchronizace: překryvy a hranice, ozvěny, idempotence, souběh, úplný/neúplný snapshot, výpadek e-chalup, upozornění. |
+| **Celkem** | **138** | |
 
 ### Testované scénáře
 
@@ -321,7 +321,8 @@ situaci nejde zabránit, jen ji rychle odhalit (`worker/booking/conflicts.ts`):
   společná noc; navazující pobyty kolizí nejsou.
 - **Kde:** tabulka `reservation_conflicts` (migrace 0004), oddělená od platebního stavu
   rezervace. Nejvýš jedna aktivní kolize na dvojici rezervace × otisk cizí události (SHA-256 z UID,
-  bez UID z kolidujících nocí), zajištěno částečným UNIQUE indexem i při souběžných bězích.
+  u výskytu opakované události UID + RECURRENCE-ID, bez UID z kolidujících nocí), zajištěno
+  částečným UNIQUE indexem i při souběžných bězích.
   Opakovaná detekce jen aktualizuje `last_seen_at`.
 - **Vyřešení:** jen z úplného exportu (žádná vynechaná událost), ve kterém už kolize není.
   Výpadek e-chalup (`stale`/`unavailable`) detekci nespustí, neúplný export (`partial`) kolize

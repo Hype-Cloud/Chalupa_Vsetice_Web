@@ -84,6 +84,11 @@ function toNights(start: Time | null, end: Time | null): { interval: BusyInterva
 export interface CalendarEvent extends BusyInterval {
   uid: string | null;
   codes: string[];
+  /**
+   * RECURRENCE-ID konkrétního výskytu opakované události (výskyty sdílejí UID). Jen u výskytů
+   * opakovaných událostí a samostatných výjimek, jinak chybí.
+   */
+  recurrenceId?: string;
 }
 
 export interface ParsedEvents {
@@ -168,7 +173,7 @@ export function parseCalendarEvents(text: string, range: { from: IsoDate; to: Is
   }
 
   const found: CalendarEvent[] = [];
-  const add = (event: Event, start: Time | null, end: Time | null) => {
+  const add = (event: Event, start: Time | null, end: Time | null, recurrenceId: Time | null = null) => {
     const nights = toNights(start, end);
     if (!nights) return false;
     const { interval } = nights;
@@ -178,6 +183,7 @@ export function parseCalendarEvents(text: string, range: { from: IsoDate; to: Is
         end: interval.end > range.to ? range.to : interval.end,
         uid: event.uid || null,
         codes: reservationCodes(event.component),
+        ...(recurrenceId ? { recurrenceId: recurrenceId.toString() } : {}),
       });
     }
     return !nights.suspicious;
@@ -191,7 +197,8 @@ export function parseCalendarEvents(text: string, range: { from: IsoDate; to: Is
       }
       if (isCancelled(event.component)) continue;
       if (!event.isRecurring()) {
-        if (!add(event, event.startDate, event.endDate)) skipped++;
+        const exceptionId = event.component.hasProperty('recurrence-id') ? event.recurrenceId : null;
+        if (!add(event, event.startDate, event.endDate, exceptionId)) skipped++;
         continue;
       }
       const iterator = event.iterator();
@@ -202,7 +209,7 @@ export function parseCalendarEvents(text: string, range: { from: IsoDate; to: Is
         const startIso = toIsoDate(details.startDate);
         if (startIso && startIso >= range.to) break;
         if (isCancelled(details.item.component)) continue;
-        if (!add(details.item, details.startDate, details.endDate)) {
+        if (!add(details.item, details.startDate, details.endDate, details.recurrenceId)) {
           skipped++;
           break;
         }
