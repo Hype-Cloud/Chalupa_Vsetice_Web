@@ -1,7 +1,7 @@
 import { addDays, todayInPrague } from '../lib/availability/dates.ts';
 import { mergeIntervals } from '../lib/availability/occupancy.ts';
 import type { AvailabilityResponse, BusyInterval } from '../lib/availability/types.ts';
-import { IcalLimitError, IcalParseError, parseBusyIntervals } from './ical.ts';
+import { busyFromEvents, IcalLimitError, IcalParseError, parseCalendarEvents, type CalendarEvent } from './ical.ts';
 
 /** Data jsou čerstvá 5 minut, pak se export stáhne znovu (při další návštěvě). */
 export const FRESH_MS = 5 * 60_000;
@@ -50,6 +50,12 @@ export interface AvailabilityDeps {
    * k obsazenosti z e-chalup, aby nová rezervace byla vidět hned, ne až po importu do e-chalup.
    */
   reservedNights?: (range: { from: string; to: string }) => Promise<BusyInterval[]>;
+  /**
+   * Volá se po každém čerstvém a čitelném stažení exportu s jednotlivými událostmi (detekce
+   * kolizí vlastních rezervací). Běží odloženě přes `defer`; odpověď API na ni nečeká a její
+   * chyba obsazenost neovlivní. Při chybě stažení nebo neplatném exportu se nevolá.
+   */
+  onFreshSnapshot?: (snapshot: { events: CalendarEvent[]; range: { from: string; to: string }; complete: boolean }, now: Date) => Promise<unknown>;
 }
 
 export interface AvailabilityEnv {
@@ -138,9 +144,13 @@ async function download(url: string, now: Date, deps: AvailabilityDeps): Promise
   const range = { from: addDays(today, -1), to: addDays(today, HORIZON_DAYS) };
   const text = await fetchExportText(url, deps);
   try {
-    const { busy, events, skipped } = parseBusyIntervals(text, range);
-    if (skipped > 0) deps.log(`availability: ${skipped} of ${events} events could not be parsed reliably`);
-    return { busy, updatedAt: now.toISOString(), range, events, skipped };
+    const { events, total, skipped } = parseCalendarEvents(text, range);
+    if (skipped > 0) deps.log(`availability: ${skipped} of ${total} events could not be parsed reliably`);
+    if (deps.onFreshSnapshot) {
+      const hook = deps.onFreshSnapshot({ events, range, complete: skipped === 0 }, now);
+      deps.defer(hook.catch(() => deps.log('conflicts: reconciliation failed')));
+    }
+    return { busy: busyFromEvents(events), updatedAt: now.toISOString(), range, events: total, skipped };
   } catch (error) {
     throw new UpstreamError(error instanceof IcalLimitError ? 'too-many-events' : error instanceof IcalParseError ? 'invalid-ical' : 'parse');
   }

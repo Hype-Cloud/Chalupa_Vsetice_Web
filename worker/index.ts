@@ -1,6 +1,7 @@
 // Cloudflare Worker: obsluhuje pouze /api/* (assets.run_worker_first ve wrangler.jsonc).
 // Všechny ostatní požadavky obsluhují statické assety z dist/client bez spuštění Workeru.
 import { getAvailability } from './availability.ts';
+import { runConflictReconciliation } from './booking/conflicts.ts';
 import { listReservedNights } from './booking/db.ts';
 import { handleIcalExport, type ExportEnv } from './booking/export.ts';
 import { handleCreateReservation, type BookingEnv } from './booking/handler.ts';
@@ -23,6 +24,8 @@ async function handleAvailability(request: Request, env: Env, ctx: ExecutionCont
     log: (message) => console.warn(message),
     // Vlastní rezervace z D1 (pokud je databáze připojená) se přidají k obsazenosti z e-chalup.
     reservedNights: env.DB ? (range) => listReservedNights(env.DB!, range) : undefined,
+    // Detekce kolizí vlastních rezervací s cizími událostmi exportu (odloženě, viz conflicts.ts).
+    onFreshSnapshot: env.DB ? (snapshot, now) => runConflictReconciliation(env, snapshot, now, (message) => console.warn(message)) : undefined,
   });
   // Krátká cache v prohlížeči; neúplná data se necachují.
   return json(data, { cacheControl: data.status === 'ok' ? 'public, max-age=60' : 'no-store' });
