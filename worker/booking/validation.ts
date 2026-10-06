@@ -1,7 +1,8 @@
-// Serverová validace požadavku na rezervaci. Cena se z požadavku nikdy nepřebírá.
+// Serverová validace požadavku na rezervaci a na cenu (POST /api/quote). Cena se z požadavku
+// nikdy nepřebírá – počítá ji jen worker/booking/pricing.ts.
 
 import { addDays, diffDays, isIsoDate, type IsoDate } from '../../lib/availability/dates.ts';
-import { BOOKING_HORIZON_DAYS, CAPACITY, MAX_NIGHTS, MIN_NIGHTS, priceFor } from '../../lib/booking/rules.ts';
+import { BOOKING_HORIZON_DAYS, CAPACITY, MAX_NIGHTS, MIN_NIGHTS } from '../../lib/booking/rules.ts';
 
 export interface BookingRequest {
   arrival: IsoDate;
@@ -17,7 +18,35 @@ export interface BookingRequest {
 
 export interface ValidBooking extends BookingRequest {
   nights: number;
-  priceCzk: number;
+}
+
+/** Ověřený termín a počet hostů (společné pro rezervaci i cenovou nabídku). */
+export interface ValidStay {
+  arrival: IsoDate;
+  departure: IsoDate;
+  guests: number;
+  nights: number;
+}
+
+/**
+ * Termín a počet hostů: příjezd od dneška nejvýš BOOKING_HORIZON_DAYS dopředu, MIN–MAX_NIGHTS
+ * nocí, 1–CAPACITY hostů. `names` = názvy polí v požadavku (pro seznam chybných polí).
+ */
+export function validateStay(
+  input: Record<string, unknown>,
+  today: IsoDate,
+  names: { arrival: string; departure: string; guests: string } = { arrival: 'arrival', departure: 'departure', guests: 'guests' },
+): { ok: true; value: ValidStay } | { ok: false; fields: string[] } {
+  const fields: string[] = [];
+  const arrival = isIsoDate(input[names.arrival]) ? (input[names.arrival] as IsoDate) : null;
+  const departure = isIsoDate(input[names.departure]) ? (input[names.departure] as IsoDate) : null;
+  if (!arrival || arrival < today || arrival > addDays(today, BOOKING_HORIZON_DAYS)) fields.push(names.arrival);
+  const nights = arrival && departure ? diffDays(arrival, departure) : 0;
+  if (!departure || (arrival && (nights < MIN_NIGHTS || nights > MAX_NIGHTS))) fields.push(names.departure);
+  const guests = input[names.guests];
+  if (typeof guests !== 'number' || !Number.isInteger(guests) || guests < 1 || guests > CAPACITY) fields.push(names.guests);
+  if (fields.length > 0) return { ok: false, fields };
+  return { ok: true, value: { arrival: arrival!, departure: departure!, guests: guests as number, nights } };
 }
 
 /** Názvy chybných polí (bez hodnot – hodnoty mohou být osobní údaje). */
@@ -38,16 +67,8 @@ function text(value: unknown, max: number): string | null {
 export function validateBooking(body: unknown, today: IsoDate): ValidationResult {
   if (!body || typeof body !== 'object' || Array.isArray(body)) return { ok: false, fields: ['body'] };
   const input = body as Record<string, unknown>;
-  const fields: string[] = [];
-
-  const arrival = isIsoDate(input.arrival) ? input.arrival : null;
-  const departure = isIsoDate(input.departure) ? input.departure : null;
-  if (!arrival || arrival < today || arrival > addDays(today, BOOKING_HORIZON_DAYS)) fields.push('arrival');
-  const nights = arrival && departure ? diffDays(arrival, departure) : 0;
-  if (!departure || (arrival && (nights < MIN_NIGHTS || nights > MAX_NIGHTS))) fields.push('departure');
-
-  const guests = input.guests;
-  if (typeof guests !== 'number' || !Number.isInteger(guests) || guests < 1 || guests > CAPACITY) fields.push('guests');
+  const stay = validateStay(input, today);
+  const fields: string[] = stay.ok ? [] : [...stay.fields];
 
   const firstName = text(input.firstName, 80);
   if (!firstName) fields.push('firstName');
@@ -66,20 +87,16 @@ export function validateBooking(body: unknown, today: IsoDate): ValidationResult
   const expected = input.expectedPriceCzk;
   if (expected !== undefined && expected !== null && (typeof expected !== 'number' || !Number.isInteger(expected) || expected <= 0)) fields.push('expectedPriceCzk');
 
-  if (fields.length > 0) return { ok: false, fields };
+  if (!stay.ok || fields.length > 0) return { ok: false, fields };
   return {
     ok: true,
     value: {
-      arrival: arrival!,
-      departure: departure!,
-      guests: guests as number,
+      ...stay.value,
       firstName: firstName!,
       lastName: lastName!,
       phone: phone!,
       email: email!,
       expectedPriceCzk: typeof expected === 'number' ? expected : null,
-      nights,
-      priceCzk: priceFor(nights),
     },
   };
 }

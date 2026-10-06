@@ -17,6 +17,7 @@ import { json } from '../http.ts';
 import { secretEquals, sha256 } from '../secrets.ts';
 import { databaseEnvironment, DuplicateError, findByIdempotencyKey, insertReservation, NightsTakenError, type ReservationSummary } from './db.ts';
 import { checkExternalAvailability } from './external.ts';
+import { PricingDataError, quoteStay, type Quote } from './pricing.ts';
 import { isTestTurnstileSecret, MAX_TOKEN_LENGTH, verifyTurnstile } from './turnstile.ts';
 import { validateBooking, type ValidBooking } from './validation.ts';
 
@@ -158,9 +159,18 @@ async function createReservation(request: Request, env: BookingEnv, deps: Bookin
       return failure(403, 'turnstile-failed');
     }
 
-    // Cena je vždy spočítaná na serveru. Nesouhlasí-li s cenou, kterou host viděl, rezervace se nezaloží.
-    if (booking.expectedPriceCzk !== null && booking.expectedPriceCzk !== booking.priceCzk) {
-      return failure(409, 'price-mismatch', { priceCzk: booking.priceCzk });
+    // Cena je vždy spočítaná na serveru stejným výpočtem jako POST /api/quote. Nesouhlasí-li
+    // s cenou, kterou host viděl (např. se mezitím změnil ceník), rezervace se nezaloží.
+    let quote: Quote;
+    try {
+      quote = await quoteStay(db, booking);
+    } catch (error) {
+      if (!(error instanceof PricingDataError)) throw error;
+      deps.log('reservations: pricing data invalid');
+      return failure(503, 'pricing-unavailable');
+    }
+    if (booking.expectedPriceCzk !== null && booking.expectedPriceCzk !== quote.totalCzk) {
+      return failure(409, 'price-mismatch', { priceCzk: quote.totalCzk });
     }
 
     // Čerstvá kontrola proti e-chalupám (bez cache). Selhání nebo neúplná data = odmítnutí.
@@ -184,7 +194,7 @@ async function createReservation(request: Request, env: BookingEnv, deps: Bookin
           lastName: booking.lastName,
           phone: booking.phone,
           email: booking.email,
-          priceCzk: booking.priceCzk,
+          priceCzk: quote.totalCzk,
           idempotencyKey,
           requestHash: hash,
           vsPrefix: today.slice(2, 4),
