@@ -4,6 +4,7 @@ import { computeQuote, loadPricingData, PricingDataError, quoteStay } from '../w
 import { handleQuote } from '../worker/booking/quote.ts';
 import { handleCreateReservation, type BookingEnv } from '../worker/booking/handler.ts';
 import { SITEVERIFY_URL } from '../worker/booking/turnstile.ts';
+import { listReservedNights } from '../worker/booking/db.ts';
 import { createTestDatabase, failingDatabase } from './d1.ts';
 import { fixture } from './helpers.ts';
 
@@ -15,7 +16,7 @@ let t: Awaited<ReturnType<typeof createTestDatabase>>;
 before(async () => (t = await createTestDatabase('preview')));
 after(() => t.dispose());
 beforeEach(async () => {
-  await t.db.batch([t.db.prepare('DELETE FROM daily_prices'), t.db.prepare('DELETE FROM length_discounts')]);
+  await t.db.batch([t.db.prepare('DELETE FROM daily_prices'), t.db.prepare('DELETE FROM length_discounts'), t.db.prepare('DELETE FROM stay_prices')]);
   await t.reset();
 });
 
@@ -23,6 +24,12 @@ const setPrices = (prices: Record<string, number>) =>
   t.db.batch(Object.entries(prices).map(([date, price]) => t.db.prepare('INSERT INTO daily_prices (date, price_czk) VALUES (?1, ?2)').bind(date, price)));
 const setDiscounts = (rules: [number, number][]) =>
   t.db.batch(rules.map(([min, pct]) => t.db.prepare('INSERT INTO length_discounts (min_nights, discount_percent) VALUES (?1, ?2)').bind(min, pct)));
+const setStayPrice = (arrival: string, departure: string, total: number) =>
+  t.db
+    .prepare('INSERT INTO stay_prices (arrival_date, departure_date, total_czk) VALUES (?1, ?2, ?3) ON CONFLICT(arrival_date, departure_date) DO UPDATE SET total_czk = excluded.total_czk')
+    .bind(arrival, departure, total)
+    .run();
+const stayCount = async () => (await t.db.prepare('SELECT count(*) AS n FROM stay_prices').first<{ n: number }>())!.n;
 const quote = (arrival: string, departure: string) => quoteStay(t.db, { arrival, departure });
 
 test('1: bez vlastních cen a bez slevy → výchozí cena za každou noc', async () => {
@@ -30,6 +37,7 @@ test('1: bez vlastních cen a bez slevy → výchozí cena za každou noc', asyn
     arrivalDate: '2030-02-01',
     departureDate: '2030-02-04',
     nights: 3,
+    pricingMode: 'nightly',
     subtotalCzk: 9000,
     discount: null,
     totalCzk: 9000,
@@ -101,10 +109,10 @@ test('8: zaokrouhlení – sleva se zaokrouhluje dolů na celé Kč', async () =
   assert.equal(q.discount?.amountCzk, 1166);
   assert.equal(q.totalCzk, 22165);
   // 0 % a 100 % jsou okrajové, ale platné hodnoty.
-  assert.equal(computeQuote({ arrival: '2030-04-01', departure: '2030-04-02' }, { defaultNightlyPriceCzk: 999, dailyPrices: new Map(), discounts: [{ minNights: 1, percent: 100 }] }).totalCzk, 0);
-  assert.equal(computeQuote({ arrival: '2030-04-01', departure: '2030-04-02' }, { defaultNightlyPriceCzk: 999, dailyPrices: new Map(), discounts: [{ minNights: 1, percent: 0 }] }).totalCzk, 999);
+  assert.equal(computeQuote({ arrival: '2030-04-01', departure: '2030-04-02' }, { defaultNightlyPriceCzk: 999, dailyPrices: new Map(), discounts: [{ minNights: 1, percent: 100 }], stayPriceCzk: null }).totalCzk, 0);
+  assert.equal(computeQuote({ arrival: '2030-04-01', departure: '2030-04-02' }, { defaultNightlyPriceCzk: 999, dailyPrices: new Map(), discounts: [{ minNights: 1, percent: 0 }], stayPriceCzk: null }).totalCzk, 999);
   // 3 % z 999 = 29,97 → 29 Kč.
-  assert.equal(computeQuote({ arrival: '2030-04-01', departure: '2030-04-02' }, { defaultNightlyPriceCzk: 999, dailyPrices: new Map(), discounts: [{ minNights: 1, percent: 3 }] }).discount?.amountCzk, 29);
+  assert.equal(computeQuote({ arrival: '2030-04-01', departure: '2030-04-02' }, { defaultNightlyPriceCzk: 999, dailyPrices: new Map(), discounts: [{ minNights: 1, percent: 3 }], stayPriceCzk: null }).discount?.amountCzk, 29);
 });
 
 test('9: pobyt přes konec měsíce', async () => {
@@ -139,7 +147,7 @@ test('/api/quote: kontrakt odpovědi, no-store', async () => {
   assert.equal(response.headers.get('cache-control'), 'no-store');
   const body = await read(response);
   assert.deepEqual({ ...body, nightlyPrices: body.nightlyPrices.length }, {
-    arrivalDate: '2030-12-07', departureDate: '2030-12-17', nights: 10, subtotalCzk: 30000,
+    arrivalDate: '2030-12-07', departureDate: '2030-12-17', nights: 10, pricingMode: 'nightly', subtotalCzk: 30000,
     discount: { type: 'length', minNights: 7, percent: 5, amountCzk: 1500 }, totalCzk: 28500, nightlyPrices: 10,
   });
   assert.deepEqual(body.nightlyPrices[0], { date: '2030-12-07', priceCzk: 3000 });
@@ -184,8 +192,8 @@ test('12: neplatná ceníková data v D1 → 503 pricing-unavailable, nikdy tich
   await setDiscounts([[7, 5]]);
   await assert.rejects(setDiscounts([[7, 10]]), /UNIQUE constraint failed/);
   // …a kdyby se tam přesto dostala (ruční zásah, jiná verze schématu), výpočet se odmítne.
-  const corrupt = (prices: unknown[], discounts: unknown[]) =>
-    ({ prepare: () => ({ bind: () => ({}) }), batch: async () => [{ results: prices }, { results: discounts }] }) as unknown as D1Database;
+  const corrupt = (prices: unknown[], discounts: unknown[], stays: unknown[] = []) =>
+    ({ prepare: () => ({ bind: () => ({}) }), batch: async () => [{ results: stays }, { results: prices }, { results: discounts }] }) as unknown as D1Database;
   for (const db of [
     corrupt([{ date: '2030-02-01', price_czk: 0 }], []),
     corrupt([{ date: '2030-02-01', price_czk: '3000' }], []),
@@ -307,4 +315,217 @@ test('/api/quote při úspěchu nic neloguje', async () => {
   const logs: string[] = [];
   await post({ arrivalDate: '2030-02-01', departureDate: '2030-02-03', guests: 2 }, t.db, logs);
   assert.deepEqual(logs, []);
+});
+
+// Pevná cena celého pobytu (stay_prices, pricingMode "exact-stay")
+// Silvestr: 29. 12. → 2. 1. = 4 noci, pevně 29 900 Kč (po nocích by to bylo 4 × 3 000 = 12 000 Kč).
+
+const SILVESTR = { arrivalDate: '2030-12-29', departureDate: '2031-01-02', guests: 2 };
+
+test('exact-stay 1: přesná shoda příjezdu a odjezdu → pevná cena, bez slevy a bez rozpisu nocí', async () => {
+  await setStayPrice('2030-12-29', '2031-01-02', 29900);
+  const response = await post(SILVESTR);
+  assert.equal(response.status, 200);
+  assert.deepEqual(await read(response), {
+    arrivalDate: '2030-12-29',
+    departureDate: '2031-01-02',
+    nights: 4,
+    pricingMode: 'exact-stay',
+    subtotalCzk: 29900,
+    discount: null,
+    totalCzk: 29900,
+    nightlyPrices: [],
+  });
+});
+
+test('exact-stay 2: o den jiný příjezd → pravidlo se ignoruje, běžný výpočet po nocích', async () => {
+  await setStayPrice('2030-12-29', '2031-01-02', 29900);
+  for (const arrival of ['2030-12-28', '2030-12-30']) {
+    const q = await quote(arrival, '2031-01-02');
+    assert.equal(q.pricingMode, 'nightly', arrival);
+    assert.equal(q.totalCzk, arrival === '2030-12-28' ? 15000 : 9000, arrival);
+  }
+});
+
+test('exact-stay 3: o den jiný odjezd → pravidlo se ignoruje, běžný výpočet po nocích', async () => {
+  await setStayPrice('2030-12-29', '2031-01-02', 29900);
+  const shorter = await quote('2030-12-29', '2031-01-01');
+  assert.equal(shorter.pricingMode, 'nightly');
+  assert.equal(shorter.totalCzk, 9000);
+  const longer = await quote('2030-12-29', '2031-01-03');
+  assert.equal(longer.pricingMode, 'nightly');
+  assert.equal(longer.totalCzk, 15000);
+});
+
+test('exact-stay 4: přednost před daily_prices (i výchozí cenou)', async () => {
+  await setPrices({ '2030-12-30': 9000, '2030-12-31': 12000 });
+  await setStayPrice('2030-12-29', '2031-01-02', 29900);
+  const q = await quote('2030-12-29', '2031-01-02');
+  assert.equal(q.pricingMode, 'exact-stay');
+  assert.equal(q.totalCzk, 29900);
+  assert.deepEqual(q.nightlyPrices, []);
+  // Bez pravidla by to bylo 3 000 + 9 000 + 12 000 + 3 000 = 27 000 Kč.
+  await t.db.prepare('DELETE FROM stay_prices').run();
+  assert.equal((await quote('2030-12-29', '2031-01-02')).totalCzk, 27000);
+});
+
+test('exact-stay 5: přednost před length_discounts – sleva se na pevnou cenu neuplatní', async () => {
+  await setDiscounts([[2, 10], [4, 20]]);
+  await setStayPrice('2030-12-29', '2031-01-02', 29900);
+  const q = await quote('2030-12-29', '2031-01-02');
+  assert.equal(q.discount, null);
+  assert.equal(q.subtotalCzk, 29900);
+  assert.equal(q.totalCzk, 29900);
+});
+
+test('exact-stay 6: bez pravidla (nebo s pravidlem pro jiný termín) se počítá beze změny po nocích', async () => {
+  await setPrices({ '2030-12-31': 6000 });
+  await setDiscounts([[4, 10]]);
+  await setStayPrice('2030-07-01', '2030-07-08', 50000);
+  // 3 000 + 3 000 + 6 000 + 3 000 = 15 000; 10 % = 1 500 → 13 500 Kč.
+  assert.deepEqual(await quote('2030-12-29', '2031-01-02'), {
+    arrivalDate: '2030-12-29',
+    departureDate: '2031-01-02',
+    nights: 4,
+    pricingMode: 'nightly',
+    subtotalCzk: 15000,
+    discount: { type: 'length', minNights: 4, percent: 10, amountCzk: 1500 },
+    totalCzk: 13500,
+    nightlyPrices: [
+      { date: '2030-12-29', priceCzk: 3000 },
+      { date: '2030-12-30', priceCzk: 3000 },
+      { date: '2030-12-31', priceCzk: 6000 },
+      { date: '2031-01-01', priceCzk: 3000 },
+    ],
+  });
+});
+
+test('exact-stay 7: změna pevné ceny mezi /api/quote a rezervací → 409 price-mismatch, nic se nezapíše', async () => {
+  await setStayPrice('2030-12-29', '2031-01-02', 29900);
+  const q = await read(await post(SILVESTR));
+  assert.equal(q.totalCzk, 29900);
+  await setStayPrice('2030-12-29', '2031-01-02', 32900);
+  const response = await booking().post({ arrival: '2030-12-29', departure: '2031-01-02', ...GUEST, expectedPriceCzk: q.totalCzk });
+  assert.equal(response.status, 409);
+  assert.deepEqual(await read(response), { error: 'price-mismatch', priceCzk: 32900 });
+  // Smazání pravidla mezi nabídkou a rezervací → zpět na cenu po nocích (12 000 Kč).
+  await t.db.prepare('DELETE FROM stay_prices').run();
+  const removed = await booking().post({ arrival: '2030-12-29', departure: '2031-01-02', ...GUEST, expectedPriceCzk: q.totalCzk });
+  assert.equal(removed.status, 409);
+  assert.deepEqual(await read(removed), { error: 'price-mismatch', priceCzk: 12000 });
+  assert.equal(await t.count('reservations'), 0);
+  assert.equal(await t.sequence(), 0, 'VS se nespotřebuje');
+});
+
+test('exact-stay 8: neplatná data ve stay_prices → CHECK je odmítne, a kdyby prošla, 503 pricing-unavailable', async () => {
+  for (const values of [
+    `('2030-12-29', '2031-01-02', 0)`,
+    `('2030-12-29', '2031-01-02', -29900)`,
+    `('2030-12-29', '2031-01-02', 29900.5)`,
+    `('2030-12-29', '2031-01-02', 'hodně')`,
+    `('2030-12-29', '2031-01-02', 30000001)`,
+    `('2031-01-02', '2030-12-29', 29900)`,
+    `('2030-12-29', '2030-12-29', 29900)`,
+    `('2030-02-30', '2030-03-02', 29900)`,
+    `('2030-12-29', '2031-13-01', 29900)`,
+    `('29.12.2030', '2031-01-02', 29900)`,
+  ]) {
+    await assert.rejects(t.db.prepare(`INSERT INTO stay_prices (arrival_date, departure_date, total_czk) VALUES ${values}`).run(), /CHECK constraint failed/, values);
+  }
+  await setStayPrice('2030-12-29', '2031-01-02', 29900);
+  await assert.rejects(t.db.prepare(`INSERT INTO stay_prices VALUES ('2030-12-29', '2031-01-02', 19900)`).run(), /UNIQUE constraint failed|PRIMARY KEY/);
+  assert.equal(await stayCount(), 1);
+
+  const stay = { arrival: '2030-12-29', departure: '2031-01-02' };
+  const corrupt = (stays: unknown[]) =>
+    ({ prepare: () => ({ bind: () => ({}) }), batch: async () => [{ results: stays }, { results: [] }, { results: [] }] }) as unknown as D1Database;
+  const row = { arrival_date: stay.arrival, departure_date: stay.departure };
+  for (const db of [
+    corrupt([{ ...row, total_czk: 0 }]),
+    corrupt([{ ...row, total_czk: '29900' }]),
+    corrupt([{ ...row, total_czk: 29900.5 }]),
+    corrupt([{ ...row, total_czk: 30_000_001 }]),
+    corrupt([{ ...row, total_czk: null }]),
+    corrupt([{ ...row, arrival_date: '2030-12-30', total_czk: 29900 }]),
+    corrupt([{ ...row, total_czk: 29900 }, { ...row, total_czk: 19900 }]),
+  ]) {
+    await assert.rejects(loadPricingData(db, stay), PricingDataError);
+    const logs: string[] = [];
+    const response = await post(SILVESTR, db, logs);
+    assert.equal(response.status, 503);
+    assert.deepEqual(await read(response), { error: 'pricing-unavailable' });
+    assert.deepEqual(logs, ['quote: pricing data invalid']);
+  }
+  // Platný řádek v téže falešné DB projde – test opravdu kontroluje validaci, ne falešnou DB.
+  assert.equal((await loadPricingData(corrupt([{ ...row, total_czk: 29900 }]), stay)).stayPriceCzk, 29900);
+});
+
+test('exact-stay 8b: rezervace nad poškozenou tabulkou stay_prices → 503 pricing-unavailable, nic se nezapíše', async () => {
+  await t.db.prepare('DROP TABLE stay_prices').run();
+  await t.db.prepare('CREATE TABLE stay_prices (arrival_date TEXT, departure_date TEXT, total_czk)').run();
+  await t.db.prepare(`INSERT INTO stay_prices VALUES ('2030-12-29', '2031-01-02', 'dohodou')`).run();
+  try {
+    const b = booking();
+    const response = await b.post({ arrival: '2030-12-29', departure: '2031-01-02', ...GUEST });
+    assert.equal(response.status, 503);
+    assert.deepEqual(await read(response), { error: 'pricing-unavailable' });
+    assert.ok(b.logs.includes('reservations: pricing data invalid'));
+    assert.equal(await t.count('reservations'), 0);
+  } finally {
+    await t.db.prepare('DROP TABLE stay_prices').run();
+    await t.db
+      .prepare(
+        `CREATE TABLE stay_prices (arrival_date TEXT NOT NULL CHECK (arrival_date GLOB '[0-9][0-9][0-9][0-9]-[0-1][0-9]-[0-3][0-9]' AND date(arrival_date) IS arrival_date), departure_date TEXT NOT NULL CHECK (departure_date GLOB '[0-9][0-9][0-9][0-9]-[0-1][0-9]-[0-3][0-9]' AND date(departure_date) IS departure_date), total_czk INTEGER NOT NULL CHECK (typeof(total_czk) = 'integer' AND total_czk > 0 AND total_czk <= 30000000), PRIMARY KEY (arrival_date, departure_date), CHECK (departure_date > arrival_date))`,
+      )
+      .run();
+  }
+});
+
+test('exact-stay 9: /api/quote s pevnou cenou nic nezapisuje (jen SELECT)', async () => {
+  await setStayPrice('2030-12-29', '2031-01-02', 29900);
+  const statements: string[] = [];
+  const recording = new Proxy(t.db, {
+    get(target, prop) {
+      if (prop === 'prepare') return (sql: string) => (statements.push(sql), target.prepare(sql));
+      const value = Reflect.get(target, prop);
+      return typeof value === 'function' ? value.bind(target) : value;
+    },
+  });
+  const state = () =>
+    t.db.prepare('SELECT (SELECT count(*) FROM stay_prices) AS sp, (SELECT total_czk FROM stay_prices) AS total, (SELECT count(*) FROM reservations) AS r, (SELECT count(*) FROM reserved_nights) AS n, (SELECT value FROM sequences) AS s').first();
+  const before = await state();
+  const response = await post(SILVESTR, recording);
+  assert.equal((await read(response)).pricingMode, 'exact-stay');
+  assert.ok(statements.length > 0 && statements.every((sql) => /^\s*SELECT\b/i.test(sql)), statements.join('\n'));
+  assert.deepEqual(await state(), before);
+});
+
+test('exact-stay 10: rezervace a /api/quote dávají pro pevnou cenu stejnou částku, uloží se do D1', async () => {
+  await setPrices({ '2030-12-31': 6000 });
+  await setDiscounts([[4, 10]]);
+  await setStayPrice('2030-12-29', '2031-01-02', 29900);
+  const q = await read(await post(SILVESTR));
+  assert.equal(q.totalCzk, 29900);
+  const response = await booking().post({ arrival: '2030-12-29', departure: '2031-01-02', ...GUEST, expectedPriceCzk: q.totalCzk });
+  assert.equal(response.status, 201);
+  assert.equal((await read(response)).reservation.priceCzk, 29900);
+  assert.equal((await t.db.prepare('SELECT price_czk FROM reservations').first<{ price_czk: number }>())!.price_czk, 29900);
+});
+
+test('exact-stay 11: pravidlo nemění dostupnost – nic neblokuje a obsazení části ho neodstraní', async () => {
+  await setStayPrice('2030-12-29', '2031-01-02', 29900);
+  const range = { from: '2030-12-01', to: '2031-02-01' };
+  assert.deepEqual(await listReservedNights(t.db, range), [], 'samotné pravidlo žádnou noc neobsadí');
+  // Kratší pobyt uvnitř intervalu pravidla jde rezervovat, za běžnou cenu po nocích.
+  const inner = await booking().post({ arrival: '2030-12-30', departure: '2031-01-01', ...GUEST, expectedPriceCzk: 6000 });
+  assert.equal(inner.status, 201);
+  assert.equal((await read(inner)).reservation.priceCzk, 6000);
+  // Pravidlo zůstává uložené a cenu dál vrací (nabídka dostupnost neověřuje)…
+  assert.equal(await stayCount(), 1);
+  assert.equal((await quote('2030-12-29', '2031-01-02')).totalCzk, 29900);
+  // …ale celý interval už přirozeně rezervovat nejde.
+  const whole = await booking().post({ arrival: '2030-12-29', departure: '2031-01-02', ...GUEST, expectedPriceCzk: 29900 });
+  assert.equal(whole.status, 409);
+  assert.deepEqual(await read(whole), { error: 'dates-unavailable' });
+  assert.equal(await t.count('reservations'), 1);
 });
