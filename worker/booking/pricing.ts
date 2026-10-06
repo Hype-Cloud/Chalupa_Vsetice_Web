@@ -1,5 +1,11 @@
 // Jediný výpočet ceny pobytu. Používá ho POST /api/quote i POST /api/reservations.
 //
+// Priorita pravidel:
+// A. stay_prices – pevná celková cena pro přesně tento příjezd + odjezd (pricingMode
+//    "exact-stay"). Je autoritativní: daily_prices, výchozí cena ani length_discounts se
+//    nepoužijí, sleva je null a rozpis po nocích prázdný (žádný vymyšlený rozpis).
+//    Jen cenové pravidlo – dostupnost ani jiné termíny neovlivňuje.
+// B. jinak výpočet po nocích (pricingMode "nightly"):
 // 1. noci pobytu [příjezd, odjezd)
 // 2. cena každé noci: daily_prices, jinak výchozí PRICE_PER_NIGHT
 // 3. subtotal = součet cen nocí
@@ -8,7 +14,7 @@
 // 6. totalCzk = subtotal − amountCzk
 // Vše v celých Kč (celočíselná aritmetika, žádná desetinná čísla).
 
-import { addDays, isIsoDate, type IsoDate } from '../../lib/availability/dates.ts';
+import { addDays, diffDays, isIsoDate, type IsoDate } from '../../lib/availability/dates.ts';
 import { PRICE_PER_NIGHT } from '../../lib/booking/rules.ts';
 
 export interface LengthDiscount {
@@ -21,17 +27,27 @@ export interface PricingData {
   /** Ceny jednotlivých nocí (jen dny s vlastní cenou). */
   dailyPrices: ReadonlyMap<IsoDate, number>;
   discounts: readonly LengthDiscount[];
+  /** Pevná celková cena přesně tohoto pobytu ze stay_prices, jinak null. */
+  stayPriceCzk: number | null;
 }
+
+/** Jak byla cena určena; frontend podle toho pozná pevnou cenu celého pobytu. */
+export type PricingMode = 'nightly' | 'exact-stay';
 
 export interface Quote {
   arrivalDate: IsoDate;
   departureDate: IsoDate;
   nights: number;
+  pricingMode: PricingMode;
   subtotalCzk: number;
   discount: { type: 'length'; minNights: number; percent: number; amountCzk: number } | null;
   totalCzk: number;
+  /** Ceny jednotlivých nocí; u pricingMode "exact-stay" prázdné. */
   nightlyPrices: { date: IsoDate; priceCzk: number }[];
 }
+
+/** Horní limit pevné ceny pobytu (stejný jako CHECK v migraci 0006). */
+const MAX_STAY_PRICE_CZK = 30_000_000;
 
 /** Ceníková data v D1 jsou neplatná – cenu nelze bezpečně spočítat. */
 export class PricingDataError extends Error {
@@ -45,6 +61,18 @@ const isPositiveInt = (value: unknown, max: number): value is number => typeof v
 
 /** Čistý výpočet (bez databáze). Předpokládá ověřený termín s alespoň jednou nocí. */
 export function computeQuote(stay: { arrival: IsoDate; departure: IsoDate }, data: PricingData): Quote {
+  if (data.stayPriceCzk !== null) {
+    return {
+      arrivalDate: stay.arrival,
+      departureDate: stay.departure,
+      nights: diffDays(stay.arrival, stay.departure),
+      pricingMode: 'exact-stay',
+      subtotalCzk: data.stayPriceCzk,
+      discount: null,
+      totalCzk: data.stayPriceCzk,
+      nightlyPrices: [],
+    };
+  }
   const nightlyPrices: Quote['nightlyPrices'] = [];
   for (let date = stay.arrival; date < stay.departure; date = addDays(date, 1)) {
     nightlyPrices.push({ date, priceCzk: data.dailyPrices.get(date) ?? data.defaultNightlyPriceCzk });
@@ -57,6 +85,7 @@ export function computeQuote(stay: { arrival: IsoDate; departure: IsoDate }, dat
     arrivalDate: stay.arrival,
     departureDate: stay.departure,
     nights,
+    pricingMode: 'nightly',
     subtotalCzk,
     discount,
     totalCzk: subtotalCzk - (discount?.amountCzk ?? 0),
@@ -65,12 +94,13 @@ export function computeQuote(stay: { arrival: IsoDate; departure: IsoDate }, dat
 }
 
 /**
- * Načte ceny nocí pobytu a slevy z D1 a ověří je (fail-closed: neplatný řádek = chyba,
+ * Načte pevnou cenu pobytu, ceny nocí pobytu a slevy z D1 (jeden batch) a ověří je (fail-closed: neplatný řádek = chyba,
  * nikdy tichý fallback na výchozí cenu).
  * @throws PricingDataError, nebo chyba D1
  */
 export async function loadPricingData(db: D1Database, stay: { arrival: IsoDate; departure: IsoDate }): Promise<PricingData> {
-  const [prices, discounts] = await db.batch<Record<string, unknown>>([
+  const [stayPrices, prices, discounts] = await db.batch<Record<string, unknown>>([
+    db.prepare('SELECT arrival_date, departure_date, total_czk FROM stay_prices WHERE arrival_date = ?1 AND departure_date = ?2').bind(stay.arrival, stay.departure),
     db.prepare('SELECT date, price_czk FROM daily_prices WHERE date >= ?1 AND date < ?2').bind(stay.arrival, stay.departure),
     db.prepare('SELECT min_nights, discount_percent FROM length_discounts'),
   ]);
@@ -86,7 +116,14 @@ export async function loadPricingData(db: D1Database, stay: { arrival: IsoDate; 
     if (rules.some((r) => r.minNights === row.min_nights)) throw new PricingDataError();
     rules.push({ minNights: row.min_nights, percent });
   }
-  return { defaultNightlyPriceCzk: PRICE_PER_NIGHT, dailyPrices, discounts: rules };
+  // Víc řádků pro stejný pár by znamenalo poškozené schéma (chybí PRIMARY KEY).
+  if (stayPrices.results.length > 1) throw new PricingDataError();
+  let stayPriceCzk: number | null = null;
+  for (const row of stayPrices.results) {
+    if (row.arrival_date !== stay.arrival || row.departure_date !== stay.departure || !isPositiveInt(row.total_czk, MAX_STAY_PRICE_CZK)) throw new PricingDataError();
+    stayPriceCzk = row.total_czk;
+  }
+  return { defaultNightlyPriceCzk: PRICE_PER_NIGHT, dailyPrices, discounts: rules, stayPriceCzk };
 }
 
 /** Autoritativní cena pobytu ze serverových dat. */

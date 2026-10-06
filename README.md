@@ -101,7 +101,7 @@ Backend pro budoucí přímé rezervace prostřednictvím webu Chalupa Všetice.
 - Atomické vytvoření rezervace prostřednictvím D1 batch transakce.
 - Databázová ochrana proti dvojité rezervaci pomocí unikátního záznamu každé obsazené noci.
 - Serverová validace termínů, kapacity a kontaktních údajů.
-- Serverový ceník v D1: výchozí cena za noc, vlastní ceny konkrétních nocí a množstevní slevy podle délky pobytu; cenová nabídka `POST /api/quote`.
+- Serverový ceník v D1: výchozí cena za noc, vlastní ceny konkrétních nocí, množstevní slevy podle délky pobytu a pevná cena přesně daného pobytu (exact-stay); cenová nabídka `POST /api/quote`.
 - Kontrola aktuální obsazenosti proti externímu iCal exportu před vytvořením rezervace.
 - Odmítnutí rezervace při nedostupném nebo neúplném exportu.
 - Podpora Idempotency-Key proti nechtěnému opakovanému vytvoření rezervace.
@@ -117,7 +117,7 @@ Produkční endpoint pro vytváření rezervací zůstává vypnutý. Testovací
 
 Projekt využívá Node.js Test Runner. Databázové testy probíhají nad lokální Cloudflare D1 prostřednictvím Miniflare/workerd. Testovací údaje jsou syntetické.
 
-**Výsledek posledního vývojového běhu: 185/185 úspěšných testů.**
+**Výsledek posledního vývojového běhu: 197/197 úspěšných testů.**
 
 | Testovací soubor | Počet | Zaměření |
 |---|---:|---|
@@ -131,8 +131,8 @@ Projekt využívá Node.js Test Runner. Databázové testy probíhají nad loká
 | conflicts.test.ts | 18 | Detekce kolizí během zpoždění synchronizace: překryvy a hranice, ozvěny, idempotence, souběh, úplný/neúplný snapshot, výpadek e-chalup, upozornění. |
 | conflict-cron.test.ts | 12 | Cron detekce a e-mailové upozornění: odeslání a notified_at, žádný druhý e-mail, retry po chybě providera, nesoulad prostředí, výpadek a neúplný export, souběh s /api/availability, bez osobních údajů. |
 | booking-public.test.ts | 16 | Veřejný POST: Turnstile (platný, neplatný, chybějící, nedostupný), rate limit, idempotentní retry a dvojklik, chybové kódy, bez úniku osobních údajů a secrets. |
-| pricing.test.ts | 19 | Ceník: výchozí a vlastní ceny nocí, prahy slev, zaokrouhlení, přelom měsíce a roku, `/api/quote` (kontrakt, validace, neplatný ceník, výpadek D1, žádné zápisy), shoda ceny nabídky a rezervace, `price-mismatch`. |
-| **Celkem** | **185** | |
+| pricing.test.ts | 31 | Ceník: výchozí a vlastní ceny nocí, prahy slev, zaokrouhlení, přelom měsíce a roku, pevná cena pobytu (přesná shoda, priorita, neplatná data, beze vlivu na dostupnost), `/api/quote` (kontrakt, validace, neplatný ceník, výpadek D1, žádné zápisy), shoda ceny nabídky a rezervace, `price-mismatch`. |
+| **Celkem** | **197** | |
 
 ### Testované scénáře
 
@@ -342,16 +342,34 @@ Logy obsahují jen druh události (`reservations: created`, `rejected (…)`), n
 
 ### Ceník a cenová nabídka
 
-Ceník žije v D1 (`migrations/0005_ceny.sql`) a spravuje se zatím jen přes Wrangler CLI –
+Ceník žije v D1 (`migrations/0005_ceny.sql`, `migrations/0006_ceny_pobytu.sql`) a spravuje se zatím jen přes Wrangler CLI –
 bez administrace a bez API pro zápis. Jediný výpočet ceny je `worker/booking/pricing.ts`;
 používá ho `POST /api/quote` i `POST /api/reservations`.
 
 ```sql
 daily_prices     (date TEXT PRIMARY KEY 'YYYY-MM-DD', price_czk INTEGER 1–1 000 000)
 length_discounts (id, min_nights INTEGER UNIQUE >= 1, discount_percent INTEGER 0–100)
+stay_prices      (arrival_date, departure_date) PRIMARY KEY, total_czk INTEGER 1–30 000 000
+                 – skutečná data YYYY-MM-DD, departure_date > arrival_date
 ```
 
-**Algoritmus** (vše v celých Kč):
+**Priorita pravidel:**
+
+1. **Pevná cena pobytu (`stay_prices`, `pricingMode: "exact-stay"`)** – existuje-li řádek
+   přesně pro tento příjezd a odjezd, jeho `total_czk` je výsledná cena. `daily_prices`, výchozí
+   cena ani `length_discounts` se nepoužijí: `subtotalCzk = totalCzk`, `discount: null`,
+   `nightlyPrices: []` (rozpis po nocích u pevné ceny neexistuje).
+2. **Jinak výpočet po nocích (`pricingMode: "nightly"`)** – algoritmus níže.
+
+**Exact-stay je jen cenové pravidlo, ne omezení rezervací.** Jiný termín (i o jeden den
+posunutý příjezd nebo odjezd) pravidlo ignoruje a dostane běžnou cenu po nocích. Pravidlo
+neblokuje žádné noci ani jiné rezervace; když někdo mezitím rezervuje část jeho období, pravidlo
+zůstane uložené, ale celý interval už přirozeně nebude dostupný. Povinné minimum nocí, povinný
+příjezd/odjezd nebo balíčky zatím neexistují – případná budoucí vrstva omezení bude samostatná
+(validace před výpočtem ceny) a na `stay_prices` může jen odkazovat; tabulka proto nenese názvy
+ani metadata balíčků.
+
+**Výpočet po nocích** (vše v celých Kč):
 
 1. Pro každou noc pobytu (od příjezdu včetně do odjezdu bez noci odjezdu) se vezme
    `daily_prices.price_czk`, jinak výchozí cena `PRICE_PER_NIGHT` (3 000 Kč, `lib/booking/rules.ts`).
@@ -362,8 +380,8 @@ length_discounts (id, min_nights INTEGER UNIQUE >= 1, discount_percent INTEGER 0
    dolů na celé Kč (host nikdy nedostane víc slevy, než odpovídá procentu).
    `totalCzk = subtotalCzk − amountCzk`. Příklad: 23 331 Kč × 5 % = 1 166,55 → sleva 1 166 Kč,
    celkem 22 165 Kč.
-5. Neplatná data v ceníku (nečíselná nebo nekladná cena, procento mimo 0–100, duplicitní práh)
-   = výpočet se odmítne (503 `pricing-unavailable`), nikdy tichý návrat k výchozí ceně.
+5. Neplatná data v načteném ceníku (nečíselná nebo nekladná cena, procento mimo 0–100, duplicitní
+   práh, neplatná pevná cena pobytu) = výpočet se odmítne (503 `pricing-unavailable`), nikdy tichý návrat k výchozí ceně.
    Databázová omezení taková data běžně nepustí; kontrola ve Workeru je pojistka.
 
 Ceník neřeší dostupnost – tu dál ověřuje `/api/availability` a při rezervaci čerstvý export e-chalup.
@@ -384,6 +402,7 @@ Odpověď 200 (`Cache-Control: no-store`):
   "arrivalDate": "2030-12-07",
   "departureDate": "2030-12-17",
   "nights": 10,
+  "pricingMode": "nightly",
   "subtotalCzk": 30000,
   "discount": { "type": "length", "minNights": 7, "percent": 5, "amountCzk": 1500 },
   "totalCzk": 28500,
@@ -391,7 +410,24 @@ Odpověď 200 (`Cache-Control: no-store`):
 }
 ```
 
-`discount` je `null`, když se žádná sleva neuplatní. Validace termínu a počtu hostů je stejná
+Pevná cena pobytu (`stay_prices`):
+
+```json
+{
+  "arrivalDate": "2026-12-29",
+  "departureDate": "2027-01-02",
+  "nights": 4,
+  "pricingMode": "exact-stay",
+  "subtotalCzk": 29900,
+  "discount": null,
+  "totalCzk": 29900,
+  "nightlyPrices": []
+}
+```
+
+`pricingMode` je `"nightly"` nebo `"exact-stay"`; frontend podle něj pozná pevnou cenu celého
+pobytu a u ní nezobrazuje rozpis po nocích (nespoléhá na `nightlyPrices.length === nights`).
+Závazná částka je vždy `totalCzk`. `discount` je `null`, když se žádná sleva neuplatní. Validace termínu a počtu hostů je stejná
 jako u rezervace (minulost, horizont 365 dní, 1–30 nocí, 1–7 hostů); chyba = 422 `invalid-request`
 s `fields` (`arrivalDate`, `departureDate`, `guests`). Další chyby: 400 `invalid-json`,
 405, 413, 415, 503 `pricing-unavailable` / `database-error` / `not-configured`, 500 `internal-error`.
@@ -429,6 +465,26 @@ npx wrangler d1 execute chalupa-vsetice-rezervace --remote \
 npx wrangler d1 execute chalupa-vsetice-rezervace --remote \
   --command "SELECT * FROM daily_prices ORDER BY date; SELECT * FROM length_discounts ORDER BY min_nights;"
 ```
+
+Pevná cena přesně daného pobytu (exact-stay). Pro testovací D1 stejné příkazy s
+`chalupa-vsetice-rezervace-test --remote --config wrangler.preview-migrations.jsonc`.
+
+```bash
+# Vytvoření nebo změna pevné ceny pobytu 29. 12. 2026 → 2. 1. 2027
+npx wrangler d1 execute chalupa-vsetice-rezervace --remote \
+  --command "INSERT INTO stay_prices (arrival_date, departure_date, total_czk) VALUES ('2026-12-29', '2027-01-02', 29900) ON CONFLICT(arrival_date, departure_date) DO UPDATE SET total_czk = excluded.total_czk;"
+
+# Odstranění (termín se vrátí k ceně po nocích)
+npx wrangler d1 execute chalupa-vsetice-rezervace --remote \
+  --command "DELETE FROM stay_prices WHERE arrival_date = '2026-12-29' AND departure_date = '2027-01-02';"
+
+# Výpis
+npx wrangler d1 execute chalupa-vsetice-rezervace --remote \
+  --command "SELECT * FROM stay_prices ORDER BY arrival_date, departure_date;"
+```
+
+`departure_date` je den odjezdu (poslední noc je noc před ním). Pevná cena se použije jen při
+přesné shodě obou dat; pobyt delší než 30 nocí nebo mimo horizont 365 dní neprojde validací termínu.
 
 Cenu konkrétního termínu ověří `POST /api/quote`. Výchozí cena za noc je v kódu
 (`PRICE_PER_NIGHT`) – její změna znamená nový deploy; frontend ji zatím zobrazuje jen orientačně.
@@ -638,7 +694,7 @@ worker/
   booking/
     handler.ts          POST /api/reservations
     validation.ts       serverová validace termínu, kapacity a kontaktů
-    pricing.ts          jediný výpočet ceny (ceník z D1, slevy, zaokrouhlení)
+    pricing.ts          jediný výpočet ceny (pevná cena pobytu, ceník nocí z D1, slevy, zaokrouhlení)
     quote.ts            POST /api/quote (cenová nabídka, jen čtení)
     external.ts         čerstvá kontrola proti exportu e-chalup, rozpoznání vlastní rezervace
     db.ts               D1: atomické založení rezervace, obsazené noci, data pro export
