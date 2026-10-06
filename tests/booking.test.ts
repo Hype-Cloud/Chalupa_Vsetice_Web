@@ -18,7 +18,7 @@ test('validace: platný požadavek, cena vždy ze serveru', () => {
   const result = validateBooking({ ...VALID, priceCzk: 1, firstName: '  Jan  ' }, TODAY);
   assert.ok(result.ok);
   assert.equal(result.value.nights, 3);
-  assert.equal(result.value.priceCzk, 9000);
+  assert.ok(!('priceCzk' in result.value), 'validace cenu nepočítá ani nepřebírá');
   assert.equal(result.value.firstName, 'Jan');
   assert.equal(result.value.expectedPriceCzk, null);
 });
