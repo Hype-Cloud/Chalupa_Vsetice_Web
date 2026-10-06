@@ -12,6 +12,8 @@ export interface BookingRequest {
   lastName: string;
   phone: string;
   email: string;
+  /** Volitelná poznámka hosta (normalizovaný prostý text), jinak null. */
+  note: string | null;
   /** Cena, kterou host viděl. Slouží jen ke kontrole; uložená cena je vždy spočítaná na serveru. */
   expectedPriceCzk: number | null;
 }
@@ -58,6 +60,31 @@ const PHONE = /^\+?[0-9][0-9 ]{7,18}[0-9]$/;
 // eslint-disable-next-line no-control-regex
 const CONTROL = /[\u0000-\u001f\u007f-\u009f\u2028\u2029]/;
 
+/** Maximální délka poznámky v Unicode znacích (code pointech) po normalizaci. */
+export const NOTE_MAX_LENGTH = 2000;
+
+// Poznámka smí obsahovat nové řádky (LF, CR, CRLF – sjednotí se na LF) a tabulátor; ostatní
+// řídicí znaky ne. Odmítá se i U+2028/2029 a bidi přepisy (U+202A–202E, U+2066–2069), kterými by šlo v exportu vizuálně přeházet text.
+// ZWJ (U+200D) zůstává povolený kvůli složeným emoji.
+// eslint-disable-next-line no-control-regex
+const NOTE_FORBIDDEN = /[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f-\u009f\u2028\u2029\u202a-\u202e\u2066-\u2069]/;
+
+/**
+ * Volitelná poznámka hosta. Chybějící, null, prázdná nebo jen bílé znaky → null.
+ * Normalizace: konce řádků na \n, NFC, ořez bílých znaků na začátku a konci; jinak se text
+ * nemění (žádná HTML sanitizace – escapuje se až při výstupu podle cílového formátu).
+ * @returns undefined = neplatná hodnota
+ */
+export function validateNote(value: unknown): string | null | undefined {
+  if (value === undefined || value === null) return null;
+  if (typeof value !== 'string' || !value.isWellFormed()) return undefined;
+  // Zakázané znaky se hledají před ořezem – trim() by jinak tiše odstranil např. VT nebo U+2028 na okraji.
+  if (NOTE_FORBIDDEN.test(value)) return undefined;
+  const normalized = value.replace(/\r\n?/g, '\n').normalize('NFC').trim();
+  if (normalized === '') return null;
+  return [...normalized].length > NOTE_MAX_LENGTH ? undefined : normalized;
+}
+
 function text(value: unknown, max: number): string | null {
   if (typeof value !== 'string' || CONTROL.test(value)) return null;
   const normalized = value.normalize('NFC').trim().replace(/ {2,}/g, ' ');
@@ -84,6 +111,9 @@ export function validateBooking(body: unknown, today: IsoDate): ValidationResult
   const email = emailText && EMAIL.test(emailText) ? emailText : null;
   if (!email) fields.push('email');
 
+  const note = validateNote(input.note);
+  if (note === undefined) fields.push('note');
+
   const expected = input.expectedPriceCzk;
   if (expected !== undefined && expected !== null && (typeof expected !== 'number' || !Number.isInteger(expected) || expected <= 0)) fields.push('expectedPriceCzk');
 
@@ -96,6 +126,7 @@ export function validateBooking(body: unknown, today: IsoDate): ValidationResult
       lastName: lastName!,
       phone: phone!,
       email: email!,
+      note: note!,
       expectedPriceCzk: typeof expected === 'number' ? expected : null,
     },
   };

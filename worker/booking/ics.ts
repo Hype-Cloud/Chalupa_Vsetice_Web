@@ -114,6 +114,9 @@ function eventLines(r: ExportReservation, options: CalendarOptions): string[] {
     `Cena: ${formatCzk(r.priceCzk)}`,
     `Variabilní symbol: ${r.variableSymbol}`,
     `Stav platby: ${PAYMENT_STATUS[r.status]}`,
+    // Poznámka hosta je volný text: escapeText níže z ní udělá jednu hodnotu DESCRIPTION
+    // (\ ; , a konce řádků), takže nemůže přidat vlastní vlastnost ani VEVENT.
+    ...(r.note ? ['', 'Poznámka hosta:', r.note] : []),
   ].join('\n');
   return [
     'BEGIN:VEVENT',

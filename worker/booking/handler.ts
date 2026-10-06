@@ -46,7 +46,8 @@ export interface BookingDeps extends Pick<AvailabilityDeps, 'fetch' | 'now' | 'l
   randomBytes?: (bytes: Uint8Array) => Uint8Array;
 }
 
-const MAX_BODY_BYTES = 8 * 1024;
+// 16 KB: poznámka (až 2000 znaků) může mít v UTF-8 až 8 000 bajtů.
+const MAX_BODY_BYTES = 16 * 1024;
 /** Perioda rate limitu ve wrangler.jsonc (s) – pro hlavičku Retry-After. */
 const RATE_LIMIT_PERIOD_S = 60;
 const IDEMPOTENCY_KEY = /^[A-Za-z0-9_-]{16,100}$/;
@@ -60,9 +61,13 @@ const hex = (bytes: Uint8Array) => Array.from(bytes, (b) => b.toString(16).padSt
 /** Bearer token z hlavičky Authorization. */
 const tokenMatches = (header: string | null, token: string) => secretEquals(header?.startsWith('Bearer ') ? header.slice(7) : '', token);
 
-/** Otisk obsahu požadavku pro opakované odeslání se stejným Idempotency-Key. */
+/**
+ * Otisk obsahu požadavku pro opakované odeslání se stejným Idempotency-Key (z normalizovaných
+ * hodnot). Normalizovaná poznámka se připojí jen tehdy, když je vyplněná – bez poznámky zůstává
+ * otisk stejný jako před jejím zavedením.
+ */
 const requestHash = async (b: ValidBooking) =>
-  hex(await sha256(JSON.stringify([b.arrival, b.departure, b.guests, b.firstName, b.lastName, b.phone, b.email])));
+  hex(await sha256(JSON.stringify([b.arrival, b.departure, b.guests, b.firstName, b.lastName, b.phone, b.email, ...(b.note === null ? [] : [b.note])])));
 
 const created = (reservation: ReservationSummary, status = 201, replayed = false) =>
   noStore(status, { reservation: { ...reservation, nights: diffDays(reservation.arrival, reservation.departure) }, ...(replayed ? { replayed: true } : {}) });
@@ -194,6 +199,7 @@ async function createReservation(request: Request, env: BookingEnv, deps: Bookin
           lastName: booking.lastName,
           phone: booking.phone,
           email: booking.email,
+          note: booking.note,
           priceCzk: quote.totalCzk,
           idempotencyKey,
           requestHash: hash,
