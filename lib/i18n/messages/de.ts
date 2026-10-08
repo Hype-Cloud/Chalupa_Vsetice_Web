@@ -1,0 +1,142 @@
+// Deutsch (de-DE). Gleiche Schlüssel wie cs.ts – geprüft durch tsc (satisfies Messages) und Tests.
+import type { Messages } from '../types.ts';
+
+export const de = {
+  'meta.title': 'Chalupa Všetice | Ihr Stück Land',
+  'meta.description': 'Ein Ferienhaus mit Garten, Pool und Kamin in Všetice. Ausstattung, Preise und Belegungskalender auf einen Blick.',
+
+  'brand.name': 'CHALUPA',
+  'brand.place': 'VŠETICE',
+
+  'nav.label': 'Hauptnavigation',
+  'nav.about': 'Das Haus',
+  'nav.amenities': 'Ausstattung',
+  'nav.pricing': 'Preise',
+  'nav.cta': 'Termin wählen',
+
+  'language.label': 'Sprache',
+
+  'hero.eyebrow': 'VŠETICE · MITTELBÖHMEN',
+  'hero.titleLine1': 'Die Stadt ausschalten.',
+  'hero.titleLine2': 'Die Ruhe einschalten.',
+  'hero.text': 'Das ganze Haus für Sie allein. Morgens im Garten, nachmittags am Pool und abends am knisternden Feuer.',
+  'hero.cta': 'Ihren Termin finden',
+  'hero.capacity': 'Bis zu {capacity} Gäste',
+  'hero.distance': 'Etwa 40 km von Prag',
+  'hero.imageAlt': 'Das Ferienhaus in Všetice mit Garten',
+  'hero.photoTag': 'Ihr Stück Land.',
+
+  'intro.eyebrow': 'NUR SIE UND IHR TEMPO',
+  'intro.titleLine1': 'Nah an Prag.',
+  'intro.titleLine2': 'Weit weg vom Alltag.',
+  'intro.text':
+    'Bringen Sie Familie, Freunde und auch den Hund mit. In Všetice erwartet Sie ein Haus mit Garten, Pool und Platz für gemeinsame Momente. Im Sommer draußen, an kühleren Abenden am Kamin.',
+
+  'amenities.pool.title': 'Pool und Garten',
+  'amenities.pool.text': 'Sommertage ohne Eile.',
+  'amenities.fireplace.title': 'Kamin und Kachelofen',
+  'amenities.fireplace.text': 'Wärme mit Atmosphäre.',
+  'amenities.outdoor.title': 'Sitzplatz im Freien',
+  'amenities.outdoor.text': 'Abende am Außenkamin.',
+  'amenities.entertainment.title': 'Unterhaltung und WLAN',
+  'amenities.entertainment.text': 'WLAN, Billard und TV.',
+
+  'stay.eyebrow': 'EIN ORT FÜR IHRE FREIZEIT',
+  'stay.title': 'Wann sehen wir uns?',
+  'stay.text': 'Wählen Sie ein paar Tage, die nur Ihnen gehören.',
+
+  'calendar.title': 'Belegungskalender',
+  'calendar.loading': 'Kalender wird geladen…',
+  'calendar.previousMonths': 'Vorherige Monate',
+  'calendar.nextMonths': 'Nächste Monate',
+  'calendar.hintArrival': 'Klicken Sie auf den Anreisetag.',
+  'calendar.hintDeparture': 'Wählen Sie jetzt den Abreisetag.',
+  'calendar.legend.label': 'Legende',
+  'calendar.legend.free': 'Frei',
+  'calendar.legend.busy': 'Belegt',
+  'calendar.legend.changeover': 'An- / Abreise anderer Gäste',
+  'calendar.legend.selected': 'Ihr Aufenthalt',
+  'calendar.legend.today': 'Heute',
+  'calendar.day.free': 'frei',
+  'calendar.day.busy': 'belegt',
+  'calendar.day.checkin': 'Anreisetag anderer Gäste, als Abreisetag wählbar',
+  'calendar.day.checkout': 'Abreisetag anderer Gäste, als Anreisetag wählbar',
+  'calendar.day.unknown': 'Belegung unbekannt',
+  'calendar.day.past': 'vergangenes Datum',
+  'calendar.day.today': 'heute',
+  'calendar.day.selectedArrival': 'gewählte Anreise',
+  'calendar.day.selectedDeparture': 'gewählte Abreise',
+  'calendar.day.inStay': 'Teil des gewählten Aufenthalts',
+
+  'availability.loading': 'Aktuelle Belegung wird geladen…',
+  'availability.unavailable': 'Die Belegung konnte gerade nicht geladen werden, daher können keine Termine gewählt werden.',
+  'availability.incomplete':
+    'Ein Teil der Belegung von e-chalupy.cz konnte nicht geladen werden, daher können derzeit keine Termine gewählt werden. Bekannte belegte Tage werden angezeigt.',
+  'availability.verifyOn': 'Freie Termine prüfen Sie auf',
+  'availability.staleAt': 'Die Belegung konnte nicht aktualisiert werden; angezeigt wird der Stand vom {time}. Den Termin bestätigt der Eigentümer.',
+  'availability.staleUnknown': 'Die Belegung konnte nicht aktualisiert werden; angezeigt wird der Stand der letzten Synchronisierung. Den Termin bestätigt der Eigentümer.',
+  'availability.source': 'Belegung von e-chalupy.cz',
+  'availability.sourceUpdated': 'Belegung von e-chalupy.cz · aktualisiert {time}',
+
+  'stayError.past': 'Termine in der Vergangenheit können nicht gewählt werden.',
+  'stayError.arrivalBusy': 'Dieser Tag ist belegt. Bitte wählen Sie einen anderen Anreisetag.',
+  'stayError.rangeBusy': 'Der gewählte Aufenthalt überschneidet sich mit belegten Tagen. Bitte wählen Sie eine frühere Abreise oder eine andere Anreise.',
+  'stayError.unknown': 'Die Belegung für diesen Zeitraum ist gerade nicht bekannt. Bitte prüfen Sie sie direkt auf e-chalupy.cz.',
+  'stayError.order': 'Die Abreise muss mindestens einen Tag nach der Anreise liegen.',
+  'stayError.noArrival': 'Wählen Sie zuerst das Anreisedatum.',
+
+  'booking.panel.eyebrow': 'IHR URLAUB',
+  'booking.panel.capacity': 'Für das ganze Haus · bis zu {capacity} Gäste',
+  'booking.panel.priceHint': 'Preis je nach Termin',
+  'booking.panel.arrival': 'Anreise',
+  'booking.panel.departure': 'Abreise',
+  'booking.panel.guests': 'Anzahl der Gäste',
+  'booking.panel.selectStay': 'Wählen Sie den Termin im Kalender oder geben Sie die Daten ein.',
+  'booking.panel.selectDeparture': 'Wählen Sie das Abreisedatum.',
+  'booking.panel.inquiry': 'Termin anfragen',
+  'booking.panel.disclaimer':
+    'Die Auswahl eines Termins ist keine Buchung. Senden Sie Ihre Anfrage über e-chalupy.cz und geben Sie dort den gewählten Termin und die Anzahl der Gäste an. Den endgültigen Preis und die Verfügbarkeit bestätigt der Eigentümer.',
+
+  'booking.summary.arrival': 'Anreise',
+  'booking.summary.departure': 'Abreise',
+  'booking.summary.guests': 'Gäste',
+  'booking.summary.nights': 'Aufenthaltsdauer',
+
+  'booking.quote.loading': 'Preis wird berechnet…',
+  'booking.quote.forStay': 'für {nights}',
+  'booking.quote.exactStay': 'Festpreis für diesen Termin',
+  'booking.quote.exactStayHint': 'Gilt genau für die gewählte An- und Abreise.',
+  'booking.quote.subtotal': 'Preis für die Nächte',
+  'booking.quote.discount': 'Rabatt {percent} % (Aufenthalt mind. {minNights})',
+  'booking.quote.retry': 'Erneut versuchen',
+
+  'booking.quote.error.arrivalDate': 'Für dieses Anreisedatum kann kein Preis berechnet werden. Die Anreise ist frühestens heute und spätestens in einem Jahr möglich.',
+  'booking.quote.error.departureDate': 'Ein Aufenthalt kann {min}–{max} Nächte dauern. Bitte passen Sie das Abreisedatum an.',
+  'booking.quote.error.guests': 'Die Anzahl der Gäste muss 1–{capacity} betragen.',
+  'booking.quote.error.invalid': 'Bitte prüfen Sie den gewählten Termin und die Anzahl der Gäste.',
+  'booking.quote.error.unavailable': 'Der Preis kann gerade nicht berechnet werden. Bitte versuchen Sie es gleich noch einmal.',
+  'booking.quote.error.network': 'Keine Verbindung zum Server. Bitte prüfen Sie Ihre Verbindung und versuchen Sie es erneut.',
+
+  'pricing.eyebrow': 'GUT ZU WISSEN',
+  'pricing.titleLine1': 'Kleine Details.',
+  'pricing.titleLine2': 'Entspannter Aufenthalt.',
+  'pricing.rent.label': 'Miete des ganzen Hauses',
+  'pricing.rent.value': 'Preis je nach gewähltem Termin',
+  'pricing.dog.label': 'Hunde willkommen',
+  'pricing.dog.value': '{price} / Nacht*',
+  'pricing.checkout.label': 'Abreise',
+  'pricing.checkout.value': 'Bis 11:00 Uhr',
+  'pricing.smoking.label': 'Rauchen',
+  'pricing.smoking.value': 'Nur draußen',
+  'pricing.note': '* Richtpreis. Den Preis Ihres Aufenthalts berechnet der Kalender oben für die gewählten Daten; die endgültigen Bedingungen bestätigt der Eigentümer.',
+
+  'footer.tagline': 'Das ganze Haus. Gemeinsame Erinnerungen.',
+  'footer.backToCalendar': 'Zurück zum Kalender ↑',
+
+  'agent.estimateStay.description':
+    'Wählt einen Aufenthalt im Kalender, prüft ihn gegen die veröffentlichte Belegung und ermittelt den Preis vom Server. Erstellt weder eine Buchung noch eine Anfrage.',
+  'agent.estimateStay.invalid': 'Ungültiger Termin',
+
+  'booking.nights': { one: '{count} Nacht', other: '{count} Nächte' },
+  'booking.guests': { one: '{count} Gast', other: '{count} Gäste' },
+} satisfies Messages;

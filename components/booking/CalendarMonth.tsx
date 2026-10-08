@@ -1,7 +1,8 @@
 import { addDays, daysInMonth, weekdayMondayFirst, type IsoDate } from '../../lib/availability/dates.ts';
 import type { Occupancy } from '../../lib/availability/occupancy.ts';
 import type { Stay } from '../../lib/availability/stay.ts';
-import { DAY_STATUS, formatFullDate, formatMonth, WEEKDAYS } from './format.ts';
+import { useI18n } from '../i18n.ts';
+import { DAY_STATUS_KEYS } from './stayErrors.ts';
 
 interface Props {
   monthStart: IsoDate;
@@ -18,6 +19,7 @@ interface Props {
 export function CalendarMonth({ monthStart, today, occupancy, stay, focusDate, onPick, onFocusDate }: Props) {
   const offset = weekdayMondayFirst(monthStart);
   const days = Array.from({ length: daysInMonth(monthStart) }, (_, i) => addDays(monthStart, i));
+  const { t, formatMonth, formatFullDate, weekdays } = useI18n();
   const title = formatMonth(monthStart);
   const titleId = `bk-month-${monthStart}`;
 
@@ -25,7 +27,7 @@ export function CalendarMonth({ monthStart, today, occupancy, stay, focusDate, o
     <div className="bk-month" role="group" aria-labelledby={titleId}>
       <h4 id={titleId} className="bk-month-title">{title}</h4>
       <div className="bk-weekdays" aria-hidden="true">
-        {WEEKDAYS.map((name) => <span key={name}>{name}</span>)}
+        {weekdays().map((name, i) => <span key={i}>{name}</span>)}
       </div>
       <div className="bk-days">
         {Array.from({ length: offset }, (_, i) => <span key={`pad-${i}`} className="bk-pad" aria-hidden="true" />)}
@@ -35,7 +37,8 @@ export function CalendarMonth({ monthStart, today, occupancy, stay, focusDate, o
           const isArrival = date === stay.arrival;
           const isDeparture = date === stay.departure;
           const inRange = !!stay.arrival && !!stay.departure && date > stay.arrival && date < stay.departure;
-          const selection = isArrival ? ', vybraný příjezd' : isDeparture ? ', vybraný odjezd' : inRange ? ', součást vybraného pobytu' : '';
+          const selection = isArrival ? t('calendar.day.selectedArrival') : isDeparture ? t('calendar.day.selectedDeparture') : inRange ? t('calendar.day.inStay') : null;
+          const label = [formatFullDate(date), date === today ? t('calendar.day.today') : null, t(DAY_STATUS_KEYS[kind]), selection].filter(Boolean).join(', ');
           const className = ['bk-day', `is-${kind}`, date === today && 'is-today', isArrival && 'is-arrival', isDeparture && 'is-departure', inRange && 'in-range'].filter(Boolean).join(' ');
           return (
             <button
@@ -44,7 +47,7 @@ export function CalendarMonth({ monthStart, today, occupancy, stay, focusDate, o
               className={className}
               data-date={date}
               tabIndex={date === focusDate ? 0 : -1}
-              aria-label={`${formatFullDate(date)}${date === today ? ', dnes' : ''}, ${DAY_STATUS[kind]}${selection}`}
+              aria-label={label}
               aria-pressed={isArrival || isDeparture || inRange}
               aria-disabled={kind === 'past' || kind === 'busy' || kind === 'unknown' || undefined}
               onClick={() => onPick(date)}
