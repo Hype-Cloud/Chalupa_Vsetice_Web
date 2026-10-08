@@ -51,7 +51,7 @@ export function urlWithLocale(href: string, locale: Locale): string {
 
 export interface LanguageOption {
   locale: Locale;
-  /** Zkratka na přepínači (CS, EN, DE, UK). */
+  /** Zkratka na přepínači (CS, EN, DE, UA). Interní locale uk zůstává beze změny. */
   label: string;
   /** Název jazyka v něm samém – pro čtečky obrazovky a tooltip. */
   name: string;
@@ -59,5 +59,5 @@ export interface LanguageOption {
 }
 
 export function languageOptions(current: Locale): LanguageOption[] {
-  return LOCALES.map((locale) => ({ locale, label: locale.toUpperCase(), name: LOCALE_NAMES[locale], active: locale === current }));
+  return LOCALES.map((locale) => ({ locale, label: locale === 'uk' ? 'UA' : locale.toUpperCase(), name: LOCALE_NAMES[locale], active: locale === current }));
 }
