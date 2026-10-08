@@ -7,6 +7,7 @@ import { AvailabilityCalendar } from './AvailabilityCalendar.tsx';
 import { BookingForm, BookingSuccess } from './BookingForm.tsx';
 import { BookingPanel } from './BookingPanel.tsx';
 import { fetchQuote, quoteKey, quoteRequestFor } from './quote.ts';
+import { TurnstileError, type TokenSource } from './invisibleTurnstile.ts';
 import { EMPTY_CONTACT, reservationPayload, submitBlock, type ContactDraft } from './reservation.ts';
 import { quoteView } from './quoteView.ts';
 import { STAY_ERROR_KEYS } from './stayErrors.ts';
@@ -43,12 +44,12 @@ export function BookingSection() {
   const [formOpen, setFormOpen] = useState(false);
   const [continueHint, setContinueHint] = useState(false);
   const [contact, setContact] = useState<ContactDraft>(EMPTY_CONTACT);
-  const [turnstileToken, setTurnstileToken] = useState<string | null>(null);
-  const [turnstileReset, setTurnstileReset] = useState(0);
+  // Invisible Turnstile: token se získá až po kliknutí na odeslání (jen když je formulář připojený).
+  const turnstile = useRef<TokenSource | null>(null);
   const reservation = useReservation({
     // Server hlásí jinou cenu → znovu načíst autoritativní nabídku (summary ukáže nový rozpis).
     onPriceChanged: quote.retry,
-    onTurnstileReset: () => setTurnstileReset((n) => n + 1),
+    getToken: () => (turnstile.current ? turnstile.current.getToken() : Promise.reject(new TurnstileError('turnstile-unavailable'))),
   });
   const stayKey = quoteKey(request);
   // Změna termínu nebo hostů zahodí hlášky předchozího odeslání (formulář i kontakty zůstávají).
@@ -63,15 +64,11 @@ export function BookingSection() {
     stayComplete: request !== null,
     quoteStatus: quoteReady ? 'ready' : quote.state.status === 'loading' ? 'loading' : quote.state.status === 'idle' ? 'idle' : 'error',
     contact,
-    turnstileToken,
     submission: reservation.state,
   });
   const submit = () => {
-    if (block || !request || !quoteReady || !turnstileToken) return;
-    void reservation.submit(
-      reservationPayload({ arrival: request.arrivalDate, departure: request.departureDate, guests, contact, expectedPriceCzk: quoteReady.totalCzk }),
-      turnstileToken,
-    );
+    if (block || !request || !quoteReady) return;
+    void reservation.submit(reservationPayload({ arrival: request.arrivalDate, departure: request.departureDate, guests, contact, expectedPriceCzk: quoteReady.totalCzk }));
   };
   const submission = reservation.state;
   const priceChanged =
@@ -142,8 +139,7 @@ export function BookingSection() {
         block={block}
         priceChanged={priceChanged}
         siteKey={config.turnstileSiteKey}
-        turnstileResetSignal={turnstileReset}
-        onToken={setTurnstileToken}
+        onTurnstile={(source) => (turnstile.current = source)}
         onSubmit={submit}
       />
     ) : null;

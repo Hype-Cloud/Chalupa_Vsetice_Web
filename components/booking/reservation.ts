@@ -2,12 +2,15 @@
 //
 // - Cenu počítá jen server: request nese expectedPriceCzk = totalCzk aktuální nabídky
 //   z /api/quote; při změně ceny server vrátí 409 price-mismatch a nic nezapíše.
-// - Idempotency-Key = jedna logická operace (stejný obsah requestu). Opakování stejné operace
-//   po síťové chybě nebo dočasné chybě serveru použije stejný klíč; změna obsahu, nové
-//   potvrzení po změně ceny nebo nové ověření Turnstile = nová operace s novým klíčem.
-// - Turnstile token se po odpovědi automaticky neresetuje: opakování stejné operace použije
-//   stejný token (server ho díky deterministickému idempotency_key pro Siteverify přijme znovu).
-//   Reset widgetu jen po turnstile-failed / turnstile-required (a po úspěchu se widget skryje).
+// - Logická operace = stejný obsah requestu (otisk bez tokenu) + jeden Idempotency-Key + jeden
+//   Turnstile token. Token se získá až po kliknutí (Invisible Turnstile, invisibleTurnstile.ts)
+//   a je svázaný s operací:
+//   - opakování stejné operace po síťové chybě nebo dočasné chybě serveru použije stejný klíč
+//     i stejný token (server ho díky deterministickému idempotency_key pro Siteverify přijme
+//     znovu, případně vrátí replay už vytvořené rezervace),
+//   - nová operace (změna obsahu, nové potvrzení po změně ceny, dates-unavailable, 422,
+//     turnstile-failed / turnstile-required …) = nový klíč a nové spuštění Turnstile; spotřebovaný
+//     token se pro jinou operaci nikdy nepoužije.
 // - Nikdy se nic neodesílá automaticky – každé odeslání je kliknutí uživatele.
 
 import type { IsoDate } from '../../lib/availability/dates.ts';
@@ -76,9 +79,6 @@ const RETRYABLE = new Set([
   'not-configured',
   'database-environment-mismatch',
 ]);
-/** Token odmítnutý (nebo chybějící) – reset widgetu a nová operace. */
-const NEEDS_NEW_TOKEN = new Set(['turnstile-failed', 'turnstile-required']);
-
 export const isRetryable = (code: string) => RETRYABLE.has(code);
 
 /** Kód chyby → uživatelská hláška (technické kódy ani detaily se nezobrazují). */
@@ -176,22 +176,33 @@ export const IDLE_SUBMISSION: SubmissionState = { status: 'idle' };
 interface Operation {
   key: string;
   fingerprint: string;
+  /** Turnstile token získaný pro tuto operaci (jednorázový, jen pro její opakování). */
+  token: string;
 }
 
 export interface ReservationControllerDeps {
   post: (payload: ReservationPayload, token: string, key: string) => Promise<SubmitResult>;
+  /** Nový token z Invisible Turnstile; selhání vyhodí chybu s kódem turnstile-failed / turnstile-unavailable. */
+  getToken: () => Promise<string>;
   /** Nový náhodný Idempotency-Key (crypto.randomUUID). */
   newKey: () => string;
   onChange: (state: SubmissionState) => void;
-  /** Token byl serverem odmítnut nebo chyběl – reset widgetu. */
-  onTurnstileReset: () => void;
   /** Server hlásí jinou cenu – znovu načíst autoritativní nabídku (/api/quote). */
   onPriceChanged: () => void;
 }
 
+/** Kód selhání klientské části Turnstile (bez tokenu se nic neodešle). */
+const turnstileFailureCode = (error: unknown) => {
+  const code = (error as { code?: unknown } | null)?.code;
+  return code === 'turnstile-unavailable' ? 'turnstile-unavailable' : 'turnstile-failed';
+};
+
 export interface ReservationController {
-  /** Vědomé odeslání (kliknutí). Stejný obsah po opakovatelné chybě = stejná operace i klíč. */
-  submit: (payload: ReservationPayload, token: string) => Promise<void>;
+  /**
+   * Vědomé odeslání (kliknutí). Stejný obsah po opakovatelné chybě = stejná operace (klíč i token);
+   * jinak nejdřív nový Turnstile token, teprve potom POST.
+   */
+  submit: (payload: ReservationPayload) => Promise<void>;
   /** Změna termínu / hostů: zahodí chybové hlášky (ne úspěch ani probíhající odeslání). */
   dismiss: () => void;
   state: () => SubmissionState;
@@ -211,13 +222,29 @@ export function createReservationController(deps: ReservationControllerDeps): Re
     dismiss: () => {
       if (state.status === 'error' || state.status === 'invalid' || state.status === 'price-changed') set(IDLE_SUBMISSION);
     },
-    submit: async (payload, token) => {
-      if (state.status === 'submitting' || state.status === 'success' || !token) return;
+    submit: async (payload) => {
+      if (state.status === 'submitting' || state.status === 'success') return;
       const fingerprint = payloadFingerprint(payload);
-      const operation: Operation = pending && pending.fingerprint === fingerprint ? pending : { key: deps.newKey(), fingerprint };
-      pending = operation;
       set({ status: 'submitting' });
-      const result = await deps.post(payload, token, operation.key);
+      let operation: Operation;
+      if (pending && pending.fingerprint === fingerprint) {
+        operation = pending;
+      } else {
+        // Nová logická operace: předchozí (jiný obsah) se už nebude opakovat.
+        pending = null;
+        let token: string;
+        try {
+          token = await deps.getToken();
+        } catch (error) {
+          // Bez tokenu žádný POST; další kliknutí spustí Turnstile znovu.
+          const code = turnstileFailureCode(error);
+          set({ status: 'error', code, retryable: isRetryable(code) });
+          return;
+        }
+        operation = { key: deps.newKey(), fingerprint, token };
+        pending = operation;
+      }
+      const result = await deps.post(payload, operation.token, operation.key);
       switch (result.kind) {
         case 'success':
           pending = null;
@@ -234,9 +261,10 @@ export function createReservationController(deps: ReservationControllerDeps): Re
           set({ status: 'invalid', fields: result.fields });
           return;
         case 'error': {
+          // Opakovatelná chyba: stejná operace (klíč i token). Jinak (např. turnstile-failed,
+          // dates-unavailable) operace končí a další kliknutí získá nový token i klíč.
           const retryable = isRetryable(result.code);
           if (!retryable) pending = null;
-          if (NEEDS_NEW_TOKEN.has(result.code)) deps.onTurnstileReset();
           set({ status: 'error', code: result.code, retryable });
         }
       }
@@ -245,13 +273,13 @@ export function createReservationController(deps: ReservationControllerDeps): Re
 }
 
 /** Proč je finální odeslání zablokované (null = lze odeslat). */
-export type SubmitBlock = 'stay' | 'quote-loading' | 'quote-unavailable' | 'contact' | 'turnstile' | 'submitting' | null;
+// Turnstile tlačítko neblokuje – token se získává až jako součást odeslání.
+export type SubmitBlock = 'stay' | 'quote-loading' | 'quote-unavailable' | 'contact' | 'submitting' | null;
 
 export function submitBlock(input: {
   stayComplete: boolean;
   quoteStatus: 'idle' | 'loading' | 'ready' | 'error';
   contact: ContactDraft;
-  turnstileToken: string | null;
   submission: SubmissionState;
 }): SubmitBlock {
   if (input.submission.status === 'submitting') return 'submitting';
@@ -259,7 +287,6 @@ export function submitBlock(input: {
   if (input.quoteStatus === 'loading') return 'quote-loading';
   if (input.quoteStatus !== 'ready') return 'quote-unavailable';
   if (!contactComplete(input.contact)) return 'contact';
-  if (!input.turnstileToken) return 'turnstile';
   return null;
 }
 
@@ -268,5 +295,4 @@ export const SUBMIT_BLOCK_KEYS: Record<Exclude<SubmitBlock, null | 'submitting'>
   'quote-loading': 'reservation.blocked.quoteLoading',
   'quote-unavailable': 'reservation.blocked.quoteUnavailable',
   contact: 'reservation.blocked.contact',
-  turnstile: 'reservation.blocked.turnstile',
 };

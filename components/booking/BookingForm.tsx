@@ -2,6 +2,7 @@ import { useEffect, useId, useRef } from 'react';
 import { ArrowUpRight } from 'lucide-react';
 import { useI18n } from '../i18n.ts';
 import { FIELD_ERROR_KEYS, reservationErrorKey, SUBMIT_BLOCK_KEYS, type ContactDraft, type ReservationConfirmation, type SubmissionState, type SubmitBlock } from './reservation.ts';
+import type { TokenSource } from './invisibleTurnstile.ts';
 import { Turnstile } from './Turnstile.tsx';
 
 interface Props {
@@ -13,8 +14,8 @@ interface Props {
   /** Hláška o změně ceny (už zformátovaná), nebo null. */
   priceChanged: string | null;
   siteKey: string;
-  turnstileResetSignal: number;
-  onToken: (token: string | null) => void;
+  /** Zdroj tokenů Invisible Turnstile (token se získává až při odeslání). */
+  onTurnstile: (source: TokenSource | null) => void;
   onSubmit: () => void;
 }
 
@@ -26,7 +27,7 @@ const FIELDS = [
 ] as const;
 
 /** Kontaktní část pod celým blokem kalendáře a panelu (bez kroků, bez modalu). */
-export function BookingForm({ contact, onContact, submission, block, priceChanged, siteKey, turnstileResetSignal, onToken, onSubmit }: Props) {
+export function BookingForm({ contact, onContact, submission, block, priceChanged, siteKey, onTurnstile, onSubmit }: Props) {
   const { t } = useI18n();
   const id = useId();
   const section = useRef<HTMLElement>(null);
@@ -95,7 +96,6 @@ export function BookingForm({ contact, onContact, submission, block, priceChange
             {fieldError('note') && <p id={`${id}-note-error`} className="field-error">{fieldError('note')}</p>}
           </div>
         </div>
-        <Turnstile siteKey={siteKey} resetSignal={turnstileResetSignal} onToken={onToken} />
         <p className={`form-status${status?.error ? ' is-error' : ''}`} role="status" aria-live="polite">
           {status?.text}
         </p>
@@ -104,6 +104,8 @@ export function BookingForm({ contact, onContact, submission, block, priceChange
           {!submitting && <ArrowUpRight size={18} />}
         </button>
       </form>
+      {/* Invisible Turnstile: mimo formulář i jeho grid, bez místa v layoutu. */}
+      <Turnstile siteKey={siteKey} onSource={onTurnstile} />
     </section>
   );
 }

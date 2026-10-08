@@ -166,7 +166,7 @@ header nav a, .nav-cta { white-space:nowrap; }
 @keyframes booking-form-in { from { opacity:0; transform:translateY(-6px); } to { opacity:1; transform:none; } }
 @media (prefers-reduced-motion: reduce) { .booking-form { animation:none; } }
 .booking-form-title { margin:0 0 18px; font-size:12px; font-weight:600; letter-spacing:.18em; text-transform:uppercase; color:#163d33; }
-/* Desktop: vlevo (pod kalendářem) kontaktní pole a poznámka, vpravo (pod panelem) Turnstile a odeslání. */
+/* Desktop: vlevo (pod kalendářem) kontaktní pole a poznámka, vpravo (pod panelem) stav a odeslání. */
 .booking-form form { display:grid; grid-template-columns:minmax(0,1.8fr) minmax(340px,1fr); grid-template-rows:auto 1fr auto; column-gap:24px; }
 .booking-form .form-grid { grid-column:1; grid-row:1 / span 3; display:grid; grid-template-columns:1fr 1fr; gap:16px; }
 .booking-form .form-field.is-note { grid-column:1 / -1; }
@@ -180,8 +180,6 @@ header nav a, .nav-cta { white-space:nowrap; }
 .booking-form .form-field input:focus-visible, .booking-form .form-field textarea:focus-visible { border-color:#163d33; outline:2px solid #b5913e; outline-offset:2px; }
 .booking-form .field-error { color:#9a3f1f; }
 .booking-form input[aria-invalid="true"], .booking-form textarea[aria-invalid="true"] { border-color:#c0603a; box-shadow:inset 0 0 0 1px #c0603a; }
-.booking-form .turnstile { grid-column:2; grid-row:1; margin-top:26px; min-height:65px; }
-.turnstile > div { max-width:100%; }
 .booking-form .form-status { grid-column:2; grid-row:2; align-self:end; min-height:20px; margin:12px 0; font-size:13px; line-height:1.55; color:#5c6a63; }
 .booking-form .form-status.is-error { color:#9a3f1f; }
 /* Finální CTA: stejný tvar a typografie jako hlavní tlačítko webu, na světlém pozadí v tmavé zelené. */
@@ -195,8 +193,7 @@ header nav a, .nav-cta { white-space:nowrap; }
 @media(max-width:1000px) {
   .booking-form-row { margin-top:32px; }
   .booking-form form { grid-template-columns:1fr; grid-template-rows:none; }
-  .booking-form .form-grid, .booking-form .turnstile, .booking-form .form-status, .booking-form button.button { grid-column:1; grid-row:auto; }
-  .booking-form .turnstile { margin-top:18px; }
+  .booking-form .form-grid, .booking-form .form-status, .booking-form button.button { grid-column:1; grid-row:auto; }
 }
 @media(max-width:640px) {
   .booking { padding:24px 20px; }

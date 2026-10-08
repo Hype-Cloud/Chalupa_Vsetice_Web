@@ -39,7 +39,7 @@ const PREVIEW: Partial<WorkerEnv> = {
   BOOKING_ENV: 'preview',
   BOOKING_API_ENABLED: 'true',
   TURNSTILE_SECRET_KEY: 'turnstile-secret',
-  TURNSTILE_SITE_KEY: '1x00000000000000000000AA',
+  TURNSTILE_SITE_KEY: '1x00000000000000000000BB',
   BOOKING_RATE_LIMITER: { limit: async () => ({ success: true }) },
 };
 

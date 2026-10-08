@@ -22,6 +22,7 @@ import { BOOKING_DISABLED, fetchBookingConfig } from '../components/booking/book
 import { bookingConfig, handleBookingConfig } from '../worker/booking/config.ts';
 import { handleCreateReservation, type BookingEnv } from '../worker/booking/handler.ts';
 import { SITEVERIFY_URL } from '../worker/booking/turnstile.ts';
+import { TurnstileError } from '../components/booking/invisibleTurnstile.ts';
 import { CATALOGS, createI18n, LOCALES } from '../lib/i18n/index.ts';
 import { parseJsonc } from '../scripts/lib/d1-migrations.ts';
 import { createTestDatabase } from './d1.ts';
@@ -64,8 +65,8 @@ test('kontakty jsou nezávislé na termínu a hostech: změna pobytu je nezměn�
   for (const field of ['firstName', 'lastName', 'email', 'phone', 'note'] as const) assert.equal(changed[field], first[field]);
 });
 
-test('odeslání: neplatný termín, načítaná nebo chybějící cena, kontakty a Turnstile ho zablokují; platná nabídka ho povolí', () => {
-  const ok = { stayComplete: true, quoteStatus: 'ready' as const, contact: CONTACT, turnstileToken: TOKEN, submission: { status: 'idle' } as SubmissionState };
+test('odeslání: neplatný termín, načítaná nebo chybějící cena a kontakty ho zablokují; Turnstile token předem nutný není', () => {
+  const ok = { stayComplete: true, quoteStatus: 'ready' as const, contact: CONTACT, submission: { status: 'idle' } as SubmissionState };
   assert.equal(submitBlock(ok), null);
   assert.equal(submitBlock({ ...ok, stayComplete: false }), 'stay');
   assert.equal(submitBlock({ ...ok, quoteStatus: 'loading' }), 'quote-loading');
@@ -73,133 +74,186 @@ test('odeslání: neplatný termín, načítaná nebo chybějící cena, kontakt
   assert.equal(submitBlock({ ...ok, quoteStatus: 'idle' }), 'quote-unavailable');
   assert.equal(submitBlock({ ...ok, contact: { ...CONTACT, phone: ' ' } }), 'contact');
   assert.equal(submitBlock({ ...ok, contact: EMPTY_CONTACT }), 'contact');
-  assert.equal(submitBlock({ ...ok, turnstileToken: null }), 'turnstile');
   assert.equal(submitBlock({ ...ok, submission: { status: 'submitting' } }), 'submitting');
   // Poznámka je volitelná.
   assert.ok(contactComplete({ ...CONTACT, note: '' }));
   for (const locale of LOCALES) {
     for (const key of Object.values(SUBMIT_BLOCK_KEYS)) assert.ok(CATALOGS[locale][key], `${locale} ${key}`);
   }
+  // Žádný blokující stav ani text „počkejte na ověření“ – Turnstile běží až po kliknutí.
+  assert.ok(!Object.keys(SUBMIT_BLOCK_KEYS).includes('turnstile'));
+  for (const locale of LOCALES) assert.ok(!Object.keys(CATALOGS[locale]).some((k) => k.startsWith('reservation.blocked.turnstile') || k.startsWith('reservation.turnstile.')), locale);
 });
 
-// --- stavový automat a Idempotency-Key ---
+// --- stavový automat, Invisible Turnstile a Idempotency-Key ---
 
-function controller(results: SubmitResult[]) {
+type TokenOutcome = 'ok' | 'failed' | 'unavailable';
+
+/**
+ * Kontrolér s falešným POST a falešným Invisible Turnstile. Každé getToken() vydá nový token
+ * (TOKEN-1, TOKEN-2, …) nebo selže podle fronty `tokens`; `events` zaznamenává pořadí volání.
+ */
+function controller(results: SubmitResult[], tokens: TokenOutcome[] = []) {
   const calls: { payload: ReservationPayload; token: string; key: string }[] = [];
   const states: SubmissionState[] = [];
+  const events: string[] = [];
   let keys = 0;
-  let resets = 0;
+  let issued = 0;
   let priceRefreshes = 0;
   const c = createReservationController({
+    getToken: async () => {
+      const outcome = tokens.shift() ?? 'ok';
+      events.push(`turnstile:${outcome}`);
+      if (outcome !== 'ok') throw new TurnstileError(outcome === 'failed' ? 'turnstile-failed' : 'turnstile-unavailable');
+      return `TOKEN-${++issued}`;
+    },
     post: async (p, token, key) => {
+      events.push(`post:${token}`);
       calls.push({ payload: p, token, key });
       return results.shift() ?? { kind: 'error', code: 'internal-error' };
     },
     newKey: () => `00000000-0000-4000-8000-${String(++keys).padStart(12, '0')}`,
     onChange: (s) => states.push(s),
-    onTurnstileReset: () => resets++,
     onPriceChanged: () => priceRefreshes++,
   });
-  return { c, calls, states, last: () => states[states.length - 1], resets: () => resets, priceRefreshes: () => priceRefreshes };
+  return { c, calls, states, events, last: () => states[states.length - 1], executions: () => events.filter((e) => e.startsWith('turnstile:')).length, priceRefreshes: () => priceRefreshes };
 }
 const SUCCESS: SubmitResult = { kind: 'success', reservation: { code: 'CV-ABC234', arrival: '2030-02-01', departure: '2030-02-04', guests: 2, priceCzk: 9000, nights: 3 }, replayed: false };
 
-test('úspěch: jeden request s UUID klíčem a tokenem; stav success', async () => {
+test('kliknutí nejdřív spustí Invisible Turnstile, POST až s získaným tokenem; stav success', async () => {
   const t = controller([SUCCESS]);
-  await t.c.submit(payload(), TOKEN);
-  assert.equal(t.calls.length, 1);
-  assert.equal(t.calls[0].token, TOKEN);
+  await t.c.submit(payload());
+  assert.deepEqual(t.events, ['turnstile:ok', 'post:TOKEN-1']);
   assert.match(t.calls[0].key, /^[0-9a-f-]{36}$/);
+  // Ověření i odeslání = jeden loading stav tlačítka.
   assert.deepEqual(t.states.map((s) => s.status), ['submitting', 'success']);
-  // Po úspěchu se nic dalšího neodešle.
-  await t.c.submit(payload(), TOKEN);
+  // Po úspěchu se nic dalšího neodešle ani neověřuje.
+  await t.c.submit(payload());
   assert.equal(t.calls.length, 1);
+  assert.equal(t.executions(), 1);
 });
 
-test('retry stejné operace po síťové chybě nebo dočasné chybě serveru: stejný klíč i token, žádný reset widgetu', async () => {
+test('selhání Turnstile (challenge i nenačtený skript) zabrání POSTu a zobrazí chybu; další kliknutí spustí Turnstile znovu', async () => {
+  const t = controller([SUCCESS], ['failed', 'unavailable']);
+  await t.c.submit(payload());
+  assert.equal(t.calls.length, 0, 'bez tokenu žádný POST');
+  assert.deepEqual(t.last(), { status: 'error', code: 'turnstile-failed', retryable: false });
+  await t.c.submit(payload());
+  assert.equal(t.calls.length, 0);
+  assert.deepEqual(t.last(), { status: 'error', code: 'turnstile-unavailable', retryable: true });
+  await t.c.submit(payload());
+  assert.deepEqual(t.events, ['turnstile:failed', 'turnstile:unavailable', 'turnstile:ok', 'post:TOKEN-1']);
+  assert.equal(t.last().status, 'success');
+  // Neočekávaná chyba klientské části = turnstile-failed.
+  const odd = createReservationController({
+    getToken: async () => {
+      throw new Error('něco jiného');
+    },
+    post: async () => SUCCESS,
+    newKey: () => crypto.randomUUID(),
+    onChange: () => undefined,
+    onPriceChanged: () => undefined,
+  });
+  await odd.submit(payload());
+  assert.deepEqual(odd.state(), { status: 'error', code: 'turnstile-failed', retryable: false });
+});
+
+test('retry stejné operace po síťové nebo dočasné chybě serveru: stejný klíč i token, Turnstile se znovu nespouští', async () => {
   const t = controller([
     { kind: 'error', code: 'network' },
     { kind: 'error', code: 'availability-check-failed' },
     { kind: 'error', code: 'turnstile-unavailable' },
     SUCCESS,
   ]);
-  for (let i = 0; i < 4; i++) await t.c.submit(payload(), TOKEN);
+  for (let i = 0; i < 4; i++) await t.c.submit(payload());
+  assert.equal(t.executions(), 1, 'jedna Turnstile challenge pro celou operaci');
   assert.equal(new Set(t.calls.map((c) => c.key)).size, 1, 'jeden klíč pro celou operaci');
-  assert.deepEqual(t.calls.map((c) => c.token), [TOKEN, TOKEN, TOKEN, TOKEN]);
-  assert.equal(t.resets(), 0);
+  assert.deepEqual(t.calls.map((c) => c.token), ['TOKEN-1', 'TOKEN-1', 'TOKEN-1', 'TOKEN-1']);
   assert.equal(t.last().status, 'success');
   assert.deepEqual(t.states.filter((s) => s.status === 'error').map((s) => (s as { retryable: boolean }).retryable), [true, true, true]);
 });
 
-test('retry po expiraci tokenu: stejný klíč, nový platný token z widgetu', async () => {
-  const t = controller([{ kind: 'error', code: 'network' }, SUCCESS]);
-  await t.c.submit(payload(), TOKEN);
-  await t.c.submit(payload(), 'NOVY.TOKEN.PO.EXPIRACI');
-  assert.equal(t.calls[0].key, t.calls[1].key);
-  assert.equal(t.calls[1].token, 'NOVY.TOKEN.PO.EXPIRACI');
-});
-
-test('nová logická operace (jiný termín, hosté, kontakt) = nový klíč', async () => {
-  const t = controller([{ kind: 'error', code: 'network' }, { kind: 'error', code: 'network' }, { kind: 'error', code: 'network' }, { kind: 'error', code: 'network' }]);
-  await t.c.submit(payload(), TOKEN);
-  await t.c.submit(payload({ arrival: '2030-02-02' }), TOKEN);
-  await t.c.submit(payload({ arrival: '2030-02-02', guests: 4 }), TOKEN);
-  await t.c.submit(payload({ arrival: '2030-02-02', guests: 4, contact: { ...CONTACT, phone: '+420 111 111 111' } }), TOKEN);
+test('změna termínu, hostů nebo kontaktu po předchozím odeslání = nová operace: nový Turnstile token i nový klíč', async () => {
+  const t = controller([{ kind: 'error', code: 'network' }, { kind: 'error', code: 'network' }, { kind: 'error', code: 'network' }, { kind: 'error', code: 'network' }, SUCCESS]);
+  await t.c.submit(payload());
+  await t.c.submit(payload({ arrival: '2030-02-02' }));
+  await t.c.submit(payload({ arrival: '2030-02-02', guests: 4 }));
+  await t.c.submit(payload({ arrival: '2030-02-02', guests: 4, contact: { ...CONTACT, phone: '+420 111 111 111' } }));
+  assert.equal(t.executions(), 4);
   assert.equal(new Set(t.calls.map((c) => c.key)).size, 4);
+  assert.deepEqual(t.calls.map((c) => c.token), ['TOKEN-1', 'TOKEN-2', 'TOKEN-3', 'TOKEN-4']);
+  // Návrat k předchozímu obsahu není retry staré operace (ta skončila změnou) – opět nový token.
+  await t.c.submit(payload());
+  assert.equal(t.calls[4].token, 'TOKEN-5');
+  assert.notEqual(t.calls[4].key, t.calls[0].key);
 });
 
-test('turnstile-failed / turnstile-required: reset widgetu a nová operace s novým klíčem', async () => {
+test('turnstile-failed / turnstile-required ze serveru: operace končí, další kliknutí = nový token i klíč', async () => {
   for (const code of ['turnstile-failed', 'turnstile-required']) {
     const t = controller([{ kind: 'error', code }, SUCCESS]);
-    await t.c.submit(payload(), TOKEN);
-    assert.equal(t.resets(), 1, code);
+    await t.c.submit(payload());
     assert.deepEqual(t.last(), { status: 'error', code, retryable: false });
-    await t.c.submit(payload(), 'NOVY.TOKEN');
+    await t.c.submit(payload());
+    assert.deepEqual(t.calls.map((c) => c.token), ['TOKEN-1', 'TOKEN-2'], code);
     assert.notEqual(t.calls[0].key, t.calls[1].key, code);
   }
 });
 
-test('price-mismatch: žádné automatické odeslání, nová cena, kontakty zachované, nové potvrzení s novým klíčem', async () => {
+test('price-mismatch: žádné automatické odeslání; vědomé potvrzení = nová operace s novým tokenem (spotřebovaný se nepoužije)', async () => {
   const contact = { ...CONTACT, note: 'Prosíme postýlku' };
   const t = controller([{ kind: 'price-mismatch', priceCzk: 13500 }, SUCCESS]);
-  await t.c.submit(payload({ contact, expectedPriceCzk: 12000 }), TOKEN);
+  await t.c.submit(payload({ contact, expectedPriceCzk: 12000 }));
   assert.equal(t.calls.length, 1, 'po změně ceny se nic automaticky neodeslalo');
+  assert.equal(t.executions(), 1, 'ani se automaticky nespustil Turnstile');
   assert.deepEqual(t.last(), { status: 'price-changed', fromCzk: 12000, toCzk: 13500 });
   assert.equal(t.priceRefreshes(), 1, 'znovu načtená autoritativní nabídka');
-  assert.equal(t.resets(), 0, 'Turnstile se kvůli změně ceny neresetuje');
   // Uživatel vědomě potvrdí novou cenu.
-  await t.c.submit(payload({ contact, expectedPriceCzk: 13500 }), TOKEN);
+  await t.c.submit(payload({ contact, expectedPriceCzk: 13500 }));
   assert.equal(t.calls.length, 2);
+  assert.equal(t.calls[1].token, 'TOKEN-2', 'nový token, ne spotřebovaný TOKEN-1');
   assert.notEqual(t.calls[1].key, t.calls[0].key, 'nové potvrzení = nový Idempotency-Key');
   assert.equal(t.calls[1].payload.expectedPriceCzk, 13500);
   for (const field of ['firstName', 'lastName', 'email', 'phone', 'note'] as const) assert.equal(t.calls[1].payload[field], t.calls[0].payload[field]);
   assert.equal(t.last().status, 'success');
 });
 
-test('dates-unavailable, 422 a idempotency-key-reused končí operaci (další odeslání = nový klíč)', async () => {
+test('price-mismatch a potvrzení původní ceny (stejný obsah): přesto nová operace s novým tokenem', async () => {
+  const t = controller([{ kind: 'price-mismatch', priceCzk: 9000 }, SUCCESS]);
+  await t.c.submit(payload());
+  await t.c.submit(payload());
+  assert.deepEqual(t.calls.map((c) => c.token), ['TOKEN-1', 'TOKEN-2']);
+  assert.notEqual(t.calls[0].key, t.calls[1].key);
+});
+
+test('dates-unavailable, 422 a idempotency-key-reused končí operaci (další odeslání = nový token i klíč)', async () => {
   for (const result of [{ kind: 'error', code: 'dates-unavailable' }, { kind: 'invalid', fields: ['email'] }, { kind: 'error', code: 'idempotency-key-reused' }] as SubmitResult[]) {
     const t = controller([result, SUCCESS]);
-    await t.c.submit(payload(), TOKEN);
-    await t.c.submit(payload(), TOKEN);
+    await t.c.submit(payload());
+    await t.c.submit(payload());
     assert.notEqual(t.calls[0].key, t.calls[1].key, JSON.stringify(result));
+    assert.deepEqual(t.calls.map((c) => c.token), ['TOKEN-1', 'TOKEN-2'], JSON.stringify(result));
   }
 });
 
-test('dvojklik během odesílání ani chybějící token nic neodešle; dismiss zahodí chybovou hlášku', async () => {
+test('dvojklik během ověření i odesílání nic dalšího nespustí; dismiss zahodí chybovou hlášku', async () => {
   let release!: (r: SubmitResult) => void;
+  let issue!: (token: string) => void;
   const calls: string[] = [];
-  const states: SubmissionState[] = [];
+  let executions = 0;
   const c = createReservationController({
+    getToken: () => (executions++, new Promise((resolve) => (issue = resolve))),
     post: (_p, _t, key) => (calls.push(key), new Promise((resolve) => (release = resolve))),
     newKey: () => crypto.randomUUID(),
-    onChange: (s) => states.push(s),
-    onTurnstileReset: () => undefined,
+    onChange: () => undefined,
     onPriceChanged: () => undefined,
   });
-  await c.submit(payload(), '');
-  assert.equal(calls.length, 0, 'bez tokenu se neodesílá');
-  const first = c.submit(payload(), TOKEN);
-  await c.submit(payload(), TOKEN);
+  const first = c.submit(payload());
+  assert.equal(c.state().status, 'submitting', 'loading stav už během ověření');
+  await c.submit(payload());
+  assert.equal(executions, 1, 'druhé kliknutí během ověření se ignoruje');
+  issue(TOKEN);
+  await new Promise((resolve) => setImmediate(resolve));
+  await c.submit(payload());
   assert.equal(calls.length, 1, 'druhé kliknutí během odesílání se ignoruje');
   release({ kind: 'error', code: 'rate-limited' });
   await first;
@@ -291,22 +345,26 @@ test('POST: změna ceny na serveru → price-mismatch s novou cenou; po vědomé
   await t.db.prepare(`INSERT INTO daily_prices (date, price_czk) VALUES ('2030-02-02', 4500)`).run();
   const states: SubmissionState[] = [];
   let refreshed = 0;
+  let issued = 0;
   const c = createReservationController({
+    getToken: async () => `XXXX.DUMMY.TOKEN.${++issued}`,
     post: (p, token, key) => postReservation(p, token, key, b.fetchFn),
     newKey: () => crypto.randomUUID(),
     onChange: (s) => states.push(s),
-    onTurnstileReset: () => undefined,
     onPriceChanged: () => refreshed++,
   });
   const contact = { ...CONTACT, note: 'Poznámka zůstává' };
-  await c.submit(payload({ contact, expectedPriceCzk: 9000 }), TOKEN);
+  await c.submit(payload({ contact, expectedPriceCzk: 9000 }));
   assert.deepEqual(c.state(), { status: 'price-changed', fromCzk: 9000, toCzk: 10500 });
   assert.equal(refreshed, 1);
   assert.equal(b.requests.length, 1, 'žádné automatické druhé odeslání');
   assert.equal(await t.count('reservations'), 0);
-  await c.submit(payload({ contact, expectedPriceCzk: 10500 }), TOKEN);
+  await c.submit(payload({ contact, expectedPriceCzk: 10500 }));
   assert.equal(c.state().status, 'success');
   assert.notEqual(b.requests[0].headers.get('idempotency-key'), b.requests[1].headers.get('idempotency-key'));
+  // Potvrzení nové ceny nese nový Turnstile token (spotřebovaný se znovu nepoužije).
+  const tokens = await Promise.all(b.requests.map(async (r) => ((await r.clone().json()) as { turnstileToken: string }).turnstileToken));
+  assert.deepEqual(tokens, ['XXXX.DUMMY.TOKEN.1', 'XXXX.DUMMY.TOKEN.2']);
   assert.deepEqual(await t.db.prepare('SELECT note, price_czk FROM reservations').first(), { note: 'Poznámka zůstává', price_czk: 10500 });
 });
 
@@ -328,12 +386,12 @@ test('POST: 422 s poli, neplatný Turnstile a vypnutý endpoint → mapované st
 
 test('booking-config: jen bookingEnabled a veřejný site key; produkce vypnutá', async () => {
   assert.deepEqual(bookingConfig({}), { bookingEnabled: false, turnstileSiteKey: null });
-  assert.deepEqual(bookingConfig({ TURNSTILE_SITE_KEY: '1x00000000000000000000AA' }), { bookingEnabled: false, turnstileSiteKey: null }, 'bez zapnuté rezervace žádný klíč');
+  assert.deepEqual(bookingConfig({ TURNSTILE_SITE_KEY: '1x00000000000000000000BB' }), { bookingEnabled: false, turnstileSiteKey: null }, 'bez zapnuté rezervace žádný klíč');
   assert.deepEqual(bookingConfig({ BOOKING_API_ENABLED: 'TRUE', TURNSTILE_SITE_KEY: 'x' }), { bookingEnabled: false, turnstileSiteKey: null });
-  assert.deepEqual(bookingConfig({ BOOKING_API_ENABLED: 'true', TURNSTILE_SITE_KEY: '1x00000000000000000000AA' }), { bookingEnabled: true, turnstileSiteKey: '1x00000000000000000000AA' });
+  assert.deepEqual(bookingConfig({ BOOKING_API_ENABLED: 'true', TURNSTILE_SITE_KEY: '1x00000000000000000000BB' }), { bookingEnabled: true, turnstileSiteKey: '1x00000000000000000000BB' });
   assert.deepEqual(bookingConfig({ BOOKING_API_ENABLED: 'true' }), { bookingEnabled: true, turnstileSiteKey: null });
 
-  const response = handleBookingConfig(new Request('https://x.invalid/api/booking-config'), { BOOKING_API_ENABLED: 'true', TURNSTILE_SITE_KEY: '1x00000000000000000000AA', ...({ TURNSTILE_SECRET_KEY: 'TAJNE' } as object) });
+  const response = handleBookingConfig(new Request('https://x.invalid/api/booking-config'), { BOOKING_API_ENABLED: 'true', TURNSTILE_SITE_KEY: '1x00000000000000000000BB', ...({ TURNSTILE_SECRET_KEY: 'TAJNE' } as object) });
   assert.equal(response.status, 200);
   assert.equal(response.headers.get('cache-control'), 'no-store');
   const body = (await response.json()) as Record<string, unknown>;
@@ -354,9 +412,10 @@ test('booking-config ve frontendu: chyba nebo neúplná odpověď = formulář v
   }) as unknown as typeof fetch), BOOKING_DISABLED);
 });
 
-test('wrangler.jsonc: veřejný testovací site key jen v Preview, produkce bez rezervace i bez site key', () => {
+test('wrangler.jsonc: veřejný testovací Invisible site key jen v Preview, produkce bez rezervace i bez site key', () => {
   const config = parseJsonc(readFileSync(new URL('../wrangler.jsonc', import.meta.url), 'utf8')) as { vars: Record<string, string>; previews: { vars: Record<string, string> } };
-  assert.equal(config.previews.vars.TURNSTILE_SITE_KEY, '1x00000000000000000000AA');
+  // Testovací Invisible site key Cloudflare (vždy projde, bez viditelného widgetu).
+  assert.equal(config.previews.vars.TURNSTILE_SITE_KEY, '1x00000000000000000000BB');
   assert.equal(config.previews.vars.BOOKING_API_ENABLED, 'true');
   assert.ok(!('TURNSTILE_SITE_KEY' in config.vars));
   assert.ok(!('BOOKING_API_ENABLED' in config.vars), 'produkční POST zůstává vypnutý');

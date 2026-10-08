@@ -35,8 +35,8 @@ Cloudflare Workers.
   `DD.MM.RRRR` (nezávislé na formátu nativního `<input type="date">`, který může být americký)
   s volitelným nativním výběrem data; interně a v API jen ISO `YYYY-MM-DD`.
 - **Rezervační formulář** (jen kde ho povolí `GET /api/booking-config`, zatím jen Worker
-  Previews): „Pokračovat k rezervaci“ rozšíří stejný panel o kontaktní údaje, Turnstile
-  a „Odeslat rezervaci“ (`POST /api/reservations`), viz
+  Previews): „Pokračovat k rezervaci“ otevře pod kalendářem a panelem kontaktní údaje
+  a „Odeslat rezervaci“ (`POST /api/reservations`, ochrana Invisible Turnstile), viz
   [Rezervační formulář](#rezervační-formulář-frontend).
 - **Poptávka** (produkce, dokud je rezervace vypnutá) vede na oficiální profil chalupy na
   e-chalupy.cz. Výběr termínu na webu není rezervací. Termín a počet hostů host uvede
@@ -203,8 +203,9 @@ Projekt využívá Node.js Test Runner. Databázové testy probíhají nad loká
 | frontend-quote.test.ts | 14 | Frontend rezervační sekce: cena jen z `/api/quote` (kontrakt proti skutečnému handleru), nightly se slevou, exact-stay, 422 a chyby serveru/sítě jako české hlášky, načítání bez staré ceny, souběh (starší odpověď nepřepíše novější), nový požadavek při změně termínu a hostů, žádný klientský výpočet ceny. |
 | i18n.test.ts | 17 | Jazykové verze: úplnost katalogů cs/en/de/ua (klíče, parametry, plurály, žádný český text ani HTML), fallback, volba jazyka (?lang, localStorage, čeština) a persistence, množná čísla, data a CZK v každém jazyce, kalendář, rezervační panel po přepnutí, přepínač, žádné pevné texty v komponentách ani univerzální cena 3 000 Kč. |
 | date-input.test.ts | 8 | Vstup data DD.MM.RRRR ↔ ISO: přestupný rok, neexistující den a měsíc, rozepsané datum bez chyby, odmítnutí amerického a ISO tvaru, všechna zobrazená data den → měsíc → rok (angličtina bez měsíc/den). |
-| reservation-form.test.ts | 18 | Rezervační formulář: request podle kontraktu, blokace odeslání (termín, cena, kontakty, Turnstile), Idempotency-Key (retry stejné operace = stejný klíč, nová operace = nový), Turnstile reset jen po turnstile-failed/required, price-mismatch bez automatického odeslání, chybové kódy → hlášky ve všech jazycích, POST proti skutečnému handleru, `GET /api/booking-config`, Preview site key jen ve `previews`. |
-| **Celkem** | **300** | |
+| reservation-form.test.ts | 19 | Rezervační formulář: request podle kontraktu, blokace odeslání (termín, cena, kontakty; Turnstile tlačítko neblokuje), kliknutí → Invisible Turnstile → POST, selhání Turnstile bez POST, Idempotency-Key a token svázané s operací (retry = stejný klíč i token bez nové challenge, nová operace = nový token i klíč, i po price-mismatch), chybové kódy → hlášky ve všech jazycích, POST proti skutečnému handleru, `GET /api/booking-config`, Preview Invisible site key jen ve `previews`. |
+| invisible-turnstile.test.ts | 7 | Invisible Turnstile na klientu: `execution: execute` bez automatického spuštění a obnovování, čerstvý widget pro každý token, ignorování pozdních callbacků, chyba / timeout / prázdný token → `turnstile-failed`, nenačtený skript → `turnstile-unavailable`, odpojení formuláře. |
+| **Celkem** | **308** | |
 
 ### Testované scénáře
 
@@ -424,7 +425,7 @@ Volitelné pole `note?: string | null` v těle `POST /api/reservations`. Prostý
 | 422 | `invalid-request` (+ `fields`: názvy chybných polí, bez hodnot) | neplatné údaje ve formuláři |
 | 422 | `idempotency-key-reused` | stejný klíč s jiným obsahem – vygenerovat nový klíč |
 | 400 | `turnstile-required` | chybí ověření Turnstile |
-| 403 | `turnstile-failed` | ověření Turnstile neprošlo – obnovit widget a odeslat znovu |
+| 403 | `turnstile-failed` | ověření Turnstile neprošlo – nový token (nová challenge) a odeslat znovu |
 | 429 | `rate-limited` | příliš mnoho pokusů, `Retry-After` v sekundách |
 | 409 | `dates-unavailable` | termín je obsazený |
 | 409 | `price-mismatch` (+ `priceCzk`) | cena se změnila – zobrazit novou cenu |
@@ -452,25 +453,32 @@ web dál nabízí poptávku přes e-chalupy.
   Žádné jiné nastavení. Smoke test v produkci ověřuje `bookingEnabled: false`.
 - **Stav:** termín, hosté a nabídka zůstávají v `BookingSection` (jediný zdroj); kontakty
   (`firstName`, `lastName`, `email`, `phone`, volitelná `note`) jsou zvlášť, takže je změna
-  termínu, hostů ani jazyka nesmaže. Otevřený formulář zůstává otevřený.
+  termínu, hostů ani jazyka nesmaže. Otevřený formulář zůstává otevřený. Kontaktní část se
+  vykresluje pod celým blokem kalendáře a panelu (panel si zachová výšku).
 - **Data:** `DateField` drží jen rozepsaný text (`DD.MM.RRRR`); autoritativní je ISO hodnota
   v centrálním stavu. Rozepsané datum není chyba, neexistující úplné datum (32.12.2026) je inline
   chyba bez tiché opravy, chybný tvar se ohlásí při opuštění pole. Platné datum jde přes stejnou
   validaci jako kalendář (`lib/availability/stay.ts`) a spustí `/api/quote`.
-- **Odeslání** je povolené jen s úplným termínem, aktuální nabídkou (`ready` pro stejný termín),
-  vyplněnými kontakty a Turnstile tokenem. Request: `arrival`, `departure`, `guests`, kontakty,
+- **Odeslání** je povolené jen s úplným termínem, aktuální nabídkou (`ready` pro stejný termín)
+  a vyplněnými kontakty; Turnstile tlačítko neblokuje. Po kliknutí se nejdřív získá token
+  z Invisible Turnstile, teprve potom proběhne POST (obojí jeden loading stav tlačítka).
+  Request: `arrival`, `departure`, `guests`, kontakty,
   `note` (prázdná = `null`), `turnstileToken`, `expectedPriceCzk` (= `totalCzk` nabídky)
   a hlavička `Idempotency-Key` (`crypto.randomUUID()`). Formát kontaktů ověřuje server; chyby
   z 422 se zobrazí u polí (`aria-invalid`, `aria-describedby`).
-- **Idempotency-Key = jedna logická operace** (stejný obsah requestu včetně `expectedPriceCzk`).
-  Opakování po síťové chybě, timeoutu nebo dočasné chybě serveru („Zkusit znovu“) použije stejný
-  klíč i stejný Turnstile token (server díky deterministickému `idempotency_key` pro Siteverify
-  a idempotentnímu replay neztratí ani nezdvojí rezervaci). Nový klíč: změna termínu, hostů nebo
-  kontaktů, nové potvrzení po změně ceny, `turnstile-failed` / `turnstile-required`,
-  `dates-unavailable`, 422. Nic se neodesílá automaticky.
-- **Turnstile** (`Turnstile.tsx`, explicitní render, skript až s formulářem): po odpovědi serveru
-  se widget neresetuje; reset jen po `turnstile-failed` / `turnstile-required`. Expirace nebo
-  chyba widgetu token zahodí a widget si vyžádá nový.
+- **Logická operace = Idempotency-Key + jeden Turnstile token** (stejný obsah requestu včetně
+  `expectedPriceCzk`). Opakování po síťové chybě, timeoutu nebo dočasné chybě serveru („Zkusit
+  znovu“) použije stejný klíč i stejný token bez nové challenge (server díky deterministickému
+  `idempotency_key` pro Siteverify a idempotentnímu replay neztratí ani nezdvojí rezervaci).
+  Nová operace = nový token i klíč: změna termínu, hostů nebo kontaktů, nové potvrzení po změně
+  ceny, `turnstile-failed` / `turnstile-required`, `dates-unavailable`, 422. Spotřebovaný token se
+  pro jinou operaci nikdy nepoužije. Nic se neodesílá automaticky.
+- **Invisible Turnstile** (`invisibleTurnstile.ts`, `Turnstile.tsx`): skript se načte s formulářem,
+  widget nic nezobrazuje ani nezabírá místo. Každý token = čerstvý widget (`render` s
+  `execution: 'execute'`, `action: 'reservation'`, `refresh-expired: 'never'`, `retry: 'never'`,
+  pak `execute`). Chyba, timeout nebo nedokončená challenge = `turnstile-failed` bez POST;
+  nenačtený skript = `turnstile-unavailable`. Režim Invisible určuje site key (v dashboardu);
+  `appearance: 'interaction-only'` je jen pojistka pro chybně nastavený viditelný klíč.
 - **Změna ceny (`409 price-mismatch`):** nic se znovu neodešle, kontakty zůstanou, nabídka se
   znovu načte z `/api/quote` (summary ukáže novou cenu i rozpis) a panel zobrazí „Cena se mezitím
   změnila z X na Y. Zkontrolujte ji a rezervaci znovu potvrďte.“ Další odeslání = vědomé
@@ -803,9 +811,12 @@ D1 (reservations) → GET /api/reservations.ics?token=… → import v e-chalup�
   ```
 
   Site key widgetu je veřejný: proměnná `TURNSTILE_SITE_KEY` (ve `vars`, ne secret), kterou
-  frontend dostane z `GET /api/booking-config`. Preview má testovací site key Cloudflare
-  `1x00000000000000000000AA` (vždy projde, patří k testovacímu secretu). Produkce site key
-  zatím nemá – formulář se tam nenabízí.
+  frontend dostane z `GET /api/booking-config`. Preview má testovací Invisible site key
+  Cloudflare `1x00000000000000000000BB` (vždy projde, nic nezobrazuje, patří k testovacímu
+  secretu `1x…AA`). Produkce site key zatím nemá – formulář se tam nenabízí. Pro zapnutí
+  v produkci je potřeba widget v režimu **Invisible** (site key do `vars`, secret přes
+  `wrangler secret put`) a odkaz na Cloudflare Turnstile Privacy Addendum v zásadách ochrany
+  osobních údajů webu (podmínka režimu Invisible).
 
 ## Architektura
 
@@ -820,8 +831,8 @@ components/booking/
   CalendarMonth.tsx     mřížka jednoho měsíce
   BookingPanel.tsx      zelený panel: data, hosté, cena ze serveru, poptávka / pokračování k rezervaci
   DateField.tsx, dateInput.ts  vstup data DD.MM.RRRR ↔ ISO (rozepsaný text, validace, picker)
-  BookingForm.tsx       kontaktní část, Turnstile, odeslání, potvrzení
-  Turnstile.tsx         Cloudflare Turnstile widget (explicitní render)
+  BookingForm.tsx       kontaktní část, odeslání, potvrzení
+  Turnstile.tsx, invisibleTurnstile.ts  Invisible Turnstile (token až při odeslání, čerstvý widget pro každý token)
   reservation.ts, useReservation.ts  POST /api/reservations: request, Idempotency-Key, stavy, chyby
   bookingConfig.ts      GET /api/booking-config (fail-closed = formulář vypnutý)
   useAvailability.ts    načítání /api/availability

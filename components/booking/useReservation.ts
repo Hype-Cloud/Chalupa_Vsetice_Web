@@ -6,16 +6,16 @@ import { createReservationController, IDLE_SUBMISSION, postReservation, type Sub
 const SUBMIT_TIMEOUT_MS = 20_000;
 
 /** Stav odeslání rezervace; logika a životní cyklus Idempotency-Key: reservation.ts. */
-export function useReservation(callbacks: { onPriceChanged: () => void; onTurnstileReset: () => void }) {
+export function useReservation(callbacks: { onPriceChanged: () => void; getToken: () => Promise<string> }) {
   const [state, setState] = useState<SubmissionState>(IDLE_SUBMISSION);
   const latest = useRef(callbacks);
   latest.current = callbacks;
   const [controller] = useState(() =>
     createReservationController({
       post: (payload, token, key) => postReservation(payload, token, key, (input, init) => fetch(input, { ...init, signal: AbortSignal.timeout(SUBMIT_TIMEOUT_MS) })),
+      getToken: () => latest.current.getToken(),
       newKey: () => crypto.randomUUID(),
       onChange: setState,
-      onTurnstileReset: () => latest.current.onTurnstileReset(),
       onPriceChanged: () => latest.current.onPriceChanged(),
     }),
   );

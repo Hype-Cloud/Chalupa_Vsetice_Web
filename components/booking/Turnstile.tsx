@@ -1,15 +1,11 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef } from 'react';
 import type { Locale } from '../../lib/i18n/index.ts';
 import { useI18n } from '../i18n.ts';
+import { createInvisibleTurnstile, type TokenSource, type TurnstileApi } from './invisibleTurnstile.ts';
 
-// Cloudflare Turnstile (explicitní render). Skript se načte až s formulářem. Site key je veřejný
-// (GET /api/booking-config); secret zůstává jen ve Workeru.
-
-interface TurnstileApi {
-  render: (element: HTMLElement, options: Record<string, unknown>) => string;
-  reset: (widgetId: string) => void;
-  remove: (widgetId: string) => void;
-}
+// Cloudflare Turnstile v režimu Invisible (explicitní render, `execution: 'execute'`). Skript se
+// načte s formulářem, challenge běží až po kliknutí na odeslání (invisibleTurnstile.ts).
+// Site key je veřejný (GET /api/booking-config); secret zůstává jen ve Workeru.
 
 declare global {
   interface Window {
@@ -29,6 +25,7 @@ function loadTurnstile(): Promise<TurnstileApi> {
     script.onload = () => (window.turnstile ? resolve(window.turnstile) : reject(new Error('turnstile-missing')));
     script.onerror = () => {
       loading = null;
+      script.remove();
       reject(new Error('turnstile-load'));
     };
     document.head.appendChild(script);
@@ -37,64 +34,43 @@ function loadTurnstile(): Promise<TurnstileApi> {
 }
 
 /**
- * Jazyk widgetu podle jazyka webu. Turnstile očekává standardní jazykový kód; pro `ua` se odvozuje
- * přes Intl z regionu (stejný princip jako INTL_LOCALE v lib/i18n), ve zdroji se používá jen `ua`.
+ * Jazyk widgetu podle jazyka webu (uplatní se jen u pojistky `interaction-only`). Turnstile očekává
+ * standardní jazykový kód; pro `ua` se odvozuje přes Intl z regionu (stejný princip jako
+ * INTL_LOCALE v lib/i18n), ve zdroji se používá jen `ua`.
  */
 const UA_WIDGET_LANGUAGE = new Intl.Locale('und-UA').maximize().language;
 const WIDGET_LANGUAGE: Record<Locale, string> = { cs: 'cs', en: 'en', de: 'de', ua: UA_WIDGET_LANGUAGE };
 
 interface Props {
   siteKey: string;
-  /** Zvýšení hodnoty = reset widgetu (po turnstile-failed / turnstile-required). */
-  resetSignal: number;
-  /** Platný token, nebo null (expirace, chyba, reset, odpojení). */
-  onToken: (token: string | null) => void;
+  /** Zdroj tokenů pro odeslání (null po odpojení formuláře). */
+  onSource: (source: TokenSource | null) => void;
 }
 
-export function Turnstile({ siteKey, resetSignal, onToken }: Props) {
-  const { t, locale } = useI18n();
+/** Kotva pro neviditelný widget – nic nezobrazuje a nerezervuje v layoutu žádné místo. */
+export function Turnstile({ siteKey, onSource }: Props) {
+  const { locale } = useI18n();
   const container = useRef<HTMLDivElement>(null);
-  const widget = useRef<string | null>(null);
-  const onTokenRef = useRef(onToken);
-  onTokenRef.current = onToken;
-  // Jazyk widgetu se bere při vykreslení; přepnutí jazyka webu widget (a token) nemění.
-  const language = useRef(WIDGET_LANGUAGE[locale]);
-  const [failed, setFailed] = useState(false);
+  const localeRef = useRef(locale);
+  localeRef.current = locale;
+  const onSourceRef = useRef(onSource);
+  onSourceRef.current = onSource;
 
   useEffect(() => {
-    let cancelled = false;
-    loadTurnstile()
-      .then((api) => {
-        if (cancelled || !container.current) return;
-        widget.current = api.render(container.current, {
-          sitekey: siteKey,
-          language: language.current,
-          size: 'flexible',
-          'refresh-expired': 'auto',
-          callback: (token: string) => onTokenRef.current(token),
-          'expired-callback': () => onTokenRef.current(null),
-          'error-callback': () => onTokenRef.current(null),
-        });
-      })
-      .catch(() => !cancelled && setFailed(true));
+    // Skript se načte předem, aby challenge po kliknutí začala hned; chyba se projeví až při odeslání.
+    loadTurnstile().catch(() => undefined);
+    const source = createInvisibleTurnstile({
+      load: loadTurnstile,
+      container: () => container.current,
+      siteKey,
+      language: () => WIDGET_LANGUAGE[localeRef.current],
+    });
+    onSourceRef.current(source);
     return () => {
-      cancelled = true;
-      if (widget.current) window.turnstile?.remove(widget.current);
-      widget.current = null;
-      onTokenRef.current(null);
+      source.dispose();
+      onSourceRef.current(null);
     };
   }, [siteKey]);
 
-  useEffect(() => {
-    if (resetSignal === 0 || !widget.current) return;
-    onTokenRef.current(null);
-    window.turnstile?.reset(widget.current);
-  }, [resetSignal]);
-
-  return (
-    <div className="turnstile" role="group" aria-label={t('reservation.turnstile.label')}>
-      <div ref={container} />
-      {failed && <p className="field-error" role="alert">{t('reservation.turnstile.unavailable')}</p>}
-    </div>
-  );
+  return <div ref={container} className="turnstile-anchor" />;
 }
