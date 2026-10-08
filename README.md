@@ -218,6 +218,9 @@ Aktualizace poznámky již importované rezervace nebyla spolehlivě potvrzena. 
 - Testovací D1: připravená, integrační testy úspěšné.
 - Produkční D1: migrace úspěšně provedena, databáze připravená a bez rezervací.
 - Produkční rezervační POST: vypnutý.
+- Workers Builds: deploy i Worker Previews běží přes kontrolu D1 migrací (`pnpm run deploy`,
+  `pnpm run deploy:preview`) s build tokenem, který má k D1 jen Read. Ověřeno na Preview
+  i produkci (kontrola migrací a smoke test 8/8).
 - Výstupní iCal `/api/reservations.ics`: zapnutý v produkci i ve Worker Previews a připojený k importu v e-chalupách. Celý tok (import, zrušení přes `STATUS:CANCELLED`) je ověřený na produkci syntetickou rezervací, která byla následně odstraněna.
 - Stávající způsob poptávky prostřednictvím e-chalup: zachován.
 
@@ -821,7 +824,7 @@ Workers & Pages → `chalupa-vsetice-web` → Settings → Build:
 | Deploy command (větev `main`) | `pnpm run deploy` |
 | Preview command (ostatní větve, PR) | `pnpm run deploy:preview` |
 | Build variables | `NODE_VERSION=24.19.0`, `PNPM_VERSION=11.25.0` |
-| API token | vlastní user token (viz níže) |
+| API token | `chalupa-vsetice-web build token` (vlastní user token, viz níže) |
 
 - `pnpm run deploy` = `check production` → `wrangler deploy`.
 - `pnpm run deploy:preview` = `check preview` → `wrangler preview` (Worker Previews s blokem
@@ -845,12 +848,15 @@ kontrola by s ním vždy selhala. Vytvoř user token (My Profile → API Tokens)
 - Zone: Workers Routes – Edit,
 - User: User Details – Read, Memberships – Read,
 
-a nastav ho v Settings → Build → API token. **D1 jen Read** – build tak migrace nemůže
-aplikovat ani omylem.
+a nastav ho v Settings → Build → API token (Production i Previews). **D1 jen Read** – build
+tak migrace nemůže aplikovat ani omylem.
 
-**Pořadí zavedení:** 1. token s D1 Read, 2. ověřit lokálně `pnpm run db:check:production`
-a `pnpm run db:check:preview`, 3. teprve pak změnit Deploy a Preview command. Do té doby
-Workers Builds nasazuje postaru (`npx wrangler deploy`) a kontrola se nespouští.
+**Aktuální stav (nastaveno ručně v dashboardu, není v repozitáři):** Production i Previews
+používají výše uvedené příkazy a token `chalupa-vsetice-web build token` (scope: jen účet
+projektu a zóna `chalupavsetice.cz`); Preview branches jsou zapnuté. Kontrola migrací tedy
+běží před každým deployem i před každým Worker Preview. Hodnota tokenu se nikde nevypisuje
+ani neukládá do repozitáře. Při výměně tokenu musí nový token mít stejná oprávnění, jinak
+build skončí chybou (fail-closed).
 
 ### Postup změny s migrací
 
@@ -868,9 +874,18 @@ Workers Builds nasazuje postaru (`npx wrangler deploy`) a kontrola se nespoušt�
 Když se merge provede před krokem 4, produkční build skončí chybou a web dál běží na předchozí
 verzi; stačí doplnit krok 4 a build zopakovat.
 
-Migrace musí být **zpětně kompatibilní**: mezi krokem 4 a 5 běží starý kód nad novým schématem
-(přidávat sloupce/tabulky ano; mazat nebo přejmenovávat až v pozdější migraci, když je už žádný
-nasazený kód nepoužívá).
+Migrace musí být **zpětně kompatibilní** s předchozí verzí kódu:
+
+- Mezi krokem 4 a dokončením deploye v kroku 5 běží **starý kód nad novým schématem**.
+- Rollback kódu (návrat na starší commit) schéma nevrací – starší kód pak běží nad novějším
+  schématem. Rollback schématu se automaticky nedělá; Time Travel je jen nouzová obnova celé DB
+  (včetně ztráty novějších dat).
+- Bezpečné: nový nullable sloupec (nebo sloupec s výchozí hodnotou), nová tabulka, nový index.
+- Breaking změny (smazání nebo přejmenování sloupce či tabulky, změna typu nebo významu dat)
+  se dělají **vícefázově**: nejdřív deploy kódu, který starou strukturu nepotřebuje, a až
+  v pozdějším PR migrace, která ji odstraní.
+- `check` migrace, které jsou v DB, ale kód je nezná, jen varuje – na ochranu po rollbacku
+  se proto spoléhat nedá.
 
 ### Destruktivní migrace
 
@@ -920,8 +935,27 @@ npx wrangler d1 execute chalupa-vsetice-rezervace --remote \
   --command "INSERT INTO meta (key, value) VALUES ('environment', 'production')"
 ```
 
-Secret pro Worker Previews se nastavuje zvlášť: `npx wrangler preview secret`. Bez něj Preview
-ukáže obsazenost jako nedostupnou.
+### Secrets pro Worker Previews
+
+Worker Previews nedědí produkční secrets. Sdílené secrets pro všechny Previews se nastavují
+v Preview base config (hodnotu zadává wrangler interaktivně, nikdy ji nevypisovat):
+
+```bash
+npx wrangler preview base-config secret put ECHALUPY_ICAL_URL
+npx wrangler preview base-config secret put BOOKING_ICAL_EXPORT_TOKEN   # jiný token než v produkci
+npx wrangler preview base-config secret put TURNSTILE_SECRET_KEY        # testovací klíč Cloudflare
+npx wrangler preview base-config secret list                            # jen názvy
+```
+
+- `ECHALUPY_ICAL_URL` – bez něj Preview ukáže obsazenost jako nedostupnou (smoke test selže).
+- `BOOKING_ICAL_EXPORT_TOKEN` – export je v Preview zapnutý (`BOOKING_ICAL_EXPORT_ENABLED`);
+  bez tokenu je „nenakonfigurovaný“ a `/api/reservations.ics` vrací 503. Smoke test očekává
+  nakonfigurovaný export, který bez předloženého tokenu vrací 404.
+- `TURNSTILE_SECRET_KEY` – bez něj zapnutý rezervační POST v Preview vrací 503 `not-configured`.
+- Volitelně `BOOKING_API_TOKEN`, `RESEND_API_KEY`, `CONFLICT_ALERT_EMAIL`.
+
+`npx wrangler preview secret put <KEY>` (bez `base-config`) nastaví secret jen **jednomu**
+Preview (výchozí název = aktuální git větev) – další PR Previews ho nedostanou.
 
 ### Smoke test
 
