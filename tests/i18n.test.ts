@@ -54,7 +54,7 @@ test('každý katalog má přesně klíče českého katalogu, neprázdné hodno
   }
 });
 
-test('katalogy en, de, uk jsou skutečně přeložené (žádný český text) a bez HTML', () => {
+test('katalogy en, de, ua jsou skutečně přeložené (žádný český text) a bez HTML', () => {
   for (const locale of ['en', 'de', 'ua'] as const) {
     for (const key of csKeys) {
       const value = (CATALOGS[locale] as Record<string, unknown>)[key];
@@ -238,7 +238,7 @@ test('persistence: přepnutí jazyka se uloží a při další návštěvě obno
 test('adresa po přepnutí: ?lang= pro en/de/ua, čeština bez parametru; ostatní parametry a kotva zůstanou', () => {
   assert.equal(urlWithLocale('https://chalupavsetice.cz/', 'en'), 'https://chalupavsetice.cz/?lang=en');
   assert.equal(urlWithLocale('https://chalupavsetice.cz/?lang=en#terminy', 'de'), 'https://chalupavsetice.cz/?lang=de#terminy');
-  assert.equal(urlWithLocale('https://chalupavsetice.cz/?utm=x&lang=uk#cenik', 'cs'), 'https://chalupavsetice.cz/?utm=x#cenik');
+  assert.equal(urlWithLocale('https://chalupavsetice.cz/?utm=x&lang=ua#cenik', 'cs'), 'https://chalupavsetice.cz/?utm=x#cenik');
 });
 
 test('přepínač jazyků: CS EN DE UA, právě jeden aktivní, názvy jazyků (ne vlajky)', () => {
