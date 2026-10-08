@@ -24,6 +24,8 @@ dist/
 # Cloudflare
 .wrangler/
 .cloudflare/
+# Zálohy D1 před destruktivní migrací (obsahují osobní údaje – nikdy necommitovat)
+.d1-backups/
 
 # Logs
 *.log

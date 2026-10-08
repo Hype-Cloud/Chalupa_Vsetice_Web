@@ -117,7 +117,7 @@ Produkční endpoint pro vytváření rezervací zůstává vypnutý. Testovací
 
 Projekt využívá Node.js Test Runner. Databázové testy probíhají nad lokální Cloudflare D1 prostřednictvím Miniflare/workerd. Testovací údaje jsou syntetické.
 
-**Výsledek posledního vývojového běhu: 214/214 úspěšných testů.**
+**Výsledek posledního vývojového běhu: 243/243 úspěšných testů.**
 
 | Testovací soubor | Počet | Zaměření |
 |---|---:|---|
@@ -133,7 +133,9 @@ Projekt využívá Node.js Test Runner. Databázové testy probíhají nad loká
 | booking-public.test.ts | 16 | Veřejný POST: Turnstile (platný, neplatný, chybějící, nedostupný), rate limit, idempotentní retry a dvojklik, chybové kódy, bez úniku osobních údajů a secrets. |
 | pricing.test.ts | 31 | Ceník: výchozí a vlastní ceny nocí, prahy slev, zaokrouhlení, přelom měsíce a roku, pevná cena pobytu (přesná shoda, priorita, neplatná data, beze vlivu na dostupnost), `/api/quote` (kontrakt, validace, neplatný ceník, výpadek D1, žádné zápisy), shoda ceny nabídky a rezervace, `price-mismatch`. |
 | reservation-note.test.ts | 17 | Poznámka hosta: NULL pro prázdné hodnoty, víceřádkový text, Unicode a NFC, limit 2000 znaků, zakázané řídicí a bidi znaky, SQL/HTML text jen jako text, není ve veřejné odpovědi ani v logách, idempotence, escapování v iCal exportu, CHECK v D1. |
-| **Celkem** | **214** | |
+| d1-migrations.test.ts | 21 | Kontrola D1 migrací před deployem: číslování, konzistence konfigurací (oddělené D1, produkční POST vypnutý), čekající a neznámé migrace, fail-closed při chybě, detekce destruktivních migrací, ruční aplikace jen v terminálu s potvrzením, záloha před destruktivní migrací produkce. |
+| smoke.test.ts | 8 | Smoke test veřejných endpointů proti skutečnému Workeru: produkce (POST 404) a Preview, bez tokenů a zápisů, odhalení zapnutého POST, výpadku D1, úniku osobních údajů a veřejného exportu. |
+| **Celkem** | **243** | |
 
 ### Testované scénáře
 
@@ -735,6 +737,9 @@ migrations/             SQL migrace D1
 tests/                  unit testy + syntetické fixtures (smyšlené rezervace), lokální D1 (Miniflare)
 public/                 fotografie, favicon
 scripts/finalize-static.mjs   úklid po buildu, ponechá statický výstup
+scripts/d1-migrations.ts      kontrola (před deployem) a ruční aplikace D1 migrací
+scripts/smoke.ts              smoke test veřejných endpointů po nasazení
+scripts/lib/                  logika obou skriptů (testovaná v tests/)
 vendor/                 základní styly shadcn/Tailwind importované z app/globals.css
 ```
 
@@ -800,33 +805,136 @@ npx wrangler d1 execute chalupa-vsetice-rezervace --local \
     (min. 32 znaků) pro výstupní iCal.
 - **Cena a kapacita:** `lib/booking/rules.ts`. Odkaz na poptávku: `components/booking/config.ts`.
 
-## Nasazení
+## Nasazení a migrace D1
 
-Nasazení zajišťuje Cloudflare Workers Builds napojené na tento repozitář:
+Nasazení zajišťuje Cloudflare Workers Builds napojené na tento repozitář. Migrace D1 se
+**nikdy nespouštějí automaticky** – build je jen kontroluje a při nesouladu nasazení zastaví.
+
+### Nastavení Workers Builds
+
+Workers & Pages → `chalupa-vsetice-web` → Settings → Build:
 
 | Nastavení | Hodnota |
 |---|---|
 | Root directory | `/` |
 | Build command | `pnpm run build` |
-| Deploy command | `npx wrangler deploy` |
+| Deploy command (větev `main`) | `pnpm run deploy` |
+| Preview command (ostatní větve, PR) | `pnpm run deploy:preview` |
 | Build variables | `NODE_VERSION=24.19.0`, `PNPM_VERSION=11.25.0` |
+| API token | vlastní user token (viz níže) |
 
-- Push do větve `main` nasadí novou produkční verzi.
-- Ostatní větve a pull requesty vytvoří náhledovou verzi (Worker Previews).
-- Secret pro Worker Previews se nastavuje zvlášť: `npx wrangler preview secret`.
-  Bez něj Preview ukáže obsazenost jako nedostupnou.
-- Migrace D1 se při buildu nespouštějí. Spouštějí se ručně, nejdřív na testovací
-  databázi. `wrangler d1` čte jen top-level `d1_databases` (ne blok `previews`), proto má
-  testovací databáze vlastní konfiguraci `wrangler.preview-migrations.jsonc` (stejné ID
-  jako `previews.d1_databases`, slouží jen pro `wrangler d1`, ne pro deploy):
+- `pnpm run deploy` = `check production` → `wrangler deploy`.
+- `pnpm run deploy:preview` = `check preview` → `wrangler preview` (Worker Previews s blokem
+  `previews` a testovací D1).
+- Kontrola (`scripts/d1-migrations.ts check`) jen čte a deploy zastaví (build skončí chybou,
+  běží dál předchozí verze), když:
+  - cílové D1 chybí některá migrace z `migrations/` (kód by běžel nad starým schématem),
+  - `meta.environment` v DB neodpovídá prostředí (špatná databáze),
+  - konfigurace není konzistentní (produkce a Preview sdílejí D1, `wrangler.preview-migrations.jsonc`
+    ukazuje jinam než `previews`, v produkci je `BOOKING_API_ENABLED`),
+  - stav D1 nejde přečíst (chybí oprávnění, výpadek API) – **fail-closed**.
 
-  ```bash
-  # Preview / test
-  npx wrangler d1 migrations apply chalupa-vsetice-rezervace-test --remote --config wrangler.preview-migrations.jsonc
-  npx wrangler d1 execute chalupa-vsetice-rezervace-test --remote --config wrangler.preview-migrations.jsonc \
-    --command "INSERT INTO meta (key, value) VALUES ('environment', 'preview')"
-  # Produkce (až po ověření Preview, před merge)
-  npx wrangler d1 migrations apply chalupa-vsetice-rezervace --remote
-  npx wrangler d1 execute chalupa-vsetice-rezervace --remote \
-    --command "INSERT INTO meta (key, value) VALUES ('environment', 'production')"
-  ```
+  Migrace, které jsou v DB, ale kód je nezná (rollback na starší commit, jiná větev), jsou jen
+  varování – proto musí být každá migrace zpětně kompatibilní s předchozí verzí kódu.
+
+**API token pro build.** Automaticky generovaný token Workers Builds nemá oprávnění k D1,
+kontrola by s ním vždy selhala. Vytvoř user token (My Profile → API Tokens) s oprávněními:
+
+- Account: Account Settings – Read, Workers Scripts – Edit, **D1 – Read**
+  (a Workers KV Storage / R2 Storage – Edit jen pokud je projekt začne používat),
+- Zone: Workers Routes – Edit,
+- User: User Details – Read, Memberships – Read,
+
+a nastav ho v Settings → Build → API token. **D1 jen Read** – build tak migrace nemůže
+aplikovat ani omylem.
+
+**Pořadí zavedení:** 1. token s D1 Read, 2. ověřit lokálně `pnpm run db:check:production`
+a `pnpm run db:check:preview`, 3. teprve pak změnit Deploy a Preview command. Do té doby
+Workers Builds nasazuje postaru (`npx wrangler deploy`) a kontrola se nespouští.
+
+### Postup změny s migrací
+
+1. PR s novou migrací `migrations/NNNN_nazev.sql` (souvislé číslování; kontroluje test).
+   Preview build PR selže, dokud migrace není na testovací D1 – to je záměr.
+2. Testovací D1: `pnpm run db:migrate:preview` → Preview build znovu spustit (retry) a ověřit.
+3. Review PR.
+4. Produkční D1 – vědomé schválení: `pnpm run db:migrate:production`
+   - jen v interaktivním terminálu (v CI a buildu se odmítne),
+   - vypíše čekající migrace a označí destruktivní,
+   - vyžaduje opsat název databáze `chalupa-vsetice-rezervace`.
+5. Merge do `main` → build: kontrola projde → deploy.
+6. Smoke test: `pnpm run smoke https://chalupavsetice.cz --env production`.
+
+Když se merge provede před krokem 4, produkční build skončí chybou a web dál běží na předchozí
+verzi; stačí doplnit krok 4 a build zopakovat.
+
+Migrace musí být **zpětně kompatibilní**: mezi krokem 4 a 5 běží starý kód nad novým schématem
+(přidávat sloupce/tabulky ano; mazat nebo přejmenovávat až v pozdější migraci, když je už žádný
+nasazený kód nepoužívá).
+
+### Destruktivní migrace
+
+Za destruktivní se považuje migrace s `DROP`, `ALTER TABLE … DROP COLUMN / RENAME`, `DELETE`,
+`UPDATE` nebo `REPLACE` (mimo těla `CREATE TRIGGER`, komentáře a řetězce; v pochybnostech
+konzervativně ano). U produkce `db:migrate:production` navíc:
+
+1. zjistí Time Travel bookmark aktuálního stavu (`wrangler d1 time-travel info`) a vypíše
+   příkaz pro obnovu,
+2. vyexportuje celou DB (`wrangler d1 export`) do `.d1-backups/` a ověří, že export není prázdný,
+3. vyžaduje opsat frázi `ZALOHA OVERENA`.
+
+Bez bookmarku, exportu nebo fráze se migrace neaplikuje. Před potvrzením export otevři
+a zkontroluj. **`.d1-backups/` obsahuje osobní údaje hostů:** je v `.gitignore`, nikam ho
+nenahrávej a po ověření migrace ho smaž.
+
+Obnova při problému:
+
+```bash
+# Celá DB do stavu před migrací (Time Travel, bookmark z výpisu migrace)
+npx wrangler d1 time-travel restore chalupa-vsetice-rezervace --bookmark=<bookmark>
+```
+
+Pak vrátit kód na verzi odpovídající schématu. Time Travel uchovává historii 30 dní (Workers
+Paid) / 7 dní (Free).
+
+### Ruční příkazy
+
+```bash
+pnpm run db:check:preview          # stav testovací D1 (jen čtení)
+pnpm run db:check:production       # stav produkční D1 (jen čtení)
+pnpm run db:migrate:preview        # aplikace na testovací D1
+pnpm run db:migrate:production     # aplikace na produkční D1 (potvrzení, u destruktivních záloha)
+```
+
+Vyžadují přihlášení (`npx wrangler login`) nebo `CLOUDFLARE_API_TOKEN`. Pod kapotou je
+`wrangler d1 … --remote`; `wrangler d1` čte jen top-level `d1_databases`, proto testovací DB
+používá `wrangler.preview-migrations.jsonc` (stejné ID jako `previews.d1_databases`, jen pro
+`wrangler d1`, ne pro deploy – kontroluje to `check`).
+
+Nová databáze potřebuje před první kontrolou označení prostředí:
+
+```bash
+npx wrangler d1 execute chalupa-vsetice-rezervace-test --remote --config wrangler.preview-migrations.jsonc \
+  --command "INSERT INTO meta (key, value) VALUES ('environment', 'preview')"
+npx wrangler d1 execute chalupa-vsetice-rezervace --remote \
+  --command "INSERT INTO meta (key, value) VALUES ('environment', 'production')"
+```
+
+Secret pro Worker Previews se nastavuje zvlášť: `npx wrangler preview secret`. Bez něj Preview
+ukáže obsazenost jako nedostupnou.
+
+### Smoke test
+
+```bash
+pnpm run smoke https://chalupavsetice.cz --env production
+pnpm run smoke https://<preview-url> --env preview
+```
+
+Ověří web, `/api/availability` (status, žádné osobní údaje), `/api/quote` (platný i neplatný
+termín, 405), `POST /api/reservations` (**v produkci musí vrátit 404**; nikde nesmí přijmout
+prázdný požadavek), `/api/reservations.ics` bez tokenu (404) a neznámé API (404 JSON
+s bezpečnostními hlavičkami). Exit 1 při selhání; `stale`/`partial` obsazenost je jen varování.
+
+Nepoužívá žádné tokeny ani secrets: přijme jen origin (https, http jen localhost) bez cesty,
+query a přihlašovacích údajů, neposílá `Authorization` ani cookies a nic nezapisuje (rezervační
+POST jde bez údajů, nabídka je jen čtení).
