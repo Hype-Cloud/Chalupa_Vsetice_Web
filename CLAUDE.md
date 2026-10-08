@@ -85,9 +85,42 @@ Skutečný stav (nastaveno ručně v dashboardu, v diffu není vidět):
 
 ## Git a PR
 
-- Autor commitů `Hype-Cloud`; commity a PR popisy česky; bez zmínek o AI a bez
+- Autor commitů `Hype-Cloud`; commit messages, PR popisy a PR komentáře česky,
+  profesionálním neosobním technickým stylem; bez zmínek o AI a bez
   `Co-Authored-By` trailerů.
 - Malé, logicky oddělené PR; nemíchat nesouvisející úklid do feature PR.
 - PR nemergovat bez souhlasu uživatele.
 - Před PR: `pnpm test`, `pnpm run build`, `pnpm exec wrangler deploy --dry-run --config wrangler.jsonc`
   (`tsc --noEmit` má jednu známou chybu ve `vite.config.ts`, mimo rozsah).
+
+### Styl PR popisů a komentářů
+
+- PR popisy, review komentáře a technické poznámky psát jako profesionální projektovou
+  dokumentaci, ne jako konverzaci s uživatelem.
+- Nepoužívat první osobu typu „udělal jsem“, „přidal jsem“, „změnil jsem“, „ověřil jsem“.
+- Preferovat věcný, neosobní styl, například:
+  - „Přidána validace…“
+  - „Implementace používá…“
+  - „Změna zachovává…“
+  - „Testy ověřují…“
+  - „Produkční POST zůstává vypnutý.“
+- Nevkládat do PR popisu konverzační fráze typu:
+  - „Jak jsme se domluvili…“
+  - „Tady je…“
+  - „Ještě jsem…“
+  - „Můžeš teď…“
+  - „Doporučuji…“
+- PR popis musí být čitelný i pro vývojáře, který neviděl předchozí chat ani zadání.
+- Struktura PR popisu má podle relevance standardně používat sekce:
+  - `## Shrnutí`
+  - `## Implementace`
+  - `## Chování / důležité scénáře`
+  - `## Testování`
+  - `## Bezpečnost / provozní dopad`
+- Popisovat stav repozitáře a výslednou změnu, ne průběh práce autora.
+- Neuvádět zbytečné narativní detaily o tom, jak implementace vznikala.
+- Technická tvrzení formulovat přesně a ověřitelně; nepsat marketingově ani přehnaně
+  sebejistě.
+- PR komentáře k testům nebo opravám psát stejným věcným stylem; místo
+  „Otestoval jsem to a funguje to“ použít například
+  „Ověřeno v Preview: 8/8 smoke kontrol úspěšných.“
