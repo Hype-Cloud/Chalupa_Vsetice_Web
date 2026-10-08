@@ -11,7 +11,7 @@ Cloudflare Workers.
 ## Funkce
 
 - **Jazyky:** čeština, angličtina, němčina a ukrajinština – celý web včetně kalendáře,
-  rezervačního panelu, hlášek a popisků pro čtečky. Přepínač CS / EN / DE / UK v hlavičce,
+  rezervačního panelu, hlášek a popisků pro čtečky. Přepínač CS / EN / DE / UA v hlavičce,
   viz [Jazykové verze](#jazykové-verze-i18n).
 - **Úvodní sekce, informace o chalupě, vybavení a ceník** jsou responzivní a na
   mobilu (≤ 640 px) se přeskládají do jednoho sloupce.
@@ -775,7 +775,7 @@ components/booking/
   config.ts             kapacita, odkaz na poptávku
 components/
   I18nProvider.tsx      aktuální jazyk celého webu (volba, persistence, lang/title/description)
-  LanguageSwitcher.tsx  přepínač CS / EN / DE / UK
+  LanguageSwitcher.tsx  přepínač CS / EN / DE / UA
   i18n.ts               useI18n(), useSetLocale()
 lib/i18n/
   index.ts              jazyky, createI18n(): t(), plural(), Intl formát dat, měsíců a ceny
