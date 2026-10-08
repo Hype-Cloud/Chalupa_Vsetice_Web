@@ -86,13 +86,12 @@ export const cs = {
   'stayError.order': 'Odjezd musí být alespoň den po příjezdu.',
   'stayError.noArrival': 'Nejdříve vyberte datum příjezdu.',
 
-  'booking.panel.eyebrow': 'VAŠE DOVOLENÁ',
   'booking.panel.capacity': 'Za celou chalupu · až {capacity} hostů',
-  'booking.panel.priceHint': 'Cena podle termínu',
+  'booking.panel.priceStandard': 'Standardně {price} / noc',
+  'booking.panel.priceNote': 'Cena se může lišit podle termínu. Delší pobyty mohou být zvýhodněné.',
   'booking.panel.arrival': 'Příjezd',
   'booking.panel.departure': 'Odjezd',
   'booking.panel.guests': 'Počet hostů',
-  'booking.panel.selectStay': 'Vyberte termín v kalendáři nebo zadejte data.',
   'booking.panel.selectDeparture': 'Vyberte datum odjezdu.',
   'booking.panel.inquiry': 'Poptat termín',
   'booking.panel.disclaimer':
@@ -140,7 +139,6 @@ export const cs = {
 
   'booking.panel.continue': 'Pokračovat k rezervaci',
   'booking.panel.formBelow': 'Vaše údaje vyplňte níže',
-  'booking.panel.bookingNote': 'Výběr termínu zatím nic nerezervuje – rezervace vznikne až odesláním formuláře.',
   'dateInput.placeholder': 'DD.MM.RRRR',
   'dateInput.openPicker': '{field}: otevřít výběr data',
   'dateInput.error.format': 'Zadejte datum ve tvaru DD.MM.RRRR, např. 07.12.2026.',

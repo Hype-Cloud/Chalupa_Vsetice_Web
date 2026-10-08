@@ -85,13 +85,12 @@ export const de = {
   'stayError.order': 'Die Abreise muss mindestens einen Tag nach der Anreise liegen.',
   'stayError.noArrival': 'Wählen Sie zuerst das Anreisedatum.',
 
-  'booking.panel.eyebrow': 'IHR URLAUB',
   'booking.panel.capacity': 'Für das ganze Haus · bis zu {capacity} Gäste',
-  'booking.panel.priceHint': 'Preis je nach Termin',
+  'booking.panel.priceStandard': 'In der Regel {price} / Nacht',
+  'booking.panel.priceNote': 'Der Preis kann je nach Termin variieren. Längere Aufenthalte können günstiger sein.',
   'booking.panel.arrival': 'Anreise',
   'booking.panel.departure': 'Abreise',
   'booking.panel.guests': 'Anzahl der Gäste',
-  'booking.panel.selectStay': 'Wählen Sie den Termin im Kalender oder geben Sie die Daten ein.',
   'booking.panel.selectDeparture': 'Wählen Sie das Abreisedatum.',
   'booking.panel.inquiry': 'Termin anfragen',
   'booking.panel.disclaimer':
@@ -139,7 +138,6 @@ export const de = {
 
   'booking.panel.continue': 'Weiter zur Buchung',
   'booking.panel.formBelow': 'Angaben unten ausfüllen',
-  'booking.panel.bookingNote': 'Die Auswahl eines Termins bucht noch nichts – die Buchung entsteht erst mit dem Absenden des Formulars.',
   'dateInput.placeholder': 'TT.MM.JJJJ',
   'dateInput.openPicker': '{field}: Datumsauswahl öffnen',
   'dateInput.error.format': 'Geben Sie das Datum als TT.MM.JJJJ ein, z. B. 07.12.2026.',

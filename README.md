@@ -204,8 +204,8 @@ Projekt využívá Node.js Test Runner. Databázové testy probíhají nad loká
 | i18n.test.ts | 17 | Jazykové verze: úplnost katalogů cs/en/de/ua (klíče, parametry, plurály, žádný český text ani HTML), fallback, volba jazyka (?lang, localStorage, čeština) a persistence, množná čísla, data a CZK v každém jazyce, kalendář, rezervační panel po přepnutí, přepínač, žádné pevné texty v komponentách ani univerzální cena 3 000 Kč. |
 | date-input.test.ts | 8 | Vstup data DD.MM.RRRR ↔ ISO: přestupný rok, neexistující den a měsíc, rozepsané datum bez chyby, odmítnutí amerického a ISO tvaru, všechna zobrazená data den → měsíc → rok (angličtina bez měsíc/den). |
 | reservation-form.test.ts | 19 | Rezervační formulář: request podle kontraktu, blokace odeslání (termín, cena, kontakty; Turnstile tlačítko neblokuje), kliknutí → Invisible Turnstile → POST, selhání Turnstile bez POST, Idempotency-Key a token svázané s operací (retry = stejný klíč i token bez nové challenge, nová operace = nový token i klíč, i po price-mismatch), chybové kódy → hlášky ve všech jazycích, POST proti skutečnému handleru, `GET /api/booking-config`, Preview Invisible site key jen ve `previews`. |
-| invisible-turnstile.test.ts | 7 | Invisible Turnstile na klientu: `execution: execute` bez automatického spuštění a obnovování, čerstvý widget pro každý token, ignorování pozdních callbacků, chyba / timeout / prázdný token → `turnstile-failed`, nenačtený skript → `turnstile-unavailable`, odpojení formuláře. |
-| **Celkem** | **308** | |
+| invisible-turnstile.test.ts | 8 | Invisible Turnstile na klientu: widget připravený předem bez spuštění challenge, po kliknutí jen `execute`, nejvýš jeden token na widget a čerstvý widget na pozadí, bez automatického obnovování, ignorování pozdních callbacků, chyba / timeout / prázdný token → `turnstile-failed`, nenačtený skript → `turnstile-unavailable` s opakováním přípravy, odpojení formuláře. |
+| **Celkem** | **309** | |
 
 ### Testované scénáře
 
@@ -473,10 +473,13 @@ web dál nabízí poptávku přes e-chalupy.
   Nová operace = nový token i klíč: změna termínu, hostů nebo kontaktů, nové potvrzení po změně
   ceny, `turnstile-failed` / `turnstile-required`, `dates-unavailable`, 422. Spotřebovaný token se
   pro jinou operaci nikdy nepoužije. Nic se neodesílá automaticky.
-- **Invisible Turnstile** (`invisibleTurnstile.ts`, `Turnstile.tsx`): skript se načte s formulářem,
-  widget nic nezobrazuje ani nezabírá místo. Každý token = čerstvý widget (`render` s
-  `execution: 'execute'`, `action: 'reservation'`, `refresh-expired: 'never'`, `retry: 'never'`,
-  pak `execute`). Chyba, timeout nebo nedokončená challenge = `turnstile-failed` bez POST;
+- **Invisible Turnstile** (`invisibleTurnstile.ts`, `Turnstile.tsx`): skript i widget se připraví
+  s otevřením formuláře (`render` s `execution: 'execute'`, `action: 'reservation'`,
+  `refresh-expired: 'never'`, `retry: 'never'` – načte iframe, challenge nespustí), po kliknutí
+  zbývá jen `execute`. Widget nic nezobrazuje ani nezabírá místo a vydá nejvýš jeden token; pak
+  se odstraní a na pozadí se připraví čerstvý. Fáze odeslání jsou označené `performance.mark`
+  (`booking:submit`, `booking:token`, `booking:post-start`, `booking:post-end`,
+  `booking:success-render`). Chyba, timeout nebo nedokončená challenge = `turnstile-failed` bez POST;
   nenačtený skript = `turnstile-unavailable`. Režim Invisible určuje site key (v dashboardu);
   `appearance: 'interaction-only'` je jen pojistka pro chybně nastavený viditelný klíč.
 - **Změna ceny (`409 price-mismatch`):** nic se znovu neodešle, kontakty zůstanou, nabídka se

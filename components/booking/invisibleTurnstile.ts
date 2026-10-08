@@ -3,9 +3,11 @@
 // - Režim widgetu (Managed / Non-Interactive / Invisible) určuje site key v Cloudflare dashboardu.
 //   Pro Invisible site key se nic nezobrazuje a widget nezabírá místo; `appearance:
 //   'interaction-only'` je jen pojistka pro případ chybně nastaveného (viditelného) klíče.
-// - Každý požadavek na token = čerstvý widget (`remove` → `render` s `execution: 'execute'` →
-//   `execute`). Token je jednorázový a nikdy se nepoužije pro jinou logickou operaci; pozdní
-//   callbacky starého widgetu se ignorují.
+// - Widget se připraví předem (`prepare`: `render` s `execution: 'execute'` – načte iframe, ale
+//   challenge nespustí), takže po kliknutí zbývá jen `execute`. Každý widget vydá nejvýš jeden
+//   token: po tokenu nebo chybě se odstraní a na pozadí se připraví čerstvý pro další odeslání.
+//   Token je jednorázový a nikdy se nepoužije pro jinou logickou operaci; callbacky starých
+//   widgetů se ignorují.
 // - Token se po vypršení sám neobnovuje (`refresh-expired: 'never'`) ani se challenge sám
 //   neopakuje (`retry: 'never'`) – nový token vznikne jen na vyžádání (nové odeslání).
 // - Selhání: nenačtený skript / chybějící kontejner = `turnstile-unavailable`; neúspěšná nebo
@@ -45,86 +47,119 @@ export interface InvisibleTurnstileOptions {
 
 /** Zdroj jednorázových tokenů; každé volání getToken() spustí novou challenge. */
 export interface TokenSource {
+  /** Připraví widget předem (načtení skriptu a iframe), aby po kliknutí zbývalo jen execute. */
+  prepare: () => Promise<void>;
   getToken: () => Promise<string>;
   dispose: () => void;
 }
+
+type Outcome = { token: string } | { error: TurnstileFailure };
 
 export function createInvisibleTurnstile(options: InvisibleTurnstileOptions): TokenSource {
   const setTimer = options.setTimer ?? ((fn, ms) => setTimeout(fn, ms));
   const clearTimer = options.clearTimer ?? ((handle) => clearTimeout(handle as ReturnType<typeof setTimeout>));
   let api: TurnstileApi | null = null;
-  let widget: string | null = null;
+  /** Připravený (dosud nespuštěný) widget, nebo widget s rozběhnutou challenge. */
+  let widget: { id: string; used: boolean } | null = null;
+  let preparing: Promise<void> | null = null;
   let disposed = false;
-  /** Pořadí požadavků – callback starší challenge se nikdy nepřiřadí novějšímu požadavku. */
-  let current = 0;
-  /** Ukončení rozběhnuté challenge (nový požadavek nebo odpojení formuláře). */
-  let abortActive: (() => void) | null = null;
+  /** Rozběhnutá challenge: výsledek patří jen widgetu, který ji spustil. */
+  let active: { widgetId: string; settle: (outcome: Outcome) => void } | null = null;
 
   const removeWidget = () => {
     if (api && widget) {
       try {
-        api.remove(widget);
+        api.remove(widget.id);
       } catch {
         // Widget už neexistuje (např. odpojený kontejner) – nic dalšího není potřeba.
       }
     }
     widget = null;
   };
+  const deliver = (widgetId: string, outcome: Outcome) => {
+    if (active && active.widgetId === widgetId) active.settle(outcome);
+  };
+
+  const render = async () => {
+    try {
+      api = await options.load();
+    } catch {
+      throw new TurnstileError('turnstile-unavailable');
+    }
+    const container = options.container();
+    if (disposed || !container) throw new TurnstileError('turnstile-unavailable');
+    removeWidget();
+    let id = '';
+    try {
+      id =
+        api.render(container, {
+          sitekey: options.siteKey,
+          action: TURNSTILE_ACTION,
+          language: options.language(),
+          execution: 'execute',
+          appearance: 'interaction-only',
+          'refresh-expired': 'never',
+          retry: 'never',
+          callback: (token: unknown) => deliver(id, typeof token === 'string' && token !== '' ? { token } : { error: 'turnstile-failed' }),
+          'error-callback': () => {
+            deliver(id, { error: 'turnstile-failed' });
+            return true; // chyba je ošetřená, Turnstile ji nemá dál hlásit
+          },
+          'timeout-callback': () => deliver(id, { error: 'turnstile-failed' }),
+          'unsupported-callback': () => deliver(id, { error: 'turnstile-failed' }),
+          // Token se používá hned po získání; vypršení řeší server (Siteverify) – nic se neobnovuje.
+          'expired-callback': () => undefined,
+        }) ?? '';
+    } catch {
+      throw new TurnstileError('turnstile-unavailable');
+    }
+    if (!id) throw new TurnstileError('turnstile-unavailable');
+    widget = { id, used: false };
+  };
+
+  /** Čerstvý nespuštěný widget (souběžná volání sdílí jednu přípravu). */
+  const prepare = (): Promise<void> => {
+    if (disposed) return Promise.reject(new TurnstileError('turnstile-unavailable'));
+    if (widget && !widget.used) return Promise.resolve();
+    preparing ??= render().finally(() => (preparing = null));
+    return preparing;
+  };
+  /** Po tokenu nebo chybě: použitý widget pryč a na pozadí nový pro další odeslání. */
+  const recycle = () => {
+    removeWidget();
+    if (!disposed) prepare().catch(() => undefined);
+  };
 
   return {
+    prepare,
     dispose: () => {
       disposed = true;
-      current++;
-      abortActive?.();
+      active?.settle({ error: 'turnstile-unavailable' });
       removeWidget();
     },
     getToken: async () => {
-      abortActive?.();
-      const request = ++current;
-      try {
-        api = await options.load();
-      } catch {
-        throw new TurnstileError('turnstile-unavailable');
-      }
-      const container = options.container();
-      if (disposed || request !== current || !container) throw new TurnstileError(disposed || !container ? 'turnstile-unavailable' : 'turnstile-failed');
-      removeWidget();
+      active?.settle({ error: 'turnstile-unavailable' });
+      await prepare();
+      if (disposed || !api || !widget || widget.used) throw new TurnstileError(disposed ? 'turnstile-unavailable' : 'turnstile-failed');
       const turnstile = api;
+      const current = widget;
+      const container = options.container();
+      if (!container) throw new TurnstileError('turnstile-unavailable');
+      current.used = true;
       return new Promise<string>((resolve, reject) => {
         let settled = false;
-        const settle = (outcome: { token: string } | { error: TurnstileFailure }) => {
+        const settle = (outcome: Outcome) => {
           if (settled) return;
           settled = true;
-          abortActive = null;
           clearTimer(timer);
+          if (active?.settle === settle) active = null;
+          if (widget === current) recycle();
           if ('token' in outcome) resolve(outcome.token);
-          else {
-            removeWidget();
-            reject(new TurnstileError(outcome.error));
-          }
+          else reject(new TurnstileError(outcome.error));
         };
         const timer = setTimer(() => settle({ error: 'turnstile-failed' }), options.timeoutMs ?? TOKEN_TIMEOUT_MS);
-        abortActive = () => settle({ error: 'turnstile-unavailable' });
+        active = { widgetId: current.id, settle };
         try {
-          widget =
-            turnstile.render(container, {
-              sitekey: options.siteKey,
-              action: TURNSTILE_ACTION,
-              language: options.language(),
-              execution: 'execute',
-              appearance: 'interaction-only',
-              'refresh-expired': 'never',
-              retry: 'never',
-              callback: (token: unknown) => settle(typeof token === 'string' && token !== '' ? { token } : { error: 'turnstile-failed' }),
-              'error-callback': () => {
-                settle({ error: 'turnstile-failed' });
-                return true; // chyba je ošetřená, Turnstile ji nemá dál hlásit
-              },
-              'timeout-callback': () => settle({ error: 'turnstile-failed' }),
-              'unsupported-callback': () => settle({ error: 'turnstile-failed' }),
-              // Token se používá hned po získání; vypršení řeší server (Siteverify) – nic se neobnovuje.
-              'expired-callback': () => undefined,
-            }) ?? null;
           turnstile.execute(container);
         } catch {
           settle({ error: 'turnstile-unavailable' });

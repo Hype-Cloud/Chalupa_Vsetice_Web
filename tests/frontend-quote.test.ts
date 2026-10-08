@@ -282,13 +282,17 @@ function sourceFiles(dir: string): string[] {
   });
 }
 
-test('frontend nikde nepočítá cenu: žádné PRICE_PER_NIGHT, 3000 ani násobení nocí', () => {
+test('frontend nikde nepočítá cenu: PRICE_PER_NIGHT jen jako orientační údaj, žádné 3000 ani násobení nocí', () => {
   const root = new URL('..', import.meta.url).pathname;
   const files = [...sourceFiles(join(root, 'components')), ...sourceFiles(join(root, 'app')), ...sourceFiles(join(root, 'lib', 'i18n'))];
   assert.ok(files.some((f) => f.endsWith('BookingPanel.tsx')) && files.some((f) => f.endsWith('BookingSection.tsx')));
   for (const file of files) {
-    const code = readFileSync(file, 'utf8').replace(/\/\/[^\n]*|\/\*[\s\S]*?\*\//g, '');
-    assert.ok(!/PRICE_PER_NIGHT/.test(code), `${file}: PRICE_PER_NIGHT`);
+    const raw = readFileSync(file, 'utf8').replace(/\/\/[^\n]*|\/\*[\s\S]*?\*\//g, '');
+    // Jediné povolené použití: re-export/import konstanty a zobrazení „standardně … / noc“
+    // přes formatPrice(PRICE_PER_NIGHT) v panelu – žádný výpočet s ní.
+    const allowed = file.endsWith('BookingPanel.tsx') || file.endsWith('booking/config.ts');
+    const code = allowed ? raw.replace(/(import|export) \{[^}]*\} from '[^']*';/g, '').replace(/formatPrice\(PRICE_PER_NIGHT\)/g, '') : raw;
+    assert.ok(!/PRICE_PER_NIGHT/.test(code), `${file}: PRICE_PER_NIGHT mimo orientační zobrazení`);
     assert.ok(!/\b3_?000\b/.test(code), `${file}: číslo 3000`);
     assert.ok(!/(nights|count|nocí)\s*\*|\*\s*(nights|count)\b/i.test(code), `${file}: násobení nocí`);
     assert.ok(!/discount_percent|percent\s*\/\s*100|\/\s*100\s*\)/.test(code), `${file}: klientská kopie slevových pravidel`);

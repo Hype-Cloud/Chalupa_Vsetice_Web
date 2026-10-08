@@ -1,3 +1,4 @@
+import { PRICE_PER_NIGHT } from '../lib/booking/rules.ts';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
@@ -288,7 +289,7 @@ test('komponenty a stránka nemají pevné české texty ani textové aria-label
   for (const file of files) assert.ok(!/STAY_ERRORS|WEEKDAYS|DAY_STATUS\b/.test(readFileSync(file, 'utf8')), file);
 });
 
-test('statická univerzální cena „3 000 Kč / noc“ už není v UI ani v katalozích', () => {
+test('žádná pevná cena „3 000 Kč“ v UI ani v katalozích; orientační cena noci jen ze serverové konstanty', () => {
   for (const file of frontendFiles()) {
     const code = readFileSync(file, 'utf8');
     assert.ok(!/3[\s ]?000\s*Kč|Kč\s*\/\s*noc/.test(code), file);
@@ -296,6 +297,13 @@ test('statická univerzální cena „3 000 Kč / noc“ už není v UI ani v ka
   for (const locale of LOCALES) {
     const text = JSON.stringify(CATALOGS[locale]);
     assert.ok(!/3[\s .,]?000/.test(text), `${locale}: 3 000 v katalogu`);
+  }
+  // Před výběrem termínu: „standardně … / noc“ s cenou z PRICE_PER_NIGHT (výchozí cena serveru).
+  const panel = readFileSync(join(ROOT, 'components/booking/BookingPanel.tsx'), 'utf8');
+  assert.match(panel, /t\('booking\.panel\.priceStandard', \{ price: formatPrice\(PRICE_PER_NIGHT\) \}\)/);
+  for (const locale of LOCALES) {
+    const i18n = createI18n(locale);
+    assert.ok(i18n.t('booking.panel.priceStandard', { price: i18n.formatPrice(PRICE_PER_NIGHT) }).includes(i18n.formatPrice(3000)), locale);
   }
   assert.equal(createI18n('cs').t('pricing.rent.value'), 'Cena podle zvoleného termínu');
   assert.equal(createI18n('en').t('pricing.rent.value'), 'Price depends on your dates');

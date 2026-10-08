@@ -189,6 +189,8 @@ export interface ReservationControllerDeps {
   onChange: (state: SubmissionState) => void;
   /** Server hlásí jinou cenu – znovu načíst autoritativní nabídku (/api/quote). */
   onPriceChanged: () => void;
+  /** Volitelné časové značky fází odeslání (performance.mark; jen měření, bez vlivu na průběh). */
+  mark?: (phase: 'submit' | 'token' | 'post-start' | 'post-end') => void;
 }
 
 /** Kód selhání klientské části Turnstile (bez tokenu se nic neodešle). */
@@ -224,6 +226,7 @@ export function createReservationController(deps: ReservationControllerDeps): Re
     },
     submit: async (payload) => {
       if (state.status === 'submitting' || state.status === 'success') return;
+      deps.mark?.('submit');
       const fingerprint = payloadFingerprint(payload);
       set({ status: 'submitting' });
       let operation: Operation;
@@ -241,10 +244,13 @@ export function createReservationController(deps: ReservationControllerDeps): Re
           set({ status: 'error', code, retryable: isRetryable(code) });
           return;
         }
+        deps.mark?.('token');
         operation = { key: deps.newKey(), fingerprint, token };
         pending = operation;
       }
+      deps.mark?.('post-start');
       const result = await deps.post(payload, operation.token, operation.key);
+      deps.mark?.('post-end');
       switch (result.kind) {
         case 'success':
           pending = null;

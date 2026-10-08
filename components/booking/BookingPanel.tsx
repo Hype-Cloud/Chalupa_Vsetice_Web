@@ -3,7 +3,7 @@ import { ArrowDown, ArrowUpRight } from 'lucide-react';
 import type { IsoDate } from '../../lib/availability/dates.ts';
 import type { Stay } from '../../lib/availability/stay.ts';
 import { useI18n } from '../i18n.ts';
-import { CAPACITY, INQUIRY_URL } from './config.ts';
+import { CAPACITY, INQUIRY_URL, PRICE_PER_NIGHT } from './config.ts';
 import { DateField } from './DateField.tsx';
 import type { QuoteView } from './quoteView.ts';
 
@@ -35,13 +35,12 @@ interface Props {
 /** Zelený panel: data pobytu (synchronizovaná s kalendářem), počet hostů a cena ze serveru. */
 export function BookingPanel(props: Props) {
   const { today, stay, guests, nights, quote, message, onArrival, onDeparture, onGuests, onRetry, bookingEnabled, formOpen, onOpenForm, continueHint, success } = props;
-  const { t, plural, formatDate } = useI18n();
+  const { t, plural, formatDate, formatPrice } = useI18n();
   const complete = nights > 0;
-  const status = message ?? (quote.kind === 'error' ? quote.message : complete ? null : (continueHint ?? (stay.arrival ? t('booking.panel.selectDeparture') : t('booking.panel.selectStay'))));
+  const status = message ?? (quote.kind === 'error' ? quote.message : complete ? null : (continueHint ?? (stay.arrival ? t('booking.panel.selectDeparture') : null)));
 
   if (success) {
     return (
-      // Bez eyebrow – potvrzení začíná rovnou titulkem.
       <aside className="booking is-success" aria-label={t('reservation.success.title')}>
         {success}
       </aside>
@@ -49,15 +48,18 @@ export function BookingPanel(props: Props) {
   }
 
   return (
-    <aside className={`booking${formOpen ? ' is-form-open' : ''}`} aria-labelledby="booking-title" aria-busy={quote.kind === 'loading'}>
-      <p className="eyebrow" id="booking-title">{t('booking.panel.eyebrow')}</p>
-      {/* Jen cena ze serveru – během načítání ani bez nabídky se žádná částka nezobrazuje. */}
+    <aside className={`booking${formOpen ? ' is-form-open' : ''}`} aria-busy={quote.kind === 'loading'}>
+      {/* Cena pobytu jen ze serveru. Před výběrem termínu jen orientační výchozí cena noci (serverová
+          konstanta PRICE_PER_NIGHT), nic se nepočítá. */}
       {quote.kind === 'ready' ? (
         <div className="price" aria-live="polite">{quote.total} <span>{quote.forStay}</span></div>
+      ) : quote.kind === 'loading' ? (
+        <div className="price is-placeholder is-loading" aria-live="polite">{quote.label}</div>
       ) : (
-        <div className={`price is-placeholder${quote.kind === 'loading' ? ' is-loading' : ''}`} aria-live="polite">
-          {quote.kind === 'loading' ? quote.label : t('booking.panel.priceHint')}
-        </div>
+        <>
+          <div className="price is-indicative" aria-live="polite">{t('booking.panel.priceStandard', { price: formatPrice(PRICE_PER_NIGHT) })}</div>
+          <p className="price-note">{t('booking.panel.priceNote')}</p>
+        </>
       )}
       <p>{t('booking.panel.capacity', { capacity: CAPACITY })}</p>
       {/* Vlastní pole DD.MM.RRRR (ne vizuální formát nativního date inputu, který může být americký). */}
@@ -102,7 +104,6 @@ export function BookingPanel(props: Props) {
           ) : (
             <button type="button" className="button" onClick={onOpenForm}>{t('booking.panel.continue')} <ArrowUpRight size={18} /></button>
           )}
-          <p className="small">{t('booking.panel.bookingNote')}</p>
         </>
       ) : (
         <>

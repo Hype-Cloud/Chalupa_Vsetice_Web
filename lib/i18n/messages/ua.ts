@@ -84,13 +84,12 @@ export const ua = {
   'stayError.order': 'Виїзд має бути щонайменше через день після заїзду.',
   'stayError.noArrival': 'Спочатку оберіть дату заїзду.',
 
-  'booking.panel.eyebrow': 'ВАША ВІДПУСТКА',
   'booking.panel.capacity': 'За весь будинок · до {capacity} гостей',
-  'booking.panel.priceHint': 'Ціна залежно від дат',
+  'booking.panel.priceStandard': 'Зазвичай {price} / ніч',
+  'booking.panel.priceNote': 'Ціна може залежати від дат. Довші перебування можуть бути вигіднішими.',
   'booking.panel.arrival': 'Заїзд',
   'booking.panel.departure': 'Виїзд',
   'booking.panel.guests': 'Кількість гостей',
-  'booking.panel.selectStay': 'Оберіть дати в календарі або введіть їх.',
   'booking.panel.selectDeparture': 'Оберіть дату виїзду.',
   'booking.panel.inquiry': 'Надіслати запит',
   'booking.panel.disclaimer':
@@ -138,7 +137,6 @@ export const ua = {
 
   'booking.panel.continue': 'Перейти до бронювання',
   'booking.panel.formBelow': 'Заповніть дані нижче',
-  'booking.panel.bookingNote': 'Вибір дат ще нічого не бронює – бронювання створюється лише після надсилання форми.',
   'dateInput.placeholder': 'ДД.ММ.РРРР',
   'dateInput.openPicker': '{field}: відкрити вибір дати',
   'dateInput.error.format': 'Введіть дату у форматі ДД.ММ.РРРР, наприклад 07.12.2026.',

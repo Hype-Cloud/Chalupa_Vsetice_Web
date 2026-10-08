@@ -17,6 +17,8 @@ export function useReservation(callbacks: { onPriceChanged: () => void; getToken
       newKey: () => crypto.randomUUID(),
       onChange: setState,
       onPriceChanged: () => latest.current.onPriceChanged(),
+      // Měřitelné v DevTools: performance.getEntriesByType('mark').filter((m) => m.name.startsWith('booking:'))
+      mark: (phase) => performance.mark(`booking:${phase}`),
     }),
   );
   return { state, submit: controller.submit, dismiss: controller.dismiss };

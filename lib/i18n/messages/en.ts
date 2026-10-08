@@ -84,13 +84,12 @@ export const en = {
   'stayError.order': 'Departure must be at least one day after arrival.',
   'stayError.noArrival': 'Please select your arrival date first.',
 
-  'booking.panel.eyebrow': 'YOUR HOLIDAY',
   'booking.panel.capacity': 'For the whole cottage · up to {capacity} guests',
-  'booking.panel.priceHint': 'Price depends on dates',
+  'booking.panel.priceStandard': 'Usually {price} / night',
+  'booking.panel.priceNote': 'Prices may vary by date. Longer stays may be discounted.',
   'booking.panel.arrival': 'Arrival',
   'booking.panel.departure': 'Departure',
   'booking.panel.guests': 'Number of guests',
-  'booking.panel.selectStay': 'Select dates in the calendar or enter them here.',
   'booking.panel.selectDeparture': 'Select your departure date.',
   'booking.panel.inquiry': 'Send an inquiry',
   'booking.panel.disclaimer':
@@ -138,7 +137,6 @@ export const en = {
 
   'booking.panel.continue': 'Continue to booking',
   'booking.panel.formBelow': 'Fill in your details below',
-  'booking.panel.bookingNote': 'Selecting dates doesn’t book anything yet – the booking is created only when you submit the form.',
   'dateInput.placeholder': 'DD.MM.YYYY',
   'dateInput.openPicker': '{field}: open date picker',
   'dateInput.error.format': 'Enter the date as DD.MM.YYYY, e.g. 07.12.2026.',

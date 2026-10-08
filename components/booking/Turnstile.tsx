@@ -3,8 +3,8 @@ import type { Locale } from '../../lib/i18n/index.ts';
 import { useI18n } from '../i18n.ts';
 import { createInvisibleTurnstile, type TokenSource, type TurnstileApi } from './invisibleTurnstile.ts';
 
-// Cloudflare Turnstile v režimu Invisible (explicitní render, `execution: 'execute'`). Skript se
-// načte s formulářem, challenge běží až po kliknutí na odeslání (invisibleTurnstile.ts).
+// Cloudflare Turnstile v režimu Invisible (explicitní render, `execution: 'execute'`). Skript
+// i widget se připraví s formulářem, challenge běží až po kliknutí na odeslání (invisibleTurnstile.ts).
 // Site key je veřejný (GET /api/booking-config); secret zůstává jen ve Workeru.
 
 declare global {
@@ -57,14 +57,15 @@ export function Turnstile({ siteKey, onSource }: Props) {
   onSourceRef.current = onSource;
 
   useEffect(() => {
-    // Skript se načte předem, aby challenge po kliknutí začala hned; chyba se projeví až při odeslání.
-    loadTurnstile().catch(() => undefined);
     const source = createInvisibleTurnstile({
       load: loadTurnstile,
       container: () => container.current,
       siteKey,
       language: () => WIDGET_LANGUAGE[localeRef.current],
     });
+    // Skript i widget (iframe) se připraví hned s formulářem, aby po kliknutí zbývalo jen execute;
+    // chyba se projeví až při odeslání (getToken přípravu zopakuje).
+    source.prepare().catch(() => undefined);
     onSourceRef.current(source);
     return () => {
       source.dispose();

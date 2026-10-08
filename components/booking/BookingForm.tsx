@@ -119,6 +119,7 @@ export function BookingSuccess({ reservation }: { reservation: ReservationConfir
   const root = useRef<HTMLDivElement>(null);
   const heading = useRef<HTMLParagraphElement>(null);
   useEffect(() => {
+    performance.mark('booking:success-render');
     // Fokus pro čtečky obrazovky bez skoku; posun až po vykreslení (formulář pod blokem už zmizel
     // a stránka je kratší), aby se kalendář a potvrzení ukázaly celé.
     heading.current?.focus({ preventScroll: true });
