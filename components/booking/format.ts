@@ -8,7 +8,6 @@ const inUtc = { timeZone: 'UTC' } as const;
 const monthTitle = new Intl.DateTimeFormat('cs-CZ', { ...inUtc, month: 'long', year: 'numeric' });
 const monthOnly = new Intl.DateTimeFormat('cs-CZ', { ...inUtc, month: 'long' });
 const fullDate = new Intl.DateTimeFormat('cs-CZ', { ...inUtc, weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
-const shortDate = new Intl.DateTimeFormat('cs-CZ', { ...inUtc, day: 'numeric', month: 'numeric', year: 'numeric' });
 const dateTime = new Intl.DateTimeFormat('cs-CZ', { timeZone: 'Europe/Prague', day: 'numeric', month: 'numeric', hour: '2-digit', minute: '2-digit' });
 
 /** Zkratky dnů v týdnu, pondělí první. */
@@ -17,28 +16,14 @@ export const WEEKDAYS = ['Po', 'Út', 'St', 'Čt', 'Pá', 'So', 'Ne'];
 const capitalize = (text: string) => text.charAt(0).toUpperCase() + text.slice(1);
 
 export const formatMonth = (monthStart: IsoDate) => capitalize(monthTitle.format(asDate(monthStart)));
-export const formatShortDate = (date: IsoDate) => shortDate.format(asDate(date));
 export const formatFullDate = (date: IsoDate) => fullDate.format(asDate(date));
 export const formatDateTime = (iso: string) => dateTime.format(new Date(iso));
-export const formatPrice = (czk: number) => `${czk.toLocaleString('cs-CZ')} Kč`;
 
 /** Popisek zobrazeného období, např. „říjen – prosinec 2026“ nebo „prosinec 2026 – únor 2027“. */
 export function formatRange(first: IsoDate, last: IsoDate): string {
   if (first === last) return monthTitle.format(asDate(first));
   const sameYear = first.slice(0, 4) === last.slice(0, 4);
   return `${(sameYear ? monthOnly : monthTitle).format(asDate(first))} – ${monthTitle.format(asDate(last))}`;
-}
-
-export function nightsLabel(count: number): string {
-  if (count === 1) return '1 noc';
-  if (count >= 2 && count <= 4) return `${count} noci`;
-  return `${count} nocí`;
-}
-
-export function guestsLabel(count: number): string {
-  if (count === 1) return '1 host';
-  if (count >= 2 && count <= 4) return `${count} hosté`;
-  return `${count} hostů`;
 }
 
 export const DAY_STATUS: Record<DayKind | 'past', string> = {

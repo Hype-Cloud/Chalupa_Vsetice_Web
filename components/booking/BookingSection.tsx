@@ -1,16 +1,22 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { isIsoDate, todayInPrague, type IsoDate } from '../../lib/availability/dates.ts';
 import { occupancyFromResponse } from '../../lib/availability/occupancy.ts';
-import { EMPTY_STAY, pickDay, rangeError, setArrival, setDeparture, type Stay, type StayContext, type StayUpdate } from '../../lib/availability/stay.ts';
+import { EMPTY_STAY, nights, pickDay, rangeError, setArrival, setDeparture, type Stay, type StayContext, type StayUpdate } from '../../lib/availability/stay.ts';
+import { useI18n } from '../i18n.ts';
 import { AvailabilityCalendar } from './AvailabilityCalendar.tsx';
 import { BookingPanel } from './BookingPanel.tsx';
-import { PRICE_PER_NIGHT } from './config.ts';
 import { STAY_ERRORS } from './format.ts';
+import { fetchQuote, quoteRequestFor } from './quote.ts';
+import { quoteView } from './quoteView.ts';
 import { useAvailability } from './useAvailability.ts';
+import { useQuote } from './useQuote.ts';
 
 type Source = 'calendar' | 'panel';
 
-/** Kalendář a zelený panel sdílí jeden stav pobytu i jednu validaci (lib/availability/stay.ts). */
+/**
+ * Kalendář a zelený panel sdílí jeden stav pobytu (termín, hosté) i jednu validaci
+ * (lib/availability/stay.ts). Cena je vždy z /api/quote (useQuote) – klient ji nepočítá.
+ */
 export function BookingSection() {
   // Dnešek se určuje až v prohlížeči, ne při statickém buildu.
   const [today, setToday] = useState<IsoDate | null>(null);
@@ -22,6 +28,8 @@ export function BookingSection() {
   const [stay, setStay] = useState<Stay>(EMPTY_STAY);
   const [guests, setGuests] = useState(2);
   const [message, setMessage] = useState<{ text: string; source: Source } | null>(null);
+  const i18n = useI18n();
+  const quote = useQuote(quoteRequestFor(stay, guests));
 
   const ctx: StayContext | null = today ? { today, occupancy } : null;
   const apply = (source: Source, update: (ctx: StayContext) => StayUpdate) => {
@@ -32,8 +40,8 @@ export function BookingSection() {
   };
 
   // Nástroj pro prohlížeče s WebMCP (document.modelContext): vybere termín stejnou validací.
-  const latest = useRef({ ctx, setStay, setMessage });
-  latest.current = { ctx, setStay, setMessage };
+  const latest = useRef({ ctx, guests, setStay, setMessage });
+  latest.current = { ctx, guests, setStay, setMessage };
   useEffect(() => {
     const mc = (document as unknown as { modelContext?: { registerTool?: (tool: unknown, options: unknown) => unknown } }).modelContext;
     if (!mc?.registerTool) return;
@@ -42,10 +50,10 @@ export function BookingSection() {
       mc.registerTool(
         {
           name: 'estimate_stay',
-          description: 'Vybere termín pobytu v kalendáři, ověří ho proti zveřejněné obsazenosti a vypočítá orientační cenu. Nevytváří rezervaci ani poptávku.',
+          description: 'Vybere termín pobytu v kalendáři, ověří ho proti zveřejněné obsazenosti a zjistí cenu ze serveru. Nevytváří rezervaci ani poptávku.',
           inputSchema: { type: 'object', properties: { arrival: { type: 'string' }, departure: { type: 'string' } }, required: ['arrival', 'departure'], additionalProperties: false },
-          execute: (input: { arrival: string; departure: string }) => {
-            const { ctx: current } = latest.current;
+          execute: async (input: { arrival: string; departure: string }) => {
+            const { ctx: current, guests: currentGuests } = latest.current;
             if (!current || !isIsoDate(input.arrival) || !isIsoDate(input.departure)) throw new Error('Neplatný termín');
             const error = rangeError(input.arrival, input.departure, current);
             if (error && error !== 'range-busy' && error !== 'arrival-busy') throw new Error(STAY_ERRORS[error]);
@@ -54,8 +62,16 @@ export function BookingSection() {
               latest.current.setMessage(null);
               document.getElementById('terminy')?.scrollIntoView();
             }
-            const count = Math.round((Date.parse(input.departure) - Date.parse(input.arrival)) / 86_400_000);
-            return { nights: count, estimatedPriceCzk: count * PRICE_PER_NIGHT, available: !error, reservationCreated: false };
+            const request = quoteRequestFor({ arrival: input.arrival, departure: input.departure }, currentGuests);
+            const result = request ? await fetchQuote(request, controller.signal, (url, init) => fetch(url, init)) : null;
+            const quote = result?.ok ? result.quote : null;
+            return {
+              nights: nights({ arrival: input.arrival, departure: input.departure }),
+              priceCzk: quote?.totalCzk ?? null,
+              pricingMode: quote?.pricingMode ?? null,
+              available: !error,
+              reservationCreated: false,
+            };
           },
         },
         { signal: controller.signal },
@@ -85,10 +101,13 @@ export function BookingSection() {
         today={today}
         stay={stay}
         guests={guests}
+        nights={nights(stay)}
+        quote={quoteView(quote.state, i18n)}
         message={message?.source === 'panel' ? message.text : null}
         onArrival={(date) => apply('panel', (c) => setArrival(stay, date, c))}
         onDeparture={(date) => apply('panel', (c) => setDeparture(stay, date, c))}
         onGuests={setGuests}
+        onRetry={quote.retry}
       />
     </div>
   );

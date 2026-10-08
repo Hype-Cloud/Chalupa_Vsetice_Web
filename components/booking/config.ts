@@ -1,4 +1,5 @@
-export { CAPACITY, PRICE_PER_NIGHT } from '../../lib/booking/rules.ts';
+// Cena se na webu nepočítá – zobrazuje se jen totalCzk z /api/quote.
+export { CAPACITY } from '../../lib/booking/rules.ts';
 /** Kolik měsíců dopředu lze v kalendáři procházet (včetně aktuálního). */
 export const HORIZON_MONTHS = 12;
 /** Oficiální profil a poptávka na e-chalupy.cz. */
