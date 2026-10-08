@@ -9,32 +9,33 @@
 import { cs } from './messages/cs.ts';
 import { de } from './messages/de.ts';
 import { en } from './messages/en.ts';
-import { uk } from './messages/uk.ts';
+import { ua } from './messages/ua.ts';
 import type { MessageKey, Messages, PluralForms, PluralKey } from './types.ts';
 
 export type { MessageKey, Messages, PluralForms, PluralKey };
 
-export const LOCALES = ['cs', 'en', 'de', 'uk'] as const;
+export const LOCALES = ['cs', 'en', 'de', 'ua'] as const;
 export type Locale = (typeof LOCALES)[number];
 export const DEFAULT_LOCALE: Locale = 'cs';
 
 /** Název jazyka v něm samém (přepínač jazyků); nepřekládá se. */
-export const LOCALE_NAMES: Record<Locale, string> = { cs: 'Čeština', en: 'English', de: 'Deutsch', uk: 'Українська' };
+export const LOCALE_NAMES: Record<Locale, string> = { cs: 'Čeština', en: 'English', de: 'Deutsch', ua: 'Українська' };
 
 /** Jazyk → locale pro Intl (formát dat, čísel a množných čísel). */
-export const INTL_LOCALE: Record<Locale, string> = { cs: 'cs-CZ', en: 'en-GB', de: 'de-DE', uk: 'uk-UA' };
+const UA_INTL_LOCALE = new Intl.Locale('und-UA').maximize().baseName;
+export const INTL_LOCALE: Record<Locale, string> = { cs: 'cs-CZ', en: 'en-GB', de: 'de-DE', ua: UA_INTL_LOCALE };
 
 export type Currency = 'CZK';
 export const DEFAULT_CURRENCY: Currency = 'CZK';
 
-export const CATALOGS: Record<Locale, Messages> = { cs, en, de, uk };
+export const CATALOGS: Record<Locale, Messages> = { cs, en, de, ua };
 
 /** Krátké datum s dnem v týdnu: čeština číselně (so 7. 12. 2030), ostatní se zkratkou měsíce (Sat 7 Dec 2030). */
 const SHORT_DATE: Record<Locale, Intl.DateTimeFormatOptions> = {
   cs: { weekday: 'short', day: 'numeric', month: 'numeric', year: 'numeric' },
   en: { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric' },
   de: { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric' },
-  uk: { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric' },
+  ua: { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric' },
 };
 
 export type Params = Record<string, string | number>;

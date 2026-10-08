@@ -1,7 +1,7 @@
-// Українська (uk-UA). Ті самі ключі, що й у cs.ts – перевіряє tsc (satisfies Messages) і тести.
+// Українська (UA). Ті самі ключі, що й у cs.ts – перевіряє tsc (satisfies Messages) і тести.
 import type { Messages } from '../types.ts';
 
-export const uk = {
+export const ua = {
   'meta.title': 'Chalupa Všetice | Ваш куточок села',
   'meta.description': 'Будинок із садом, басейном і каміном у Вшетіцах. Перегляньте зручності, ціни та календар зайнятості.',
 

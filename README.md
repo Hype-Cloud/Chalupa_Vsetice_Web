@@ -90,7 +90,7 @@ Web je v češtině (výchozí), angličtině, němčině a ukrajinštině. Vše
 komponent – navigace, obsah, kalendář, rezervační panel, hlášky, `aria-label` a `alt` – jdou přes
 překladové klíče; v komponentách nejsou pevné texty (hlídá test).
 
-- **Katalogy:** `lib/i18n/messages/cs.ts` (vzor), `en.ts`, `de.ts`, `uk.ts`. Klíče jsou
+- **Katalogy:** `lib/i18n/messages/cs.ts` (vzor), `en.ts`, `de.ts`, `ua.ts`. Klíče jsou
   významové podle oblasti (`nav.about`, `calendar.legend.free`, `booking.quote.loading`,
   `pricing.rent.value`), ne české věty. Hodnoty jsou prostý text bez HTML; odkazy a zvýraznění
   skládá komponenta (např. odkaz na e-chalupy.cz za textem `availability.verifyOn`).
@@ -111,7 +111,7 @@ překladové klíče; v komponentách nejsou pevné texty (hlídá test).
 
 ### Volba jazyka a persistence
 
-1. `?lang=en|de|uk|cs` v adrese (sdílitelný odkaz),
+1. `?lang=en|de|ua|cs` v adrese (sdílitelný odkaz),
 2. jinak uložená preference v `localStorage` (`chalupa-vsetice.locale`),
 3. jinak čeština.
 
@@ -128,7 +128,7 @@ předrenderované jazykové stránky (`/en/` …) s `hreflang` jsou případný 
 
 ### Přidání textu nebo jazyka
 
-- **Nový text:** klíč do `cs.ts` a stejný klíč do `en.ts`, `de.ts`, `uk.ts` (jinak `tsc`
+- **Nový text:** klíč do `cs.ts` a stejný klíč do `en.ts`, `de.ts`, `ua.ts` (jinak `tsc`
   selže), v komponentě `const { t } = useI18n(); t('oblast.klic')`.
 - **Nový jazyk:** `messages/<kód>.ts` (`satisfies Messages`), kód do `LOCALES`, název do
   `LOCALE_NAMES`, locale pro Intl do `INTL_LOCALE`, krátký formát data do `SHORT_DATE`
@@ -193,7 +193,7 @@ Projekt využívá Node.js Test Runner. Databázové testy probíhají nad loká
 | d1-migrations.test.ts | 21 | Kontrola D1 migrací před deployem: číslování, konzistence konfigurací (oddělené D1, produkční POST vypnutý), čekající a neznámé migrace, fail-closed při chybě, detekce destruktivních migrací, ruční aplikace jen v terminálu s potvrzením, záloha před destruktivní migrací produkce. |
 | smoke.test.ts | 8 | Smoke test veřejných endpointů proti skutečnému Workeru: produkce (POST 404) a Preview, bez tokenů a zápisů, odhalení zapnutého POST, výpadku D1, úniku osobních údajů a veřejného exportu. |
 | frontend-quote.test.ts | 14 | Frontend rezervační sekce: cena jen z `/api/quote` (kontrakt proti skutečnému handleru), nightly se slevou, exact-stay, 422 a chyby serveru/sítě jako české hlášky, načítání bez staré ceny, souběh (starší odpověď nepřepíše novější), nový požadavek při změně termínu a hostů, žádný klientský výpočet ceny. |
-| i18n.test.ts | 17 | Jazykové verze: úplnost katalogů cs/en/de/uk (klíče, parametry, plurály, žádný český text ani HTML), fallback, volba jazyka (?lang, localStorage, čeština) a persistence, množná čísla, data a CZK v každém jazyce, kalendář, rezervační panel po přepnutí, přepínač, žádné pevné texty v komponentách ani univerzální cena 3 000 Kč. |
+| i18n.test.ts | 17 | Jazykové verze: úplnost katalogů cs/en/de/ua (klíče, parametry, plurály, žádný český text ani HTML), fallback, volba jazyka (?lang, localStorage, čeština) a persistence, množná čísla, data a CZK v každém jazyce, kalendář, rezervační panel po přepnutí, přepínač, žádné pevné texty v komponentách ani univerzální cena 3 000 Kč. |
 | **Celkem** | **274** | |
 
 ### Testované scénáře
@@ -781,7 +781,7 @@ lib/i18n/
   index.ts              jazyky, createI18n(): t(), plural(), Intl formát dat, měsíců a ceny
   types.ts              typy klíčů odvozené z češtiny (MessageKey, Messages)
   preference.ts         volba jazyka (?lang → localStorage → cs), adresa s jazykem
-  messages/             katalogy cs.ts (vzor), en.ts, de.ts, uk.ts
+  messages/             katalogy cs.ts (vzor), en.ts, de.ts, ua.ts
 lib/booking/            pravidla pobytu, výchozí cena za noc, veřejný kód a iCal UID rezervace
 lib/availability/       sdílená logika (klient i Worker)
   dates.ts              práce s daty YYYY-MM-DD, dnešek v Europe/Prague

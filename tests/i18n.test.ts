@@ -10,7 +10,7 @@ import { DAY_STATUS_KEYS, STAY_ERROR_KEYS } from '../components/booking/stayErro
 import { quoteView } from '../components/booking/quoteView.ts';
 import type { QuoteRequest } from '../components/booking/quote.ts';
 
-// i18n celého frontendu: úplnost katalogů (cs, en, de, uk), fallback, volba a persistence jazyka,
+// i18n celého frontendu: úplnost katalogů (cs, en, de, ua), fallback, volba a persistence jazyka,
 // množná čísla, data a CZK v každém jazyce, kalendář a absence pevných textů v komponentách.
 
 const ROOT = new URL('..', import.meta.url).pathname;
@@ -29,8 +29,8 @@ const extraKey = { ...en, 'nav.unknown': 'x' } satisfies Messages;
 void missingKey;
 void extraKey;
 
-test('podporované jazyky: cs, en, de, uk; výchozí čeština', () => {
-  assert.deepEqual([...LOCALES], ['cs', 'en', 'de', 'uk']);
+test('podporované jazyky: cs, en, de, ua; výchozí čeština', () => {
+  assert.deepEqual([...LOCALES], ['cs', 'en', 'de', 'ua']);
   assert.equal(DEFAULT_LOCALE, 'cs');
   assert.ok(LOCALES.every(isLocale));
   assert.ok(!isLocale('sk') && !isLocale('EN') && !isLocale(undefined) && !isLocale(null));
@@ -54,8 +54,8 @@ test('každý katalog má přesně klíče českého katalogu, neprázdné hodno
   }
 });
 
-test('katalogy en, de, uk jsou skutečně přeložené (žádný český text) a bez HTML', () => {
-  for (const locale of ['en', 'de', 'uk'] as const) {
+test('katalogy en, de, ua jsou skutečně přeložené (žádný český text) a bez HTML', () => {
+  for (const locale of ['en', 'de', 'ua'] as const) {
     for (const key of csKeys) {
       const value = (CATALOGS[locale] as Record<string, unknown>)[key];
       const text = typeof value === 'string' ? value : JSON.stringify(value);
@@ -83,7 +83,7 @@ test('množná čísla: každý jazyk má všechny kategorie Intl.PluralRules', 
     cs: { nights: ['1 noc', '2 noci', '4 noci', '5 nocí', '21 nocí', '30 nocí'], guests: ['1 host', '2 hosté', '4 hosté', '5 hostů', '7 hostů'] },
     en: { nights: ['1 night', '2 nights', '4 nights', '5 nights', '21 nights', '30 nights'], guests: ['1 guest', '2 guests', '4 guests', '5 guests', '7 guests'] },
     de: { nights: ['1 Nacht', '2 Nächte', '4 Nächte', '5 Nächte', '21 Nächte', '30 Nächte'], guests: ['1 Gast', '2 Gäste', '4 Gäste', '5 Gäste', '7 Gäste'] },
-    uk: { nights: ['1 ніч', '2 ночі', '4 ночі', '5 ночей', '21 ніч', '30 ночей'], guests: ['1 гість', '2 гості', '4 гості', '5 гостей', '7 гостей'] },
+    ua: { nights: ['1 ніч', '2 ночі', '4 ночі', '5 ночей', '21 ніч', '30 ночей'], guests: ['1 гість', '2 гості', '4 гості', '5 гостей', '7 гостей'] },
   };
   for (const locale of LOCALES) {
     const i18n = createI18n(locale);
@@ -97,7 +97,7 @@ test('datum v každém jazyce (Intl.DateTimeFormat), interně ISO', () => {
     cs: ['so 7. 12. 2030', 'sobota 7. prosince 2030', '8. 10. 22:06'],
     en: ['Sat, 7 Dec 2030', 'Saturday, 7 December 2030', '08/10, 22:06'],
     de: ['Sa., 7. Dez. 2030', 'Samstag, 7. Dezember 2030', '8.10., 22:06'],
-    uk: ['сб, 7 груд. 2030 р.', 'субота, 7 грудня 2030 р.', '08.10, 22:06'],
+    ua: ['сб, 7 груд. 2030 р.', 'субота, 7 грудня 2030 р.', '08.10, 22:06'],
   };
   for (const locale of LOCALES) {
     const i18n = createI18n(locale);
@@ -106,7 +106,7 @@ test('datum v každém jazyce (Intl.DateTimeFormat), interně ISO', () => {
 });
 
 test('cena: vždy CZK, formát podle jazyka – jazyk neurčuje měnu (en ani de nejsou EUR)', () => {
-  const expected: Record<Locale, string> = { cs: '28 500 Kč', en: 'CZK 28,500', de: '28.500 CZK', uk: '28 500 CZK' };
+  const expected: Record<Locale, string> = { cs: '28 500 Kč', en: 'CZK 28,500', de: '28.500 CZK', ua: '28 500 CZK' };
   for (const locale of LOCALES) {
     const formatted = plain(createI18n(locale).formatPrice(28500));
     assert.equal(formatted, expected[locale], locale);
@@ -119,7 +119,7 @@ test('kalendář: dny v týdnu, měsíce a rozsahy přes Intl v každém jazyce'
     cs: { weekdays: 'Po Út St Čt Pá So Ne', month: 'Listopad 2026', sameYear: 'listopad – prosinec 2026', twoYears: 'prosinec 2026 – únor 2027' },
     en: { weekdays: 'Mon Tue Wed Thu Fri Sat Sun', month: 'November 2026', sameYear: 'November – December 2026', twoYears: 'December 2026 – February 2027' },
     de: { weekdays: 'Mo Di Mi Do Fr Sa So', month: 'November 2026', sameYear: 'November – Dezember 2026', twoYears: 'Dezember 2026 – Februar 2027' },
-    uk: { weekdays: 'Пн Вт Ср Чт Пт Сб Нд', month: 'Листопад 2026 р.', sameYear: 'листопад – грудень 2026 р.', twoYears: 'грудень 2026 р. – лютий 2027 р.' },
+    ua: { weekdays: 'Пн Вт Ср Чт Пт Сб Нд', month: 'Листопад 2026 р.', sameYear: 'листопад – грудень 2026 р.', twoYears: 'грудень 2026 р. – лютий 2027 р.' },
   };
   for (const locale of LOCALES) {
     const i18n = createI18n(locale);
@@ -166,7 +166,7 @@ test('rezervační panel: stejný stav nabídky se po přepnutí jazyka zobrazí
     cs: { total: '29 900 Kč', forStay: 'za 4 noci', exact: 'Pevná cena pro tento termín', discount: 'Sleva 5 % (pobyt min. 7 nocí)', loading: 'Počítáme cenu…', error: 'Cenu teď nelze spočítat. Zkuste to prosím za chvíli.' },
     en: { total: 'CZK 29,900', forStay: 'for 4 nights', exact: 'Fixed price for these dates', discount: 'Discount 5% (stays of 7 nights or more)', loading: 'Calculating the price…', error: 'The price can’t be calculated right now. Please try again shortly.' },
     de: { total: '29.900 CZK', forStay: 'für 4 Nächte', exact: 'Festpreis für diesen Termin', discount: 'Rabatt 5 % (Aufenthalt mind. 7 Nächte)', loading: 'Preis wird berechnet…', error: 'Der Preis kann gerade nicht berechnet werden. Bitte versuchen Sie es gleich noch einmal.' },
-    uk: { total: '29 900 CZK', forStay: 'за 4 ночі', exact: 'Фіксована ціна на ці дати', discount: 'Знижка 5 % (перебування мінімум 7 ночей)', loading: 'Розраховуємо ціну…', error: 'Зараз неможливо розрахувати ціну. Спробуйте, будь ласка, трохи пізніше.' },
+    ua: { total: '29 900 CZK', forStay: 'за 4 ночі', exact: 'Фіксована ціна на ці дати', discount: 'Знижка 5 % (перебування мінімум 7 ночей)', loading: 'Розраховуємо ціну…', error: 'Зараз неможливо розрахувати ціну. Спробуйте, будь ласка, трохи пізніше.' },
   };
   for (const locale of LOCALES) {
     const i18n = createI18n(locale);
@@ -212,7 +212,7 @@ const brokenStorage: LocaleStorage = {
 test('volba jazyka: ?lang= v URL → uložená preference → čeština', () => {
   const { storage } = memoryStorage({ [LOCALE_STORAGE_KEY]: 'de' });
   assert.equal(resolveLocale({ search: '?lang=en', storage }), 'en', 'URL má přednost');
-  assert.equal(resolveLocale({ search: '?lang=UK', storage }), 'uk');
+  assert.equal(resolveLocale({ search: '?lang=UA', storage }), 'ua');
   assert.equal(resolveLocale({ search: '?lang=sk', storage }), 'de', 'neplatný jazyk v URL → preference');
   assert.equal(resolveLocale({ search: '', storage }), 'de');
   assert.equal(resolveLocale({ search: '?utm=x', storage: memoryStorage().storage }), 'cs');
@@ -225,20 +225,20 @@ test('volba jazyka: ?lang= v URL → uložená preference → čeština', () => 
 
 test('persistence: přepnutí jazyka se uloží a při další návštěvě obnoví; chyba úložiště nevadí', () => {
   const { storage, data } = memoryStorage();
-  storeLocale(storage, 'uk');
-  assert.equal(data.get(LOCALE_STORAGE_KEY), 'uk');
-  assert.equal(readStoredLocale(storage), 'uk');
-  assert.equal(resolveLocale({ search: '', storage }), 'uk', 'další návštěva bez ?lang');
+  storeLocale(storage, 'ua');
+  assert.equal(data.get(LOCALE_STORAGE_KEY), 'ua');
+  assert.equal(readStoredLocale(storage), 'ua');
+  assert.equal(resolveLocale({ search: '', storage }), 'ua', 'další návštěva bez ?lang');
   storeLocale(storage, 'cs');
   assert.equal(resolveLocale({ search: '', storage }), 'cs');
   assert.doesNotThrow(() => storeLocale(brokenStorage, 'en'));
   assert.equal(readStoredLocale(brokenStorage), null);
 });
 
-test('adresa po přepnutí: ?lang= pro en/de/uk, čeština bez parametru; ostatní parametry a kotva zůstanou', () => {
+test('adresa po přepnutí: ?lang= pro en/de/ua, čeština bez parametru; ostatní parametry a kotva zůstanou', () => {
   assert.equal(urlWithLocale('https://chalupavsetice.cz/', 'en'), 'https://chalupavsetice.cz/?lang=en');
   assert.equal(urlWithLocale('https://chalupavsetice.cz/?lang=en#terminy', 'de'), 'https://chalupavsetice.cz/?lang=de#terminy');
-  assert.equal(urlWithLocale('https://chalupavsetice.cz/?utm=x&lang=uk#cenik', 'cs'), 'https://chalupavsetice.cz/?utm=x#cenik');
+  assert.equal(urlWithLocale('https://chalupavsetice.cz/?utm=x&lang=ua#cenik', 'cs'), 'https://chalupavsetice.cz/?utm=x#cenik');
 });
 
 test('přepínač jazyků: CS EN DE UA, právě jeden aktivní, názvy jazyků (ne vlajky)', () => {
