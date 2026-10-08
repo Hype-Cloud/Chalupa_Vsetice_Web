@@ -70,8 +70,9 @@ Skutečný stav (nastaveno ručně v dashboardu, v diffu není vidět):
   `POST /api/reservations`, `GET /api/availability`) a zobrazuje/formátuje výsledek.
 - Cena na frontendu se **nepočítá** jako počet nocí × 3 000 Kč; zobrazuje se `totalCzk`
   z `/api/quote` a podle `pricingMode` (`nightly` / `exact-stay`) případně rozpis nocí.
-- Frontend od začátku s i18n infrastrukturou (texty přes klíče, formátování přes `Intl`, jazyk
-  v URL); překlady do dalších jazyků později. API vrací jen stabilní kódy (`error`), ne texty.
+- Frontend je vícejazyčný (cs, en, de, uk – `lib/i18n`): žádné pevné texty v komponentách
+  (ani `aria-label`/`alt`), každý nový klíč do všech čtyř katalogů (tsc to vynutí), formátování
+  přes `Intl`. Jazyk a měna jsou oddělené (vždy CZK). API vrací jen stabilní kódy (`error`), ne texty.
 
 ## Secrets a data
 

@@ -4,5 +4,7 @@ export { CAPACITY } from '../../lib/booking/rules.ts';
 export const HORIZON_MONTHS = 12;
 /** Oficiální profil a poptávka na e-chalupy.cz. */
 export const INQUIRY_URL = 'https://www.e-chalupy.cz/netvorice-ubytovani-vsetice-chalupa-k-pronajmu-o19216';
+/** Text odkazu na e-chalupy.cz (název webu, nepřekládá se). */
+export const INQUIRY_LABEL = 'e-chalupy.cz ↗';
 /** Obsazenost se v otevřené stránce obnovuje po 5 minutách (stejně jako cache Workeru). */
 export const REFRESH_MS = 5 * 60_000;

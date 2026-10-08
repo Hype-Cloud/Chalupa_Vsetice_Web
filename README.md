@@ -10,12 +10,15 @@ Cloudflare Workers.
 
 ## Funkce
 
+- **Jazyky:** čeština, angličtina, němčina a ukrajinština – celý web včetně kalendáře,
+  rezervačního panelu, hlášek a popisků pro čtečky. Přepínač CS / EN / DE / UA v hlavičce,
+  viz [Jazykové verze](#jazykové-verze-i18n).
 - **Úvodní sekce, informace o chalupě, vybavení a ceník** jsou responzivní a na
   mobilu (≤ 640 px) se přeskládají do jednoho sloupce.
 - **Rezervační kalendář** je vlastní React komponenta:
   - zobrazuje 1–3 měsíce podle skutečné šířky panelu a šipkami lze procházet
     12 měsíců dopředu,
-  - má české názvy, začíná pondělím a zvýrazňuje dnešek,
+  - názvy měsíců a dnů má v jazyce webu (Intl), začíná pondělím a zvýrazňuje dnešek,
   - rozlišuje volné a obsazené dny i dny příjezdu a odjezdu jiných hostů,
   - první klik vybere příjezd a druhý odjezd; pobyt přes obsazené období ani
     v minulosti vybrat nejde,
@@ -26,7 +29,8 @@ Cloudflare Workers.
   počet nocí a cenu ze serveru (`POST /api/quote`, při každé změně termínu nebo hostů).
   Web cenu nepočítá: pevnou cenu termínu (exact-stay) označí „Pevná cena pro tento termín“,
   u slevy ukáže rozpis ze serveru. Během načítání se žádná částka nezobrazuje, chyby jsou
-  české hlášky (u chyby serveru s „Zkusit znovu“).
+  srozumitelné hlášky v jazyce webu (u chyby serveru s „Zkusit znovu“). Ceník na stránce
+  neuvádí univerzální cenu za noc – cena pobytu závisí na termínu.
 - **Poptávka** vede na oficiální profil chalupy na e-chalupy.cz. Výběr termínu na
   webu není rezervací. Termín a počet hostů host uvede v poptávce na e-chalupách.
 - **WebMCP:** pokud prohlížeč podporuje experimentální API `document.modelContext`,
@@ -80,6 +84,56 @@ e-chalupy (iCal export, GET) → Worker /api/availability → React kalendář
 - Po neúspěšném stažení se další pokus provede nejdřív za minutu.
 - Neplatný iCal se nikdy nevyloží jako prázdný kalendář.
 
+## Jazykové verze (i18n)
+
+Web je v češtině (výchozí), angličtině, němčině a ukrajinštině. Všechny uživatelské texty
+komponent – navigace, obsah, kalendář, rezervační panel, hlášky, `aria-label` a `alt` – jdou přes
+překladové klíče; v komponentách nejsou pevné texty (hlídá test).
+
+- **Katalogy:** `lib/i18n/messages/cs.ts` (vzor), `en.ts`, `de.ts`, `uk.ts`. Klíče jsou
+  významové podle oblasti (`nav.about`, `calendar.legend.free`, `booking.quote.loading`,
+  `pricing.rent.value`), ne české věty. Hodnoty jsou prostý text bez HTML; odkazy a zvýraznění
+  skládá komponenta (např. odkaz na e-chalupy.cz za textem `availability.verifyOn`).
+- **Typová kontrola:** `MessageKey` a `Messages` se odvozují z českého katalogu. Ostatní
+  katalogy jsou `satisfies Messages`, takže chybějící i přebytečný klíč je chyba `tsc`.
+  Test navíc ověří stejné parametry `{…}`, všechny tvary množného čísla a že překlad není
+  česky.
+- **Množná čísla:** `plural(key, count)` vybírá tvar podle `Intl.PluralRules` jazyka
+  (`one` / `few` / `many` / `other`; čeština a ukrajinština mají `few` i `many`, angličtina
+  a němčina jen `one` / `other`).
+- **Formátování:** data, názvy měsíců, dny v týdnu a rozsahy měsíců přes `Intl.DateTimeFormat`
+  (interně zůstávají ISO data `YYYY-MM-DD`), ceny přes `Intl.NumberFormat`.
+- **Jazyk a měna jsou oddělené.** Měna je vždy CZK (`28 500 Kč`, `CZK 28,500`, `28.500 CZK`);
+  angličtina ani němčina neznamenají EUR. Částky přicházejí ze serveru – cena termínu je vždy
+  `totalCzk` z `POST /api/quote`, web ji nepočítá.
+- **Fallback:** chybějící překlad se zobrazí česky. Je to jen pojistka – produkční katalogy
+  jsou úplné (test).
+
+### Volba jazyka a persistence
+
+1. `?lang=en|de|uk|cs` v adrese (sdílitelný odkaz),
+2. jinak uložená preference v `localStorage` (`chalupa-vsetice.locale`),
+3. jinak čeština.
+
+Přepnutím v hlavičce se jazyk uloží do `localStorage` a adresa se upraví na `?lang=…`
+(čeština bez parametru) přes `history.replaceState` – bez reloadu. Změna jazyka jen
+přerenderuje texty; termín, hosté i načtená cena zůstanou (nový požadavek na `/api/quote` se
+nevolá). Nedostupné `localStorage` (soukromý režim) nevadí, jazyk se jen nezapamatuje.
+
+Web je jedna staticky předrenderovaná stránka, proto je jazyk v query parametru, ne v cestě
+(`/en/`) – bez změny routingu a buildu. Statický HTML je česky (`<html lang="cs">`, titulek
+a popis z českého katalogu); jiný jazyk se nastaví hned po načtení v prohlížeči včetně
+`lang`, `<title>` a `meta description`. Vyhledávače tak indexují jen češtinu – samostatné
+předrenderované jazykové stránky (`/en/` …) s `hreflang` jsou případný navazující krok.
+
+### Přidání textu nebo jazyka
+
+- **Nový text:** klíč do `cs.ts` a stejný klíč do `en.ts`, `de.ts`, `uk.ts` (jinak `tsc`
+  selže), v komponentě `const { t } = useI18n(); t('oblast.klic')`.
+- **Nový jazyk:** `messages/<kód>.ts` (`satisfies Messages`), kód do `LOCALES`, název do
+  `LOCALE_NAMES`, locale pro Intl do `INTL_LOCALE`, krátký formát data do `SHORT_DATE`
+  a katalog do `CATALOGS` v `lib/i18n/index.ts`. Test ověří úplnost a tvary množného čísla.
+
 ## Technologie
 
 | Oblast | Technologie |
@@ -120,7 +174,7 @@ Produkční endpoint pro vytváření rezervací zůstává vypnutý. Testovací
 
 Projekt využívá Node.js Test Runner. Databázové testy probíhají nad lokální Cloudflare D1 prostřednictvím Miniflare/workerd. Testovací údaje jsou syntetické.
 
-**Výsledek posledního vývojového běhu: 258/258 úspěšných testů.**
+**Výsledek posledního vývojového běhu: 274/274 úspěšných testů.**
 
 | Testovací soubor | Počet | Zaměření |
 |---|---:|---|
@@ -138,8 +192,9 @@ Projekt využívá Node.js Test Runner. Databázové testy probíhají nad loká
 | reservation-note.test.ts | 17 | Poznámka hosta: NULL pro prázdné hodnoty, víceřádkový text, Unicode a NFC, limit 2000 znaků, zakázané řídicí a bidi znaky, SQL/HTML text jen jako text, není ve veřejné odpovědi ani v logách, idempotence, escapování v iCal exportu, CHECK v D1. |
 | d1-migrations.test.ts | 21 | Kontrola D1 migrací před deployem: číslování, konzistence konfigurací (oddělené D1, produkční POST vypnutý), čekající a neznámé migrace, fail-closed při chybě, detekce destruktivních migrací, ruční aplikace jen v terminálu s potvrzením, záloha před destruktivní migrací produkce. |
 | smoke.test.ts | 8 | Smoke test veřejných endpointů proti skutečnému Workeru: produkce (POST 404) a Preview, bez tokenů a zápisů, odhalení zapnutého POST, výpadku D1, úniku osobních údajů a veřejného exportu. |
-| frontend-quote.test.ts | 15 | Frontend rezervační sekce: cena jen z `/api/quote` (kontrakt proti skutečnému handleru), nightly se slevou, exact-stay, 422 a chyby serveru/sítě jako české hlášky, načítání bez staré ceny, souběh (starší odpověď nepřepíše novější), nový požadavek při změně termínu a hostů, i18n, žádný klientský výpočet ceny. |
-| **Celkem** | **258** | |
+| frontend-quote.test.ts | 14 | Frontend rezervační sekce: cena jen z `/api/quote` (kontrakt proti skutečnému handleru), nightly se slevou, exact-stay, 422 a chyby serveru/sítě jako české hlášky, načítání bez staré ceny, souběh (starší odpověď nepřepíše novější), nový požadavek při změně termínu a hostů, žádný klientský výpočet ceny. |
+| i18n.test.ts | 17 | Jazykové verze: úplnost katalogů cs/en/de/uk (klíče, parametry, plurály, žádný český text ani HTML), fallback, volba jazyka (?lang, localStorage, čeština) a persistence, množná čísla, data a CZK v každém jazyce, kalendář, rezervační panel po přepnutí, přepínač, žádné pevné texty v komponentách ani univerzální cena 3 000 Kč. |
+| **Celkem** | **274** | |
 
 ### Testované scénáře
 
@@ -716,9 +771,17 @@ components/booking/
   useAvailability.ts    načítání /api/availability
   quote.ts, useQuote.ts cenová nabídka z /api/quote (zrušení starších požadavků, stav načítání a chyb)
   quoteView.ts          co panel zobrazí pro nabídku (nightly / exact-stay, sleva, chybové hlášky)
-  config.ts, format.ts  kapacita, odkaz na poptávku, texty kalendáře a formátování
-components/i18n.ts      useI18n() – texty a formátování aktuálního jazyka (zatím čeština)
-lib/i18n/               překladové klíče (messages/cs.ts), množná čísla, Intl formát data a ceny
+  stayErrors.ts         kód chyby výběru / stav dne → překladový klíč
+  config.ts             kapacita, odkaz na poptávku
+components/
+  I18nProvider.tsx      aktuální jazyk celého webu (volba, persistence, lang/title/description)
+  LanguageSwitcher.tsx  přepínač CS / EN / DE / UA
+  i18n.ts               useI18n(), useSetLocale()
+lib/i18n/
+  index.ts              jazyky, createI18n(): t(), plural(), Intl formát dat, měsíců a ceny
+  types.ts              typy klíčů odvozené z češtiny (MessageKey, Messages)
+  preference.ts         volba jazyka (?lang → localStorage → cs), adresa s jazykem
+  messages/             katalogy cs.ts (vzor), en.ts, de.ts, uk.ts
 lib/booking/            pravidla pobytu, výchozí cena za noc, veřejný kód a iCal UID rezervace
 lib/availability/       sdílená logika (klient i Worker)
   dates.ts              práce s daty YYYY-MM-DD, dnešek v Europe/Prague

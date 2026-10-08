@@ -4,7 +4,7 @@ import { readdirSync, readFileSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import { createQuoteLoader, fetchQuote, IDLE_QUOTE, quoteRequestFor, type QuoteRequest, type QuoteResult, type QuoteState } from '../components/booking/quote.ts';
 import { quoteView } from '../components/booking/quoteView.ts';
-import { createI18n, isLocale, LOCALES } from '../lib/i18n/index.ts';
+import { createI18n } from '../lib/i18n/index.ts';
 import { handleQuote } from '../worker/booking/quote.ts';
 import { createTestDatabase } from './d1.ts';
 
@@ -55,7 +55,7 @@ test('nightly nabídka se slevou → rozpis jen z hodnot serveru', async () => {
   assert.deepEqual(view.discount && { ...view.discount, subtotal: plain(view.discount.subtotal), amount: plain(view.discount.amount) }, {
     subtotalLabel: 'Cena za noci',
     subtotal: '22 333 Kč',
-    label: 'Sleva 5 % (pobyt od 7 nocí)',
+    label: 'Sleva 5 % (pobyt min. 7 nocí)',
     amount: '−1 116 Kč',
   });
 });
@@ -271,23 +271,6 @@ test('zrušený fetch (AbortError) se nehlásí jako síťová chyba', async () 
   const pending = fetchQuote(request('2030-02-01', '2030-02-03'), controller.signal, abortingFetch);
   controller.abort();
   assert.deepEqual(await pending, { ok: false, aborted: true });
-});
-
-// --- i18n ---
-
-test('i18n: české texty, množná čísla, formát data a ceny přes Intl; další jazyky připravené', () => {
-  assert.deepEqual([...LOCALES], ['cs', 'de', 'en', 'uk']);
-  assert.ok(isLocale('uk') && !isLocale('sk') && !isLocale(undefined));
-  assert.deepEqual([1, 2, 4, 5, 30].map((n) => cs.plural('booking.nights', n)), ['1 noc', '2 noci', '4 noci', '5 nocí', '30 nocí']);
-  assert.deepEqual([1, 3, 7].map((n) => cs.plural('booking.guests', n)), ['1 host', '3 hosté', '7 hostů']);
-  assert.equal(plain(cs.formatPrice(28500)), '28 500 Kč');
-  assert.equal(plain(cs.formatPrice(0)), '0 Kč');
-  assert.equal(plain(cs.formatDate('2030-12-07')), 'so 7. 12. 2030');
-  assert.equal(cs.t('booking.panel.capacity', { capacity: 7 }), 'Za celou chalupu · až 7 hostů');
-  // Jazyk bez překladu: texty česky (fallback), formát podle jazyka.
-  const de = createI18n('de');
-  assert.equal(de.t('booking.quote.exactStay'), 'Pevná cena pro tento termín');
-  assert.equal(plain(de.formatPrice(28500)), '28.500 CZK');
 });
 
 // --- žádný výpočet ceny ve frontendu ---

@@ -4,8 +4,8 @@ import { addDays, addMonths, startOfMonth, type IsoDate } from '../../lib/availa
 import { isIncomplete, type Occupancy } from '../../lib/availability/occupancy.ts';
 import type { Stay } from '../../lib/availability/stay.ts';
 import { CalendarMonth } from './CalendarMonth.tsx';
-import { HORIZON_MONTHS, INQUIRY_URL } from './config.ts';
-import { formatDateTime, formatRange } from './format.ts';
+import { HORIZON_MONTHS, INQUIRY_LABEL, INQUIRY_URL } from './config.ts';
+import { useI18n } from '../i18n.ts';
 import type { AvailabilityState } from './useAvailability.ts';
 
 // Měsíc potřebuje alespoň 230 px, aby dny zůstaly dobře čitelné a klikatelné; mezera 24 px.
@@ -25,6 +25,7 @@ interface Props {
 }
 
 export function AvailabilityCalendar({ today, availability, occupancy, stay, message, onPick }: Props) {
+  const { t, formatDateTime, formatMonthRange } = useI18n();
   const firstMonth = startOfMonth(today);
   const lastDay = addDays(addMonths(firstMonth, HORIZON_MONTHS), -1);
   const monthsRef = useRef<HTMLDivElement>(null);
@@ -84,45 +85,42 @@ export function AvailabilityCalendar({ today, availability, occupancy, stay, mes
     setFocusDate(next);
   };
 
+  // Odkaz se skládá v komponentě – překlady jsou jen prostý text (žádné HTML v katalogu).
+  const verify = (
+    <>
+      {' '}{t('availability.verifyOn')}{' '}
+      <a href={INQUIRY_URL} target="_blank" rel="noreferrer">{INQUIRY_LABEL}</a>.
+    </>
+  );
   const status = (() => {
-    if (availability.phase === 'loading') return <p className="bk-status" role="status">Načítáme aktuální obsazenost…</p>;
+    if (availability.phase === 'loading') return <p className="bk-status" role="status">{t('availability.loading')}</p>;
     if (availability.phase === 'error' || availability.data.status === 'unavailable') {
-      return (
-        <p className="bk-status is-warning" role="alert">
-          Obsazenost se teď nepodařilo načíst, proto termíny nelze vybrat. Volné termíny ověříte na{' '}
-          <a href={INQUIRY_URL} target="_blank" rel="noreferrer">e-chalupy.cz ↗</a>.
-        </p>
-      );
+      return <p className="bk-status is-warning" role="alert">{t('availability.unavailable')}{verify}</p>;
     }
     const { status: dataStatus, updatedAt } = availability.data;
     if (isIncomplete(availability.data)) {
-      return (
-        <p className="bk-status is-warning" role="status">
-          Část obsazenosti z e-chalupy.cz se nepodařilo načíst, proto teď termíny nelze vybrat. Známé obsazené dny zobrazujeme, volné termíny ověříte na{' '}
-          <a href={INQUIRY_URL} target="_blank" rel="noreferrer">e-chalupy.cz ↗</a>.
-        </p>
-      );
+      return <p className="bk-status is-warning" role="status">{t('availability.incomplete')}{verify}</p>;
     }
     if (dataStatus === 'stale') {
       return (
         <p className="bk-status is-warning" role="status">
-          Obsazenost se nepodařilo obnovit, zobrazujeme stav z {updatedAt ? formatDateTime(updatedAt) : 'poslední synchronizace'}. Termín potvrdí majitel.
+          {updatedAt ? t('availability.staleAt', { time: formatDateTime(updatedAt) }) : t('availability.staleUnknown')}
         </p>
       );
     }
-    return <p className="bk-status">Obsazenost z e-chalupy.cz{updatedAt ? ` · aktualizováno ${formatDateTime(updatedAt)}` : ''}</p>;
+    return <p className="bk-status">{updatedAt ? t('availability.sourceUpdated', { time: formatDateTime(updatedAt) }) : t('availability.source')}</p>;
   })();
 
-  const hint = !stay.arrival || stay.departure ? 'Klikněte na den příjezdu.' : 'Teď vyberte den odjezdu.';
+  const hint = !stay.arrival || stay.departure ? t('calendar.hintArrival') : t('calendar.hintDeparture');
 
   return (
     <div className="bk-calendar">
       <div className="calendar-nav">
-        <button type="button" onClick={() => setOffset(Math.max(0, first - perView))} disabled={first <= 0} aria-label="Předchozí měsíce">
+        <button type="button" onClick={() => setOffset(Math.max(0, first - perView))} disabled={first <= 0} aria-label={t('calendar.previousMonths')}>
           <ChevronLeft size={18} strokeWidth={1.6} />
         </button>
-        <span aria-live="polite">{formatRange(months[0], months[months.length - 1])}</span>
-        <button type="button" onClick={() => setOffset(Math.min(maxOffset, first + perView))} disabled={first >= maxOffset} aria-label="Další měsíce">
+        <span aria-live="polite">{formatMonthRange(months[0], months[months.length - 1])}</span>
+        <button type="button" onClick={() => setOffset(Math.min(maxOffset, first + perView))} disabled={first >= maxOffset} aria-label={t('calendar.nextMonths')}>
           <ChevronRight size={18} strokeWidth={1.6} />
         </button>
       </div>
@@ -132,12 +130,12 @@ export function AvailabilityCalendar({ today, availability, occupancy, stay, mes
           <CalendarMonth key={monthStart} monthStart={monthStart} today={today} occupancy={occupancy} stay={stay} focusDate={tabbable} onPick={onPick} onFocusDate={setFocusDate} />
         ))}
       </div>
-      <ul className="bk-legend" aria-label="Legenda">
-        <li><i className="is-free" /> Volno</li>
-        <li><i className="is-busy" /> Obsazeno</li>
-        <li><i className="is-checkin" /> Příjezd / odjezd jiných hostů</li>
-        <li><i className="is-selected" /> Váš pobyt</li>
-        <li><i className="is-today" /> Dnes</li>
+      <ul className="bk-legend" aria-label={t('calendar.legend.label')}>
+        <li><i className="is-free" /> {t('calendar.legend.free')}</li>
+        <li><i className="is-busy" /> {t('calendar.legend.busy')}</li>
+        <li><i className="is-checkin" /> {t('calendar.legend.changeover')}</li>
+        <li><i className="is-selected" /> {t('calendar.legend.selected')}</li>
+        <li><i className="is-today" /> {t('calendar.legend.today')}</li>
       </ul>
       {status}
     </div>

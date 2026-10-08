@@ -1,13 +1,13 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { isIsoDate, todayInPrague, type IsoDate } from '../../lib/availability/dates.ts';
 import { occupancyFromResponse } from '../../lib/availability/occupancy.ts';
-import { EMPTY_STAY, nights, pickDay, rangeError, setArrival, setDeparture, type Stay, type StayContext, type StayUpdate } from '../../lib/availability/stay.ts';
+import { EMPTY_STAY, nights, pickDay, rangeError, setArrival, setDeparture, type Stay, type StayContext, type StayError, type StayUpdate } from '../../lib/availability/stay.ts';
 import { useI18n } from '../i18n.ts';
 import { AvailabilityCalendar } from './AvailabilityCalendar.tsx';
 import { BookingPanel } from './BookingPanel.tsx';
-import { STAY_ERRORS } from './format.ts';
 import { fetchQuote, quoteRequestFor } from './quote.ts';
 import { quoteView } from './quoteView.ts';
+import { STAY_ERROR_KEYS } from './stayErrors.ts';
 import { useAvailability } from './useAvailability.ts';
 import { useQuote } from './useQuote.ts';
 
@@ -27,7 +27,8 @@ export function BookingSection() {
 
   const [stay, setStay] = useState<Stay>(EMPTY_STAY);
   const [guests, setGuests] = useState(2);
-  const [message, setMessage] = useState<{ text: string; source: Source } | null>(null);
+  // Kód chyby výběru (ne text) – hláška se přeloží až při zobrazení, takže po přepnutí jazyka sedí.
+  const [message, setMessage] = useState<{ error: StayError; source: Source } | null>(null);
   const i18n = useI18n();
   const quote = useQuote(quoteRequestFor(stay, guests));
 
@@ -36,12 +37,12 @@ export function BookingSection() {
     if (!ctx) return;
     const result = update(ctx);
     setStay(result.stay);
-    setMessage(result.error ? { text: STAY_ERRORS[result.error], source } : null);
+    setMessage(result.error ? { error: result.error, source } : null);
   };
 
   // Nástroj pro prohlížeče s WebMCP (document.modelContext): vybere termín stejnou validací.
-  const latest = useRef({ ctx, guests, setStay, setMessage });
-  latest.current = { ctx, guests, setStay, setMessage };
+  const latest = useRef({ ctx, guests, i18n, setStay, setMessage });
+  latest.current = { ctx, guests, i18n, setStay, setMessage };
   useEffect(() => {
     const mc = (document as unknown as { modelContext?: { registerTool?: (tool: unknown, options: unknown) => unknown } }).modelContext;
     if (!mc?.registerTool) return;
@@ -50,13 +51,13 @@ export function BookingSection() {
       mc.registerTool(
         {
           name: 'estimate_stay',
-          description: 'Vybere termín pobytu v kalendáři, ověří ho proti zveřejněné obsazenosti a zjistí cenu ze serveru. Nevytváří rezervaci ani poptávku.',
+          description: latest.current.i18n.t('agent.estimateStay.description'),
           inputSchema: { type: 'object', properties: { arrival: { type: 'string' }, departure: { type: 'string' } }, required: ['arrival', 'departure'], additionalProperties: false },
           execute: async (input: { arrival: string; departure: string }) => {
-            const { ctx: current, guests: currentGuests } = latest.current;
-            if (!current || !isIsoDate(input.arrival) || !isIsoDate(input.departure)) throw new Error('Neplatný termín');
+            const { ctx: current, guests: currentGuests, i18n: currentI18n } = latest.current;
+            if (!current || !isIsoDate(input.arrival) || !isIsoDate(input.departure)) throw new Error(currentI18n.t('agent.estimateStay.invalid'));
             const error = rangeError(input.arrival, input.departure, current);
-            if (error && error !== 'range-busy' && error !== 'arrival-busy') throw new Error(STAY_ERRORS[error]);
+            if (error && error !== 'range-busy' && error !== 'arrival-busy') throw new Error(currentI18n.t(STAY_ERROR_KEYS[error]));
             if (!error) {
               latest.current.setStay({ arrival: input.arrival, departure: input.departure });
               latest.current.setMessage(null);
@@ -83,18 +84,18 @@ export function BookingSection() {
   return (
     <div className="booking-grid">
       <div className="calendar-panel">
-        <div className="calendar-title"><h3>Kalendář obsazenosti</h3></div>
+        <div className="calendar-title"><h3>{i18n.t('calendar.title')}</h3></div>
         {today ? (
           <AvailabilityCalendar
             today={today}
             availability={availability}
             occupancy={occupancy}
             stay={stay}
-            message={message?.source === 'calendar' ? message.text : null}
+            message={message?.source === 'calendar' ? i18n.t(STAY_ERROR_KEYS[message.error]) : null}
             onPick={(date) => apply('calendar', (c) => pickDay(stay, date, c))}
           />
         ) : (
-          <div className="bk-calendar is-placeholder" role="status">Načítáme kalendář…</div>
+          <div className="bk-calendar is-placeholder" role="status">{i18n.t('calendar.loading')}</div>
         )}
       </div>
       <BookingPanel
@@ -103,7 +104,7 @@ export function BookingSection() {
         guests={guests}
         nights={nights(stay)}
         quote={quoteView(quote.state, i18n)}
-        message={message?.source === 'panel' ? message.text : null}
+        message={message?.source === 'panel' ? i18n.t(STAY_ERROR_KEYS[message.error]) : null}
         onArrival={(date) => apply('panel', (c) => setArrival(stay, date, c))}
         onDeparture={(date) => apply('panel', (c) => setDeparture(stay, date, c))}
         onGuests={setGuests}
