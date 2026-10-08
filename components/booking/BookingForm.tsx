@@ -110,22 +110,39 @@ export function BookingForm({ contact, onContact, submission, block, priceChange
   );
 }
 
-/** Potvrzení po úspěšném odeslání – jen údaje, které vrací server. */
+/**
+ * Potvrzení po úspěšném odeslání – jen údaje, které vrací server. Kód rezervace v odpovědi zůstává
+ * (interní identifikátor), host ho ale v UI nepotřebuje.
+ */
 export function BookingSuccess({ reservation }: { reservation: ReservationConfirmation }) {
   const { t, plural, formatDate, formatPrice } = useI18n();
+  const root = useRef<HTMLDivElement>(null);
   const heading = useRef<HTMLParagraphElement>(null);
-  useEffect(() => heading.current?.focus(), []);
+  useEffect(() => {
+    // Fokus pro čtečky obrazovky bez skoku; posun až po vykreslení (formulář pod blokem už zmizel
+    // a stránka je kratší), aby se kalendář a potvrzení ukázaly celé.
+    heading.current?.focus({ preventScroll: true });
+    const frame = requestAnimationFrame(() => {
+      const panel = root.current?.closest('aside');
+      const grid = root.current?.closest('.booking-grid');
+      // Celý blok, pokud se vejde do okna (desktop); jinak samotné potvrzení (mobil).
+      const target = grid && grid.getBoundingClientRect().height <= window.innerHeight ? grid : panel;
+      const reduce = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
+      target?.scrollIntoView({ behavior: reduce ? 'instant' : 'smooth', block: 'center' });
+    });
+    return () => cancelAnimationFrame(frame);
+  }, []);
   return (
-    <div className="booking-success" role="status">
+    <div className="booking-success" role="status" ref={root}>
       <p className="price booking-success-title" tabIndex={-1} ref={heading}>{t('reservation.success.title')}</p>
       <dl className="estimate">
-        <div className="booking-code"><dt>{t('reservation.success.code')}</dt><dd>{reservation.code}</dd></div>
         <div><dt>{t('reservation.success.stay')}</dt><dd>{formatDate(reservation.arrival)} – {formatDate(reservation.departure)}</dd></div>
         <div><dt>{t('reservation.success.guests')}</dt><dd>{plural('booking.guests', reservation.guests)}</dd></div>
         <div><dt>{t('reservation.success.nights')}</dt><dd>{plural('booking.nights', reservation.nights)}</dd></div>
         <div><dt>{t('reservation.success.price')}</dt><dd>{formatPrice(reservation.priceCzk)}</dd></div>
       </dl>
-      <p className="small">{t('reservation.success.keepCode')}</p>
+      <p className="booking-success-note">{t('reservation.success.emailNote')}</p>
+      <p className="booking-success-thanks">{t('reservation.success.thanks')}</p>
     </div>
   );
 }

@@ -41,8 +41,8 @@ export function BookingPanel(props: Props) {
 
   if (success) {
     return (
-      <aside className="booking" aria-labelledby="booking-title">
-        <p className="eyebrow" id="booking-title">{t('booking.panel.eyebrow')}</p>
+      // Bez eyebrow – potvrzení začíná rovnou titulkem.
+      <aside className="booking is-success" aria-label={t('reservation.success.title')}>
         {success}
       </aside>
     );

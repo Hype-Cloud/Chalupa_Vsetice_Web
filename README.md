@@ -483,8 +483,11 @@ web dál nabízí poptávku přes e-chalupy.
   znovu načte z `/api/quote` (summary ukáže novou cenu i rozpis) a panel zobrazí „Cena se mezitím
   změnila z X na Y. Zkontrolujte ji a rezervaci znovu potvrďte.“ Další odeslání = vědomé
   potvrzení s novým klíčem.
-- **Úspěch:** potvrzení ve stejném panelu – kód rezervace, termín, hosté, noci a cena. Variabilní
-  symbol, platební údaje ani e-mail se zatím nezobrazují ani neslibují.
+- **Úspěch:** potvrzení v panelu (bez eyebrow) – centrovaný titulek, termín, hosté, noci a cena,
+  patička „Potvrzení rezervace vám dorazí e-mailem.“ a „Těšíme se na váš pobyt.“ Kód rezervace
+  zůstává v odpovědi API, v UI se nezobrazuje; variabilní symbol ani platební údaje také ne.
+  Kontaktní část pod blokem zmizí a stránka se po vykreslení posune zpět k bloku (celý grid,
+  pokud se vejde do okna, jinak potvrzení); reveal animace respektuje `prefers-reduced-motion`.
 
 ### Ceník a cenová nabídka
 
