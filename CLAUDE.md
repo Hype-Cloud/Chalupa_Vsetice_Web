@@ -73,6 +73,10 @@ Skutečný stav (nastaveno ručně v dashboardu, v diffu není vidět):
 - Frontend je vícejazyčný (cs, en, de, ua – `lib/i18n`): žádné pevné texty v komponentách
   (ani `aria-label`/`alt`), každý nový klíč do všech čtyř katalogů (tsc to vynutí), formátování
   přes `Intl`. Jazyk a měna jsou oddělené (vždy CZK). API vrací jen stabilní kódy (`error`), ne texty.
+- Data v UI vždy den → měsíc → rok (vstup `DD.MM.RRRR`, i v angličtině nikdy měsíc/den); interně
+  a v API jen ISO `YYYY-MM-DD`.
+- Rezervační formulář se nabízí jen podle `GET /api/booking-config` (`bookingEnabled`); produkce
+  zůstává na poptávce přes e-chalupy, dokud o zapnutí nerozhodne uživatel.
 
 ## Secrets a data
 

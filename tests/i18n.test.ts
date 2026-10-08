@@ -19,6 +19,8 @@ const csKeys = Object.keys(cs).sort();
 const placeholders = (text: string) => [...text.matchAll(/\{(\w+)\}/g)].map((m) => m[1]).sort();
 /** Klíče, které jsou záměrně stejné ve všech jazycích (název chalupy). */
 const SAME_IN_ALL = new Set(['brand.name', 'brand.place']);
+/** Slova, která jsou v daném jazyce stejná jako česky (ne nepřeložený text). */
+const SAME_AS_CZECH = new Set(['de:reservation.form.phone']);
 
 // --- typová kontrola katalogů (tsc --noEmit; za běhu nic nedělá) ---
 const { 'meta.title': _omitted, ...withoutTitle } = en;
@@ -59,7 +61,7 @@ test('katalogy en, de, ua jsou skutečně přeložené (žádný český text) a
     for (const key of csKeys) {
       const value = (CATALOGS[locale] as Record<string, unknown>)[key];
       const text = typeof value === 'string' ? value : JSON.stringify(value);
-      if (!SAME_IN_ALL.has(key)) assert.notDeepEqual(value, (cs as Record<string, unknown>)[key], `${locale} ${key} je stejné jako česky`);
+      if (!SAME_IN_ALL.has(key) && !SAME_AS_CZECH.has(`${locale}:${key}`)) assert.notDeepEqual(value, (cs as Record<string, unknown>)[key], `${locale} ${key} je stejné jako česky`);
       assert.ok(!/[ěščřůňťď]/i.test(text.replace(/VŠETICE|Všetice|e-chalupy\.cz|Čeština/g, '')), `${locale} ${key}: český text`);
     }
   }
@@ -95,7 +97,7 @@ test('množná čísla: každý jazyk má všechny kategorie Intl.PluralRules', 
 test('datum v každém jazyce (Intl.DateTimeFormat), interně ISO', () => {
   const expected: Record<Locale, [string, string, string]> = {
     cs: ['so 7. 12. 2030', 'sobota 7. prosince 2030', '8. 10. 22:06'],
-    en: ['Sat, 7 Dec 2030', 'Saturday, 7 December 2030', '08/10, 22:06'],
+    en: ['Sat, 7 Dec 2030', 'Saturday, 7 December 2030', '8 Oct, 22:06'],
     de: ['Sa., 7. Dez. 2030', 'Samstag, 7. Dezember 2030', '8.10., 22:06'],
     ua: ['сб, 7 груд. 2030 р.', 'субота, 7 грудня 2030 р.', '08.10, 22:06'],
   };

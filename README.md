@@ -31,8 +31,16 @@ Cloudflare Workers.
   u slevy ukáže rozpis ze serveru. Během načítání se žádná částka nezobrazuje, chyby jsou
   srozumitelné hlášky v jazyce webu (u chyby serveru s „Zkusit znovu“). Ceník na stránce
   neuvádí univerzální cenu za noc – cena pobytu závisí na termínu.
-- **Poptávka** vede na oficiální profil chalupy na e-chalupy.cz. Výběr termínu na
-  webu není rezervací. Termín a počet hostů host uvede v poptávce na e-chalupách.
+- **Data v panelu** se zadávají a zobrazují vždy v pořadí den → měsíc → rok: vlastní pole
+  `DD.MM.RRRR` (nezávislé na formátu nativního `<input type="date">`, který může být americký)
+  s volitelným nativním výběrem data; interně a v API jen ISO `YYYY-MM-DD`.
+- **Rezervační formulář** (jen kde ho povolí `GET /api/booking-config`, zatím jen Worker
+  Previews): „Pokračovat k rezervaci“ rozšíří stejný panel o kontaktní údaje, Turnstile
+  a „Odeslat rezervaci“ (`POST /api/reservations`), viz
+  [Rezervační formulář](#rezervační-formulář-frontend).
+- **Poptávka** (produkce, dokud je rezervace vypnutá) vede na oficiální profil chalupy na
+  e-chalupy.cz. Výběr termínu na webu není rezervací. Termín a počet hostů host uvede
+  v poptávce na e-chalupách.
 - **WebMCP:** pokud prohlížeč podporuje experimentální API `document.modelContext`,
   stránka zaregistruje nástroj `estimate_stay`. Ten vybere termín stejnou validací
   a vrátí cenu z `/api/quote` (`priceCzk`, `pricingMode`); nevytváří rezervaci ani poptávku.
@@ -174,7 +182,7 @@ Produkční endpoint pro vytváření rezervací zůstává vypnutý. Testovací
 
 Projekt využívá Node.js Test Runner. Databázové testy probíhají nad lokální Cloudflare D1 prostřednictvím Miniflare/workerd. Testovací údaje jsou syntetické.
 
-**Výsledek posledního vývojového běhu: 274/274 úspěšných testů.**
+**Výsledek posledního vývojového běhu: 300/300 úspěšných testů.**
 
 | Testovací soubor | Počet | Zaměření |
 |---|---:|---|
@@ -191,10 +199,12 @@ Projekt využívá Node.js Test Runner. Databázové testy probíhají nad loká
 | pricing.test.ts | 31 | Ceník: výchozí a vlastní ceny nocí, prahy slev, zaokrouhlení, přelom měsíce a roku, pevná cena pobytu (přesná shoda, priorita, neplatná data, beze vlivu na dostupnost), `/api/quote` (kontrakt, validace, neplatný ceník, výpadek D1, žádné zápisy), shoda ceny nabídky a rezervace, `price-mismatch`. |
 | reservation-note.test.ts | 17 | Poznámka hosta: NULL pro prázdné hodnoty, víceřádkový text, Unicode a NFC, limit 2000 znaků, zakázané řídicí a bidi znaky, SQL/HTML text jen jako text, není ve veřejné odpovědi ani v logách, idempotence, escapování v iCal exportu, CHECK v D1. |
 | d1-migrations.test.ts | 21 | Kontrola D1 migrací před deployem: číslování, konzistence konfigurací (oddělené D1, produkční POST vypnutý), čekající a neznámé migrace, fail-closed při chybě, detekce destruktivních migrací, ruční aplikace jen v terminálu s potvrzením, záloha před destruktivní migrací produkce. |
-| smoke.test.ts | 8 | Smoke test veřejných endpointů proti skutečnému Workeru: produkce (POST 404) a Preview, bez tokenů a zápisů, odhalení zapnutého POST, výpadku D1, úniku osobních údajů a veřejného exportu. |
+| smoke.test.ts | 8 | Smoke test veřejných endpointů proti skutečnému Workeru: produkce (POST 404, `booking-config` vypnutý) a Preview, bez tokenů a zápisů, odhalení zapnutého POST, výpadku D1, úniku osobních údajů a veřejného exportu. |
 | frontend-quote.test.ts | 14 | Frontend rezervační sekce: cena jen z `/api/quote` (kontrakt proti skutečnému handleru), nightly se slevou, exact-stay, 422 a chyby serveru/sítě jako české hlášky, načítání bez staré ceny, souběh (starší odpověď nepřepíše novější), nový požadavek při změně termínu a hostů, žádný klientský výpočet ceny. |
 | i18n.test.ts | 17 | Jazykové verze: úplnost katalogů cs/en/de/ua (klíče, parametry, plurály, žádný český text ani HTML), fallback, volba jazyka (?lang, localStorage, čeština) a persistence, množná čísla, data a CZK v každém jazyce, kalendář, rezervační panel po přepnutí, přepínač, žádné pevné texty v komponentách ani univerzální cena 3 000 Kč. |
-| **Celkem** | **274** | |
+| date-input.test.ts | 8 | Vstup data DD.MM.RRRR ↔ ISO: přestupný rok, neexistující den a měsíc, rozepsané datum bez chyby, odmítnutí amerického a ISO tvaru, všechna zobrazená data den → měsíc → rok (angličtina bez měsíc/den). |
+| reservation-form.test.ts | 18 | Rezervační formulář: request podle kontraktu, blokace odeslání (termín, cena, kontakty, Turnstile), Idempotency-Key (retry stejné operace = stejný klíč, nová operace = nový), Turnstile reset jen po turnstile-failed/required, price-mismatch bez automatického odeslání, chybové kódy → hlášky ve všech jazycích, POST proti skutečnému handleru, `GET /api/booking-config`, Preview site key jen ve `previews`. |
+| **Celkem** | **300** | |
 
 ### Testované scénáře
 
@@ -287,7 +297,7 @@ Aktualizace poznámky již importované rezervace nebyla spolehlivě potvrzena. 
 
 Dosud nejsou implementovány:
 
-- Veřejný rezervační formulář.
+- Zapnutí rezervačního formuláře v produkci (produkční Turnstile widget a secret, `BOOKING_API_ENABLED`).
 - Generování platebních QR kódů.
 - Automatické odesílání e-mailových oznámení.
 
@@ -429,6 +439,44 @@ Odpovědi nikdy neobsahují stack trace, secrets, adresu exportu ani detaily dat
 
 Logy obsahují jen druh události (`reservations: created`, `rejected (…)`), nikdy osobní
 údaje ani adresu exportu.
+
+### Rezervační formulář (frontend)
+
+Formulář je pokračováním zeleného panelu (`BookingPanel` → `BookingForm`), ne nový krok,
+modal ani stránka. Nabízí se jen tam, kde `GET /api/booking-config` vrátí
+`{ "bookingEnabled": true, "turnstileSiteKey": "…" }`; jinak (produkce, chyba, chybějící site key)
+web dál nabízí poptávku přes e-chalupy.
+
+- **`GET /api/booking-config`** (`worker/booking/config.ts`) vrací jen `bookingEnabled`
+  (`BOOKING_API_ENABLED === "true"`) a veřejný `turnstileSiteKey` (jen při zapnuté rezervaci).
+  Žádné jiné nastavení. Smoke test v produkci ověřuje `bookingEnabled: false`.
+- **Stav:** termín, hosté a nabídka zůstávají v `BookingSection` (jediný zdroj); kontakty
+  (`firstName`, `lastName`, `email`, `phone`, volitelná `note`) jsou zvlášť, takže je změna
+  termínu, hostů ani jazyka nesmaže. Otevřený formulář zůstává otevřený.
+- **Data:** `DateField` drží jen rozepsaný text (`DD.MM.RRRR`); autoritativní je ISO hodnota
+  v centrálním stavu. Rozepsané datum není chyba, neexistující úplné datum (32.12.2026) je inline
+  chyba bez tiché opravy, chybný tvar se ohlásí při opuštění pole. Platné datum jde přes stejnou
+  validaci jako kalendář (`lib/availability/stay.ts`) a spustí `/api/quote`.
+- **Odeslání** je povolené jen s úplným termínem, aktuální nabídkou (`ready` pro stejný termín),
+  vyplněnými kontakty a Turnstile tokenem. Request: `arrival`, `departure`, `guests`, kontakty,
+  `note` (prázdná = `null`), `turnstileToken`, `expectedPriceCzk` (= `totalCzk` nabídky)
+  a hlavička `Idempotency-Key` (`crypto.randomUUID()`). Formát kontaktů ověřuje server; chyby
+  z 422 se zobrazí u polí (`aria-invalid`, `aria-describedby`).
+- **Idempotency-Key = jedna logická operace** (stejný obsah requestu včetně `expectedPriceCzk`).
+  Opakování po síťové chybě, timeoutu nebo dočasné chybě serveru („Zkusit znovu“) použije stejný
+  klíč i stejný Turnstile token (server díky deterministickému `idempotency_key` pro Siteverify
+  a idempotentnímu replay neztratí ani nezdvojí rezervaci). Nový klíč: změna termínu, hostů nebo
+  kontaktů, nové potvrzení po změně ceny, `turnstile-failed` / `turnstile-required`,
+  `dates-unavailable`, 422. Nic se neodesílá automaticky.
+- **Turnstile** (`Turnstile.tsx`, explicitní render, skript až s formulářem): po odpovědi serveru
+  se widget neresetuje; reset jen po `turnstile-failed` / `turnstile-required`. Expirace nebo
+  chyba widgetu token zahodí a widget si vyžádá nový.
+- **Změna ceny (`409 price-mismatch`):** nic se znovu neodešle, kontakty zůstanou, nabídka se
+  znovu načte z `/api/quote` (summary ukáže novou cenu i rozpis) a panel zobrazí „Cena se mezitím
+  změnila z X na Y. Zkontrolujte ji a rezervaci znovu potvrďte.“ Další odeslání = vědomé
+  potvrzení s novým klíčem.
+- **Úspěch:** potvrzení ve stejném panelu – kód rezervace, termín, hosté, noci a cena. Variabilní
+  symbol, platební údaje ani e-mail se zatím nezobrazují ani neslibují.
 
 ### Ceník a cenová nabídka
 
@@ -754,7 +802,10 @@ D1 (reservations) → GET /api/reservations.ics?token=… → import v e-chalup�
   npx wrangler secret put TURNSTILE_SECRET_KEY
   ```
 
-  Site key widgetu je veřejný a doplní ho až frontend formuláře.
+  Site key widgetu je veřejný: proměnná `TURNSTILE_SITE_KEY` (ve `vars`, ne secret), kterou
+  frontend dostane z `GET /api/booking-config`. Preview má testovací site key Cloudflare
+  `1x00000000000000000000AA` (vždy projde, patří k testovacímu secretu). Produkce site key
+  zatím nemá – formulář se tam nenabízí.
 
 ## Architektura
 
@@ -767,7 +818,12 @@ components/booking/
   BookingSection.tsx    společný stav pobytu (kalendář + panel), WebMCP nástroj
   AvailabilityCalendar.tsx  navigace, responzivní počet měsíců, klávesnice, legenda, stav dat
   CalendarMonth.tsx     mřížka jednoho měsíce
-  BookingPanel.tsx      zelený panel: data, hosté, cena ze serveru, poptávka
+  BookingPanel.tsx      zelený panel: data, hosté, cena ze serveru, poptávka / pokračování k rezervaci
+  DateField.tsx, dateInput.ts  vstup data DD.MM.RRRR ↔ ISO (rozepsaný text, validace, picker)
+  BookingForm.tsx       kontaktní část, Turnstile, odeslání, potvrzení
+  Turnstile.tsx         Cloudflare Turnstile widget (explicitní render)
+  reservation.ts, useReservation.ts  POST /api/reservations: request, Idempotency-Key, stavy, chyby
+  bookingConfig.ts      GET /api/booking-config (fail-closed = formulář vypnutý)
   useAvailability.ts    načítání /api/availability
   quote.ts, useQuote.ts cenová nabídka z /api/quote (zrušení starších požadavků, stav načítání a chyb)
   quoteView.ts          co panel zobrazí pro nabídku (nightly / exact-stay, sleva, chybové hlášky)
@@ -1036,7 +1092,8 @@ pnpm run smoke https://<preview-url> --env preview
 
 Ověří web, `/api/availability` (status, žádné osobní údaje), `/api/quote` (platný i neplatný
 termín, 405), `POST /api/reservations` (**v produkci musí vrátit 404**; nikde nesmí přijmout
-prázdný požadavek), `/api/reservations.ics` bez tokenu (404) a neznámé API (404 JSON
+prázdný požadavek), `/api/booking-config` (v produkci `bookingEnabled: false`, v Preview zapnutý
+s veřejným site key), `/api/reservations.ics` bez tokenu (404) a neznámé API (404 JSON
 s bezpečnostními hlavičkami). Exit 1 při selhání; `stale`/`partial` obsazenost je jen varování.
 
 Nepoužívá žádné tokeny ani secrets: přijme jen origin (https, http jen localhost) bez cesty,

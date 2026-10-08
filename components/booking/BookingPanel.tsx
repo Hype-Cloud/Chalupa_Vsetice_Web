@@ -1,8 +1,10 @@
+import type { ReactNode } from 'react';
 import { ArrowUpRight } from 'lucide-react';
 import type { IsoDate } from '../../lib/availability/dates.ts';
 import type { Stay } from '../../lib/availability/stay.ts';
 import { useI18n } from '../i18n.ts';
 import { CAPACITY, INQUIRY_URL } from './config.ts';
+import { DateField } from './DateField.tsx';
 import type { QuoteView } from './quoteView.ts';
 
 interface Props {
@@ -18,16 +20,36 @@ interface Props {
   onDeparture: (date: IsoDate | null) => void;
   onGuests: (guests: number) => void;
   onRetry: () => void;
+  /** Rezervační formulář je k dispozici (GET /api/booking-config); jinak poptávka přes e-chalupy. */
+  bookingEnabled: boolean;
+  formOpen: boolean;
+  onOpenForm: () => void;
+  /** Hláška po kliknutí na „Pokračovat k rezervaci“ bez úplného termínu. */
+  continueHint: string | null;
+  /** Kontaktní část formuláře (pod souhrnem, jen když je formulář otevřený). */
+  form?: ReactNode;
+  /** Potvrzení po úspěšné rezervaci – nahradí obsah panelu. */
+  success?: ReactNode;
 }
 
 /** Zelený panel: data pobytu (synchronizovaná s kalendářem), počet hostů a cena ze serveru. */
-export function BookingPanel({ today, stay, guests, nights, quote, message, onArrival, onDeparture, onGuests, onRetry }: Props) {
+export function BookingPanel(props: Props) {
+  const { today, stay, guests, nights, quote, message, onArrival, onDeparture, onGuests, onRetry, bookingEnabled, formOpen, onOpenForm, continueHint, form, success } = props;
   const { t, plural, formatDate } = useI18n();
   const complete = nights > 0;
-  const status = message ?? (quote.kind === 'error' ? quote.message : complete ? null : stay.arrival ? t('booking.panel.selectDeparture') : t('booking.panel.selectStay'));
+  const status = message ?? (quote.kind === 'error' ? quote.message : complete ? null : (continueHint ?? (stay.arrival ? t('booking.panel.selectDeparture') : t('booking.panel.selectStay'))));
+
+  if (success) {
+    return (
+      <aside className="booking" aria-labelledby="booking-title">
+        <p className="eyebrow" id="booking-title">{t('booking.panel.eyebrow')}</p>
+        {success}
+      </aside>
+    );
+  }
 
   return (
-    <aside className="booking" aria-labelledby="booking-title" aria-busy={quote.kind === 'loading'}>
+    <aside className={`booking${formOpen ? ' is-form-open' : ''}`} aria-labelledby="booking-title" aria-busy={quote.kind === 'loading'}>
       <p className="eyebrow" id="booking-title">{t('booking.panel.eyebrow')}</p>
       {/* Jen cena ze serveru – během načítání ani bez nabídky se žádná částka nezobrazuje. */}
       {quote.kind === 'ready' ? (
@@ -38,15 +60,10 @@ export function BookingPanel({ today, stay, guests, nights, quote, message, onAr
         </div>
       )}
       <p>{t('booking.panel.capacity', { capacity: CAPACITY })}</p>
+      {/* Vlastní pole DD.MM.RRRR (ne vizuální formát nativního date inputu, který může být americký). */}
       <div className="date-fields">
-        <label>
-          {t('booking.panel.arrival')}
-          <input type="date" min={today ?? undefined} value={stay.arrival ?? ''} onChange={(e) => onArrival(e.target.value || null)} />
-        </label>
-        <label>
-          {t('booking.panel.departure')}
-          <input type="date" min={stay.arrival ?? today ?? undefined} value={stay.departure ?? ''} onChange={(e) => onDeparture(e.target.value || null)} />
-        </label>
+        <DateField label={t('booking.panel.arrival')} value={stay.arrival} min={today ?? undefined} onCommit={onArrival} />
+        <DateField label={t('booking.panel.departure')} value={stay.departure} min={stay.arrival ?? today ?? undefined} onCommit={onDeparture} />
       </div>
       <label className="guests-field">
         {t('booking.panel.guests')}
@@ -77,8 +94,21 @@ export function BookingPanel({ today, stay, guests, nights, quote, message, onAr
           )}
         </dl>
       )}
-      <a className="button" href={INQUIRY_URL} target="_blank" rel="noreferrer">{t('booking.panel.inquiry')} <ArrowUpRight size={18} /></a>
-      <p className="small">{t('booking.panel.disclaimer')}</p>
+      {bookingEnabled ? (
+        formOpen ? (
+          form
+        ) : (
+          <>
+            <button type="button" className="button" onClick={onOpenForm}>{t('booking.panel.continue')} <ArrowUpRight size={18} /></button>
+            <p className="small">{t('booking.panel.bookingNote')}</p>
+          </>
+        )
+      ) : (
+        <>
+          <a className="button" href={INQUIRY_URL} target="_blank" rel="noreferrer">{t('booking.panel.inquiry')} <ArrowUpRight size={18} /></a>
+          <p className="small">{t('booking.panel.disclaimer')}</p>
+        </>
+      )}
     </aside>
   );
 }

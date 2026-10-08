@@ -113,6 +113,22 @@ export async function runSmoke(baseUrl: URL, env: SmokeEnv, fetchFn: typeof fetc
     return { ok: [401, 422, 429].includes(response.status), detail: `HTTP ${response.status}${error ? ` ${String(error)}` : ''}` };
   });
 
+  // Frontend nabízí rezervační formulář jen podle tohoto nastavení – v produkci musí být vypnutý.
+  await check(env === 'production' ? 'GET /api/booking-config – formulář v produkci vypnutý' : 'GET /api/booking-config – formulář zapnutý s veřejným site key', async () => {
+    const response = await request('/api/booking-config');
+    const { body } = await jsonOf(response);
+    const config = body as { bookingEnabled?: unknown; turnstileSiteKey?: unknown } | undefined;
+    if (response.status !== 200 || !apiHeaders(response) || !config) return { ok: false, detail: `HTTP ${response.status}` };
+    const keys = Object.keys(config).sort().join(',');
+    if (keys !== 'bookingEnabled,turnstileSiteKey') return { ok: false, detail: 'neočekávaná pole v odpovědi' };
+    if (env === 'production') {
+      const ok = config.bookingEnabled === false && config.turnstileSiteKey === null;
+      return { ok, detail: ok ? 'bookingEnabled false' : 'formulář je v produkci zapnutý!' };
+    }
+    const ok = config.bookingEnabled === true && typeof config.turnstileSiteKey === 'string' && config.turnstileSiteKey !== '';
+    return { ok, detail: ok ? 'bookingEnabled true' : 'chybí bookingEnabled nebo TURNSTILE_SITE_KEY' };
+  });
+
   await check('GET /api/reservations.ics bez tokenu → 404', async () => {
     const response = await request('/api/reservations.ics');
     const text = await response.text();

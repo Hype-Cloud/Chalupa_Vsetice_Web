@@ -4,18 +4,23 @@ import { occupancyFromResponse } from '../../lib/availability/occupancy.ts';
 import { EMPTY_STAY, nights, pickDay, rangeError, setArrival, setDeparture, type Stay, type StayContext, type StayError, type StayUpdate } from '../../lib/availability/stay.ts';
 import { useI18n } from '../i18n.ts';
 import { AvailabilityCalendar } from './AvailabilityCalendar.tsx';
+import { BookingForm, BookingSuccess } from './BookingForm.tsx';
 import { BookingPanel } from './BookingPanel.tsx';
-import { fetchQuote, quoteRequestFor } from './quote.ts';
+import { fetchQuote, quoteKey, quoteRequestFor } from './quote.ts';
+import { EMPTY_CONTACT, reservationPayload, submitBlock, type ContactDraft } from './reservation.ts';
 import { quoteView } from './quoteView.ts';
 import { STAY_ERROR_KEYS } from './stayErrors.ts';
 import { useAvailability } from './useAvailability.ts';
 import { useQuote } from './useQuote.ts';
+import { useBookingConfig, useReservation } from './useReservation.ts';
 
 type Source = 'calendar' | 'panel';
 
 /**
  * Kalendář a zelený panel sdílí jeden stav pobytu (termín, hosté) i jednu validaci
  * (lib/availability/stay.ts). Cena je vždy z /api/quote (useQuote) – klient ji nepočítá.
+ * Rezervační formulář (jen když ho GET /api/booking-config povolí) je pokračováním stejného
+ * panelu; kontakty se drží odděleně od termínu, takže změna termínu, hostů ani jazyka je nesmaže.
  */
 export function BookingSection() {
   // Dnešek se určuje až v prohlížeči, ne při statickém buildu.
@@ -30,7 +35,49 @@ export function BookingSection() {
   // Kód chyby výběru (ne text) – hláška se přeloží až při zobrazení, takže po přepnutí jazyka sedí.
   const [message, setMessage] = useState<{ error: StayError; source: Source } | null>(null);
   const i18n = useI18n();
-  const quote = useQuote(quoteRequestFor(stay, guests));
+  const request = quoteRequestFor(stay, guests);
+  const quote = useQuote(request);
+
+  // Rezervační formulář
+  const config = useBookingConfig();
+  const [formOpen, setFormOpen] = useState(false);
+  const [continueHint, setContinueHint] = useState(false);
+  const [contact, setContact] = useState<ContactDraft>(EMPTY_CONTACT);
+  const [turnstileToken, setTurnstileToken] = useState<string | null>(null);
+  const [turnstileReset, setTurnstileReset] = useState(0);
+  const reservation = useReservation({
+    // Server hlásí jinou cenu → znovu načíst autoritativní nabídku (summary ukáže nový rozpis).
+    onPriceChanged: quote.retry,
+    onTurnstileReset: () => setTurnstileReset((n) => n + 1),
+  });
+  const stayKey = quoteKey(request);
+  // Změna termínu nebo hostů zahodí hlášky předchozího odeslání (formulář i kontakty zůstávají).
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  useEffect(() => reservation.dismiss(), [stayKey]);
+  useEffect(() => {
+    if (request) setContinueHint(false);
+  }, [stayKey]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const quoteReady = quote.state.status === 'ready' && quoteKey(quote.state.request) === stayKey ? quote.state.quote : null;
+  const block = submitBlock({
+    stayComplete: request !== null,
+    quoteStatus: quoteReady ? 'ready' : quote.state.status === 'loading' ? 'loading' : quote.state.status === 'idle' ? 'idle' : 'error',
+    contact,
+    turnstileToken,
+    submission: reservation.state,
+  });
+  const submit = () => {
+    if (block || !request || !quoteReady || !turnstileToken) return;
+    void reservation.submit(
+      reservationPayload({ arrival: request.arrivalDate, departure: request.departureDate, guests, contact, expectedPriceCzk: quoteReady.totalCzk }),
+      turnstileToken,
+    );
+  };
+  const submission = reservation.state;
+  const priceChanged =
+    submission.status === 'price-changed'
+      ? i18n.t('reservation.priceChanged', { from: i18n.formatPrice(submission.fromCzk), to: i18n.formatPrice(quoteReady?.totalCzk ?? submission.toCzk) })
+      : null;
 
   const ctx: StayContext | null = today ? { today, occupancy } : null;
   const apply = (source: Source, update: (ctx: StayContext) => StayUpdate) => {
@@ -109,6 +156,33 @@ export function BookingSection() {
         onDeparture={(date) => apply('panel', (c) => setDeparture(stay, date, c))}
         onGuests={setGuests}
         onRetry={quote.retry}
+        bookingEnabled={config.bookingEnabled}
+        formOpen={formOpen}
+        onOpenForm={() => {
+          if (request) setFormOpen(true);
+          else setContinueHint(true);
+        }}
+        continueHint={continueHint ? i18n.t('reservation.blocked.stay') : null}
+        form={
+          config.turnstileSiteKey && (
+            <BookingForm
+              contact={contact}
+              onContact={(next) => {
+                setContact(next);
+                // Opravený údaj: zahodit hlášky u polí z předchozí odpovědi 422.
+                if (submission.status === 'invalid') reservation.dismiss();
+              }}
+              submission={submission}
+              block={block}
+              priceChanged={priceChanged}
+              siteKey={config.turnstileSiteKey}
+              turnstileResetSignal={turnstileReset}
+              onToken={setTurnstileToken}
+              onSubmit={submit}
+            />
+          )
+        }
+        success={submission.status === 'success' ? <BookingSuccess reservation={submission.reservation} /> : undefined}
       />
     </div>
   );
