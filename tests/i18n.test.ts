@@ -241,10 +241,10 @@ test('adresa po přepnutí: ?lang= pro en/de/uk, čeština bez parametru; ostatn
   assert.equal(urlWithLocale('https://chalupavsetice.cz/?utm=x&lang=uk#cenik', 'cs'), 'https://chalupavsetice.cz/?utm=x#cenik');
 });
 
-test('přepínač jazyků: CS EN DE UK, právě jeden aktivní, názvy jazyků (ne vlajky)', () => {
+test('přepínač jazyků: CS EN DE UA, právě jeden aktivní, názvy jazyků (ne vlajky)', () => {
   for (const current of LOCALES) {
     const options = languageOptions(current);
-    assert.deepEqual(options.map((o) => o.label), ['CS', 'EN', 'DE', 'UK']);
+    assert.deepEqual(options.map((o) => o.label), ['CS', 'EN', 'DE', 'UA']);
     assert.deepEqual(options.map((o) => o.name), ['Čeština', 'English', 'Deutsch', 'Українська']);
     assert.deepEqual(options.filter((o) => o.active).map((o) => o.locale), [current]);
   }
