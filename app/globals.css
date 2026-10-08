@@ -129,8 +129,8 @@ header nav a, .nav-cta { white-space:nowrap; }
 @media(max-width:640px) { .nav-cta { gap:4px; } .nav-cta svg { display:none; } }
 @media(max-width:760px) { header nav { display:none; } }
 @media(max-width:480px) { header .nav-cta { display:none; } }
-/* Rezervační formulář – pokračování zeleného panelu (bez modalu, bez kroků). */
-/* Panel: o něco širší a kompaktnější, kalendář zůstává dominantní. */
+/* Rezervační panel a formulář (bez modalu, bez kroků). */
+/* Panel: o něco širší a kompaktnější, kalendář zůstává dominantní. Kontaktní část je pod celým blokem. */
 @media(min-width:1001px) { .booking-grid { grid-template-columns:minmax(0,1.8fr) minmax(340px,1fr); } .booking { padding:28px 30px; } }
 .booking .eyebrow { margin-bottom:18px; }
 .booking > .price { line-height:1.15; }
@@ -138,16 +138,15 @@ header nav a, .nav-cta { white-space:nowrap; }
 .booking .date-fields { margin-top:20px; }
 .booking .estimate { margin-top:16px; padding:14px 0 16px; gap:6px; border-top-color:rgba(219,232,189,.2); }
 .booking .estimate .quote-note { padding-top:4px; font-size:13px; }
-/* Pole: stejná výška, jemný rámeček, zaoblení jako dny kalendáře, zřetelný focus. */
-.booking label, .booking .form-field > label { font-size:13px; color:#dfe7e1; }
-.booking .date-field input[type="text"], .booking .form-field input, .booking .guests-field select, .booking .form-field textarea {
+/* Pole v panelu: stejná výška, jemný rámeček, zaoblení jako dny kalendáře, zřetelný focus. */
+.booking label { font-size:13px; color:#dfe7e1; }
+.booking .date-field input[type="text"], .booking .guests-field select {
   display:block; width:100%; min-width:0; height:44px; margin-top:6px; padding:0 12px; border:1px solid #dfe5da; border-radius:4px; background:#f8f9f5; color:#163d33; font:inherit; font-size:15px; transition:border-color .15s, box-shadow .15s, background-color .15s;
 }
 .booking .guests-field select { padding-right:8px; cursor:pointer; }
-.booking .form-field textarea { height:auto; min-height:68px; padding:10px 12px; line-height:1.5; resize:vertical; }
-.booking input::placeholder, .booking textarea::placeholder { color:#7d8a83; opacity:1; }
-.booking .date-field input[type="text"]:hover, .booking .form-field input:hover, .booking .guests-field select:hover, .booking .form-field textarea:hover { background:#fff; }
-.booking .date-field input[type="text"]:focus-visible, .booking .form-field input:focus-visible, .booking .guests-field select:focus-visible, .booking .form-field textarea:focus-visible { background:#fff; border-color:#b5913e; outline:2px solid #b5913e; outline-offset:2px; }
+.booking input::placeholder { color:#7d8a83; opacity:1; }
+.booking .date-field input[type="text"]:hover, .booking .guests-field select:hover { background:#fff; }
+.booking .date-field input[type="text"]:focus-visible, .booking .guests-field select:focus-visible { background:#fff; border-color:#b5913e; outline:2px solid #b5913e; outline-offset:2px; }
 .date-field label { display:block; }
 .date-field-control { position:relative; margin-top:6px; }
 .booking .date-field-control input[type="text"] { margin-top:0; padding-right:40px; letter-spacing:.02em; }
@@ -155,26 +154,52 @@ header nav a, .nav-cta { white-space:nowrap; }
 .date-picker-button:focus-visible { outline:2px solid #b5913e; outline-offset:0; }
 .date-picker-proxy { position:absolute; right:0; bottom:0; width:1px; height:1px; margin:0; padding:0; border:0; opacity:0; pointer-events:none; }
 .field-error { margin:6px 0 0; font-size:12px; line-height:1.5; color:#f3d9c9; }
-.booking input[aria-invalid="true"], .booking textarea[aria-invalid="true"] { border-color:#e9a68a; box-shadow:inset 0 0 0 1px #e9a68a; }
-/* CTA: stejná DNA jako hlavní tlačítko webu; neaktivní stav jako obrys bez výplně. */
+.booking input[aria-invalid="true"] { border-color:#e9a68a; box-shadow:inset 0 0 0 1px #e9a68a; }
 .booking .button + .small { margin:12px 0 0; }
 .booking button.button { width:100%; min-height:54px; border:0; font-family:inherit; cursor:pointer; transition:background-color .15s, color .15s, box-shadow .15s; }
-.booking button.button[disabled] { background:transparent; color:rgba(255,255,255,.5); box-shadow:inset 0 0 0 1px rgba(219,232,189,.3); cursor:not-allowed; }
-.booking button.button[aria-busy="true"] { background:#dbe8bd; color:#163d33; box-shadow:none; opacity:.8; cursor:progress; }
-/* Formulář: jemný oddělovač, bez vnořené karty. */
-.booking-form { border-top:1px solid rgba(219,232,189,.2); padding-top:18px; animation:booking-form-in .3s ease-out; }
+/* Po otevření formuláře: stejné místo v panelu, ale vedlejší akce (posun ke kontaktní části). */
+.booking button.button.is-secondary { background:transparent; color:#dbe8bd; box-shadow:inset 0 0 0 1px rgba(219,232,189,.45); }
+.booking button.button.is-secondary:hover { background:rgba(219,232,189,.08); }
+/* Kontaktní část: pokračování sekce na jejím pozadí, jemný oddělovač, bez další karty. */
+.booking-form-row { max-width:1280px; margin:40px auto 0; scroll-margin:24px 0; }
+.booking-form { padding-top:26px; border-top:1px solid #cdd6ce; scroll-margin:24px 0; animation:booking-form-in .3s ease-out; }
 @keyframes booking-form-in { from { opacity:0; transform:translateY(-6px); } to { opacity:1; transform:none; } }
 @media (prefers-reduced-motion: reduce) { .booking-form { animation:none; } }
-.booking-form-title { margin:0 0 12px; font-size:12px; font-weight:600; letter-spacing:.18em; text-transform:uppercase; color:#cfddc2; }
-.form-grid { display:grid; grid-template-columns:1fr 1fr; gap:12px; }
-.form-field.is-note { grid-column:1 / -1; }
-.form-field .optional { color:#b9c9be; font-size:12px; }
-.turnstile { margin-top:16px; min-height:65px; }
+.booking-form-title { margin:0 0 18px; font-size:12px; font-weight:600; letter-spacing:.18em; text-transform:uppercase; color:#163d33; }
+/* Desktop: vlevo (pod kalendářem) kontaktní pole a poznámka, vpravo (pod panelem) Turnstile a odeslání. */
+.booking-form form { display:grid; grid-template-columns:minmax(0,1.8fr) minmax(340px,1fr); grid-template-rows:auto 1fr auto; column-gap:24px; }
+.booking-form .form-grid { grid-column:1; grid-row:1 / span 3; display:grid; grid-template-columns:1fr 1fr; gap:16px; }
+.booking-form .form-field.is-note { grid-column:1 / -1; }
+.booking-form label { font-size:14px; color:#163d33; }
+.booking-form .optional { color:#657267; font-size:12px; }
+.booking-form .form-field input, .booking-form .form-field textarea {
+  display:block; width:100%; min-width:0; height:46px; margin-top:6px; padding:0 14px; border:1px solid #cdd6ce; border-radius:4px; background:#fff; color:#163d33; font:inherit; font-size:15px; transition:border-color .15s, box-shadow .15s;
+}
+.booking-form .form-field textarea { height:auto; min-height:72px; padding:11px 14px; line-height:1.5; resize:vertical; }
+.booking-form .form-field input:hover, .booking-form .form-field textarea:hover { border-color:#9fb0a5; }
+.booking-form .form-field input:focus-visible, .booking-form .form-field textarea:focus-visible { border-color:#163d33; outline:2px solid #b5913e; outline-offset:2px; }
+.booking-form .field-error { color:#9a3f1f; }
+.booking-form input[aria-invalid="true"], .booking-form textarea[aria-invalid="true"] { border-color:#c0603a; box-shadow:inset 0 0 0 1px #c0603a; }
+.booking-form .turnstile { grid-column:2; grid-row:1; margin-top:26px; min-height:65px; }
 .turnstile > div { max-width:100%; }
-.form-status { min-height:20px; margin:12px 0; font-size:13px; line-height:1.55; color:#d2ddd7; }
-.form-status.is-error { color:#f3d9c9; }
+.booking-form .form-status { grid-column:2; grid-row:2; align-self:end; min-height:20px; margin:12px 0; font-size:13px; line-height:1.55; color:#5c6a63; }
+.booking-form .form-status.is-error { color:#9a3f1f; }
+/* Finální CTA: stejný tvar a typografie jako hlavní tlačítko webu, na světlém pozadí v tmavé zelené. */
+.booking-form button.button { grid-column:2; grid-row:3; align-self:end; width:100%; min-height:56px; border:0; background:#163d33; color:#fff; font-family:inherit; cursor:pointer; transition:background-color .15s, color .15s, box-shadow .15s; }
+.booking-form button.button:hover { background:#0f2e26; }
+.booking-form button.button[disabled] { background:transparent; color:#7d8a83; box-shadow:inset 0 0 0 1px #b9c4bb; cursor:not-allowed; }
+.booking-form button.button[aria-busy="true"] { background:#163d33; color:#fff; box-shadow:none; opacity:.8; cursor:progress; }
 .booking-success { animation:booking-form-in .3s ease-out; }
 .booking-success-title { font-size:30px; line-height:1.2; margin:0 0 6px; outline:none; }
 .booking-code dd { font-size:18px; letter-spacing:.08em; }
-@media(max-width:640px) { .booking { padding:24px 20px; } .booking .date-field input[type="text"], .booking .form-field input, .booking .guests-field select, .booking .form-field textarea { font-size:16px; } }
-@media(max-width:480px) { .form-grid { grid-template-columns:1fr; } }
+@media(max-width:1000px) {
+  .booking-form-row { margin-top:32px; }
+  .booking-form form { grid-template-columns:1fr; grid-template-rows:none; }
+  .booking-form .form-grid, .booking-form .turnstile, .booking-form .form-status, .booking-form button.button { grid-column:1; grid-row:auto; }
+  .booking-form .turnstile { margin-top:18px; }
+}
+@media(max-width:640px) {
+  .booking { padding:24px 20px; }
+  .booking .date-field input[type="text"], .booking .guests-field select, .booking-form .form-field input, .booking-form .form-field textarea { font-size:16px; }
+  .booking-form .form-grid { grid-template-columns:1fr; gap:14px; }
+}

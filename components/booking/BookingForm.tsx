@@ -25,7 +25,7 @@ const FIELDS = [
   { name: 'phone', label: 'reservation.form.phone', autoComplete: 'tel', type: 'tel' },
 ] as const;
 
-/** Kontaktní část pod souhrnem pobytu ve stejném panelu (bez kroků, bez modalu). */
+/** Kontaktní část pod celým blokem kalendáře a panelu (bez kroků, bez modalu). */
 export function BookingForm({ contact, onContact, submission, block, priceChanged, siteKey, turnstileResetSignal, onToken, onSubmit }: Props) {
   const { t } = useI18n();
   const id = useId();

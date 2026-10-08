@@ -1,5 +1,5 @@
 import type { ReactNode } from 'react';
-import { ArrowUpRight } from 'lucide-react';
+import { ArrowDown, ArrowUpRight } from 'lucide-react';
 import type { IsoDate } from '../../lib/availability/dates.ts';
 import type { Stay } from '../../lib/availability/stay.ts';
 import { useI18n } from '../i18n.ts';
@@ -22,19 +22,19 @@ interface Props {
   onRetry: () => void;
   /** Rezervační formulář je k dispozici (GET /api/booking-config); jinak poptávka přes e-chalupy. */
   bookingEnabled: boolean;
+  /** Kontaktní část je otevřená (vykresluje se pod celým booking blokem, ne v panelu). */
   formOpen: boolean;
+  /** Otevře kontaktní část, nebo k ní posune, pokud už je otevřená. */
   onOpenForm: () => void;
   /** Hláška po kliknutí na „Pokračovat k rezervaci“ bez úplného termínu. */
   continueHint: string | null;
-  /** Kontaktní část formuláře (pod souhrnem, jen když je formulář otevřený). */
-  form?: ReactNode;
   /** Potvrzení po úspěšné rezervaci – nahradí obsah panelu. */
   success?: ReactNode;
 }
 
 /** Zelený panel: data pobytu (synchronizovaná s kalendářem), počet hostů a cena ze serveru. */
 export function BookingPanel(props: Props) {
-  const { today, stay, guests, nights, quote, message, onArrival, onDeparture, onGuests, onRetry, bookingEnabled, formOpen, onOpenForm, continueHint, form, success } = props;
+  const { today, stay, guests, nights, quote, message, onArrival, onDeparture, onGuests, onRetry, bookingEnabled, formOpen, onOpenForm, continueHint, success } = props;
   const { t, plural, formatDate } = useI18n();
   const complete = nights > 0;
   const status = message ?? (quote.kind === 'error' ? quote.message : complete ? null : (continueHint ?? (stay.arrival ? t('booking.panel.selectDeparture') : t('booking.panel.selectStay'))));
@@ -95,14 +95,15 @@ export function BookingPanel(props: Props) {
         </dl>
       )}
       {bookingEnabled ? (
-        formOpen ? (
-          form
-        ) : (
-          <>
+        <>
+          {/* Po otevření zůstává panel stejně vysoký; kontaktní část je pod celým blokem. */}
+          {formOpen ? (
+            <button type="button" className="button is-secondary" onClick={onOpenForm}>{t('booking.panel.formBelow')} <ArrowDown size={18} /></button>
+          ) : (
             <button type="button" className="button" onClick={onOpenForm}>{t('booking.panel.continue')} <ArrowUpRight size={18} /></button>
-            <p className="small">{t('booking.panel.bookingNote')}</p>
-          </>
-        )
+          )}
+          <p className="small">{t('booking.panel.bookingNote')}</p>
+        </>
       ) : (
         <>
           <a className="button" href={INQUIRY_URL} target="_blank" rel="noreferrer">{t('booking.panel.inquiry')} <ArrowUpRight size={18} /></a>

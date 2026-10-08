@@ -138,6 +138,7 @@ export const de = {
   'agent.estimateStay.invalid': 'Ungültiger Termin',
 
   'booking.panel.continue': 'Weiter zur Buchung',
+  'booking.panel.formBelow': 'Angaben unten ausfüllen',
   'booking.panel.bookingNote': 'Die Auswahl eines Termins bucht noch nichts – die Buchung entsteht erst mit dem Absenden des Formulars.',
   'dateInput.placeholder': 'TT.MM.JJJJ',
   'dateInput.openPicker': '{field}: Datumsauswahl öffnen',

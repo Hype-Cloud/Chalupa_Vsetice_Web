@@ -137,6 +137,7 @@ export const ua = {
   'agent.estimateStay.invalid': 'Неправильні дати',
 
   'booking.panel.continue': 'Перейти до бронювання',
+  'booking.panel.formBelow': 'Заповніть дані нижче',
   'booking.panel.bookingNote': 'Вибір дат ще нічого не бронює – бронювання створюється лише після надсилання форми.',
   'dateInput.placeholder': 'ДД.ММ.РРРР',
   'dateInput.openPicker': '{field}: відкрити вибір дати',

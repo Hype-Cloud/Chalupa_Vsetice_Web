@@ -19,8 +19,8 @@ type Source = 'calendar' | 'panel';
 /**
  * Kalendář a zelený panel sdílí jeden stav pobytu (termín, hosté) i jednu validaci
  * (lib/availability/stay.ts). Cena je vždy z /api/quote (useQuote) – klient ji nepočítá.
- * Rezervační formulář (jen když ho GET /api/booking-config povolí) je pokračováním stejného
- * panelu; kontakty se drží odděleně od termínu, takže změna termínu, hostů ani jazyka je nesmaže.
+ * Rezervační formulář (jen když ho GET /api/booking-config povolí) navazuje pod celým blokem
+ * kalendáře a panelu; kontakty se drží odděleně od termínu, takže změna termínu, hostů ani jazyka je nesmaže.
  */
 export function BookingSection() {
   // Dnešek se určuje až v prohlížeči, ne při statickém buildu.
@@ -128,62 +128,70 @@ export function BookingSection() {
     return () => controller.abort();
   }, []);
 
-  return (
-    <div className="booking-grid">
-      <div className="calendar-panel">
-        <div className="calendar-title"><h3>{i18n.t('calendar.title')}</h3></div>
-        {today ? (
-          <AvailabilityCalendar
-            today={today}
-            availability={availability}
-            occupancy={occupancy}
-            stay={stay}
-            message={message?.source === 'calendar' ? i18n.t(STAY_ERROR_KEYS[message.error]) : null}
-            onPick={(date) => apply('calendar', (c) => pickDay(stay, date, c))}
-          />
-        ) : (
-          <div className="bk-calendar is-placeholder" role="status">{i18n.t('calendar.loading')}</div>
-        )}
-      </div>
-      <BookingPanel
-        today={today}
-        stay={stay}
-        guests={guests}
-        nights={nights(stay)}
-        quote={quoteView(quote.state, i18n)}
-        message={message?.source === 'panel' ? i18n.t(STAY_ERROR_KEYS[message.error]) : null}
-        onArrival={(date) => apply('panel', (c) => setArrival(stay, date, c))}
-        onDeparture={(date) => apply('panel', (c) => setDeparture(stay, date, c))}
-        onGuests={setGuests}
-        onRetry={quote.retry}
-        bookingEnabled={config.bookingEnabled}
-        formOpen={formOpen}
-        onOpenForm={() => {
-          if (request) setFormOpen(true);
-          else setContinueHint(true);
+  const formRow = useRef<HTMLDivElement>(null);
+  const form =
+    config.bookingEnabled && formOpen && config.turnstileSiteKey && submission.status !== 'success' ? (
+      <BookingForm
+        contact={contact}
+        onContact={(next) => {
+          setContact(next);
+          // Opravený údaj: zahodit hlášky u polí z předchozí odpovědi 422.
+          if (submission.status === 'invalid') reservation.dismiss();
         }}
-        continueHint={continueHint ? i18n.t('reservation.blocked.stay') : null}
-        form={
-          config.turnstileSiteKey && (
-            <BookingForm
-              contact={contact}
-              onContact={(next) => {
-                setContact(next);
-                // Opravený údaj: zahodit hlášky u polí z předchozí odpovědi 422.
-                if (submission.status === 'invalid') reservation.dismiss();
-              }}
-              submission={submission}
-              block={block}
-              priceChanged={priceChanged}
-              siteKey={config.turnstileSiteKey}
-              turnstileResetSignal={turnstileReset}
-              onToken={setTurnstileToken}
-              onSubmit={submit}
-            />
-          )
-        }
-        success={submission.status === 'success' ? <BookingSuccess reservation={submission.reservation} /> : undefined}
+        submission={submission}
+        block={block}
+        priceChanged={priceChanged}
+        siteKey={config.turnstileSiteKey}
+        turnstileResetSignal={turnstileReset}
+        onToken={setTurnstileToken}
+        onSubmit={submit}
       />
+    ) : null;
+
+  return (
+    <div className="booking-block">
+      <div className="booking-grid">
+        <div className="calendar-panel">
+          <div className="calendar-title"><h3>{i18n.t('calendar.title')}</h3></div>
+          {today ? (
+            <AvailabilityCalendar
+              today={today}
+              availability={availability}
+              occupancy={occupancy}
+              stay={stay}
+              message={message?.source === 'calendar' ? i18n.t(STAY_ERROR_KEYS[message.error]) : null}
+              onPick={(date) => apply('calendar', (c) => pickDay(stay, date, c))}
+            />
+          ) : (
+            <div className="bk-calendar is-placeholder" role="status">{i18n.t('calendar.loading')}</div>
+          )}
+        </div>
+        <BookingPanel
+          today={today}
+          stay={stay}
+          guests={guests}
+          nights={nights(stay)}
+          quote={quoteView(quote.state, i18n)}
+          message={message?.source === 'panel' ? i18n.t(STAY_ERROR_KEYS[message.error]) : null}
+          onArrival={(date) => apply('panel', (c) => setArrival(stay, date, c))}
+          onDeparture={(date) => apply('panel', (c) => setDeparture(stay, date, c))}
+          onGuests={setGuests}
+          onRetry={quote.retry}
+          bookingEnabled={config.bookingEnabled}
+          formOpen={formOpen}
+          onOpenForm={() => {
+            if (formOpen) {
+              const reduce = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
+              formRow.current?.scrollIntoView({ behavior: reduce ? 'auto' : 'smooth', block: 'nearest' });
+            } else if (request) setFormOpen(true);
+            else setContinueHint(true);
+          }}
+          continueHint={continueHint ? i18n.t('reservation.blocked.stay') : null}
+          success={submission.status === 'success' ? <BookingSuccess reservation={submission.reservation} /> : undefined}
+        />
+      </div>
+      {/* Kontaktní část pod celým blokem (přes plnou šířku); stav kontaktů, Turnstile i odeslání zůstává zde. */}
+      {form && <div ref={formRow} className="booking-form-row">{form}</div>}
     </div>
   );
 }

@@ -139,6 +139,7 @@ export const cs = {
   'agent.estimateStay.invalid': 'Neplatný termín',
 
   'booking.panel.continue': 'Pokračovat k rezervaci',
+  'booking.panel.formBelow': 'Vaše údaje vyplňte níže',
   'booking.panel.bookingNote': 'Výběr termínu zatím nic nerezervuje – rezervace vznikne až odesláním formuláře.',
   'dateInput.placeholder': 'DD.MM.RRRR',
   'dateInput.openPicker': '{field}: otevřít výběr data',

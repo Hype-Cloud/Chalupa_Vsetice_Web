@@ -137,6 +137,7 @@ export const en = {
   'agent.estimateStay.invalid': 'Invalid dates',
 
   'booking.panel.continue': 'Continue to booking',
+  'booking.panel.formBelow': 'Fill in your details below',
   'booking.panel.bookingNote': 'Selecting dates doesn’t book anything yet – the booking is created only when you submit the form.',
   'dateInput.placeholder': 'DD.MM.YYYY',
   'dateInput.openPicker': '{field}: open date picker',
