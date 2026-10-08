@@ -143,7 +143,7 @@ export const de = {
   'dateInput.openPicker': '{field}: Datumsauswahl öffnen',
   'dateInput.error.format': 'Geben Sie das Datum als TT.MM.JJJJ ein, z. B. 07.12.2026.',
   'dateInput.error.invalid': 'Dieses Datum gibt es nicht. Bitte prüfen Sie Tag und Monat.',
-  'reservation.form.label': 'Kontaktdaten',
+  'reservation.form.label': 'Ihre Angaben',
   'reservation.form.firstName': 'Vorname',
   'reservation.form.lastName': 'Nachname',
   'reservation.form.email': 'E-Mail',

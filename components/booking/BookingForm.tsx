@@ -1,4 +1,5 @@
 import { useEffect, useId, useRef } from 'react';
+import { ArrowUpRight } from 'lucide-react';
 import { useI18n } from '../i18n.ts';
 import { FIELD_ERROR_KEYS, reservationErrorKey, SUBMIT_BLOCK_KEYS, type ContactDraft, type ReservationConfirmation, type SubmissionState, type SubmitBlock } from './reservation.ts';
 import { Turnstile } from './Turnstile.tsx';
@@ -84,7 +85,7 @@ export function BookingForm({ contact, onContact, submission, block, priceChange
             </label>
             <textarea
               id={`${id}-note`}
-              rows={3}
+              rows={2}
               maxLength={2000}
               value={contact.note}
               aria-invalid={fieldError('note') ? true : undefined}
@@ -100,6 +101,7 @@ export function BookingForm({ contact, onContact, submission, block, priceChange
         </p>
         <button type="submit" className="button" disabled={block !== null} aria-busy={submitting}>
           {submitting ? t('reservation.form.submitting') : submission.status === 'error' && submission.retryable ? t('reservation.retry') : t('reservation.form.submit')}
+          {!submitting && <ArrowUpRight size={18} />}
         </button>
       </form>
     </section>

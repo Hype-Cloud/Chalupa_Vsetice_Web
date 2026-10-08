@@ -142,7 +142,7 @@ export const ua = {
   'dateInput.openPicker': '{field}: відкрити вибір дати',
   'dateInput.error.format': 'Введіть дату у форматі ДД.ММ.РРРР, наприклад 07.12.2026.',
   'dateInput.error.invalid': 'Такої дати не існує. Перевірте день і місяць.',
-  'reservation.form.label': 'Контактні дані',
+  'reservation.form.label': 'Ваші дані',
   'reservation.form.firstName': 'Ім’я',
   'reservation.form.lastName': 'Прізвище',
   'reservation.form.email': 'Електронна пошта',

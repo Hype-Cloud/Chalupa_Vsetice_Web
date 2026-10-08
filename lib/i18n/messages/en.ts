@@ -142,7 +142,7 @@ export const en = {
   'dateInput.openPicker': '{field}: open date picker',
   'dateInput.error.format': 'Enter the date as DD.MM.YYYY, e.g. 07.12.2026.',
   'dateInput.error.invalid': 'This date doesn’t exist. Please check the day and month.',
-  'reservation.form.label': 'Contact details',
+  'reservation.form.label': 'Your details',
   'reservation.form.firstName': 'First name',
   'reservation.form.lastName': 'Last name',
   'reservation.form.email': 'Email',

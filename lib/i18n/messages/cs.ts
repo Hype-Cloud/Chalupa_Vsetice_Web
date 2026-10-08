@@ -144,7 +144,7 @@ export const cs = {
   'dateInput.openPicker': '{field}: otevřít výběr data',
   'dateInput.error.format': 'Zadejte datum ve tvaru DD.MM.RRRR, např. 07.12.2026.',
   'dateInput.error.invalid': 'Toto datum neexistuje. Zkontrolujte den a měsíc.',
-  'reservation.form.label': 'Kontaktní údaje',
+  'reservation.form.label': 'Vaše údaje',
   'reservation.form.firstName': 'Jméno',
   'reservation.form.lastName': 'Příjmení',
   'reservation.form.email': 'E-mail',
