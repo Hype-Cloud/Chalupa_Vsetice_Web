@@ -22,13 +22,16 @@ Cloudflare Workers.
   - ovládá se myší, dotykem i klávesnicí (šipky, Enter, mezerník) a každý den má
     přístupný popisek.
 - **Rezervační panel** sdílí s kalendářem jeden stav pobytu. Datumová pole
-  procházejí stejnou validací a panel zobrazuje počet nocí, počet hostů
-  (max. 7) a orientační cenu (3 000 Kč / noc).
+  procházejí stejnou validací a panel zobrazuje příjezd, odjezd, počet hostů (max. 7),
+  počet nocí a cenu ze serveru (`POST /api/quote`, při každé změně termínu nebo hostů).
+  Web cenu nepočítá: pevnou cenu termínu (exact-stay) označí „Pevná cena pro tento termín“,
+  u slevy ukáže rozpis ze serveru. Během načítání se žádná částka nezobrazuje, chyby jsou
+  české hlášky (u chyby serveru s „Zkusit znovu“).
 - **Poptávka** vede na oficiální profil chalupy na e-chalupy.cz. Výběr termínu na
   webu není rezervací. Termín a počet hostů host uvede v poptávce na e-chalupách.
 - **WebMCP:** pokud prohlížeč podporuje experimentální API `document.modelContext`,
   stránka zaregistruje nástroj `estimate_stay`. Ten vybere termín stejnou validací
-  a vrátí orientační cenu; nevytváří rezervaci ani poptávku.
+  a vrátí cenu z `/api/quote` (`priceCzk`, `pricingMode`); nevytváří rezervaci ani poptávku.
 
 ## Rezervace a obsazenost
 
@@ -117,7 +120,7 @@ Produkční endpoint pro vytváření rezervací zůstává vypnutý. Testovací
 
 Projekt využívá Node.js Test Runner. Databázové testy probíhají nad lokální Cloudflare D1 prostřednictvím Miniflare/workerd. Testovací údaje jsou syntetické.
 
-**Výsledek posledního vývojového běhu: 243/243 úspěšných testů.**
+**Výsledek posledního vývojového běhu: 258/258 úspěšných testů.**
 
 | Testovací soubor | Počet | Zaměření |
 |---|---:|---|
@@ -135,7 +138,8 @@ Projekt využívá Node.js Test Runner. Databázové testy probíhají nad loká
 | reservation-note.test.ts | 17 | Poznámka hosta: NULL pro prázdné hodnoty, víceřádkový text, Unicode a NFC, limit 2000 znaků, zakázané řídicí a bidi znaky, SQL/HTML text jen jako text, není ve veřejné odpovědi ani v logách, idempotence, escapování v iCal exportu, CHECK v D1. |
 | d1-migrations.test.ts | 21 | Kontrola D1 migrací před deployem: číslování, konzistence konfigurací (oddělené D1, produkční POST vypnutý), čekající a neznámé migrace, fail-closed při chybě, detekce destruktivních migrací, ruční aplikace jen v terminálu s potvrzením, záloha před destruktivní migrací produkce. |
 | smoke.test.ts | 8 | Smoke test veřejných endpointů proti skutečnému Workeru: produkce (POST 404) a Preview, bez tokenů a zápisů, odhalení zapnutého POST, výpadku D1, úniku osobních údajů a veřejného exportu. |
-| **Celkem** | **243** | |
+| frontend-quote.test.ts | 15 | Frontend rezervační sekce: cena jen z `/api/quote` (kontrakt proti skutečnému handleru), nightly se slevou, exact-stay, 422 a chyby serveru/sítě jako české hlášky, načítání bez staré ceny, souběh (starší odpověď nepřepíše novější), nový požadavek při změně termínu a hostů, i18n, žádný klientský výpočet ceny. |
+| **Celkem** | **258** | |
 
 ### Testované scénáře
 
@@ -229,7 +233,6 @@ Aktualizace poznámky již importované rezervace nebyla spolehlivě potvrzena. 
 Dosud nejsou implementovány:
 
 - Veřejný rezervační formulář.
-- Napojení kalendáře na webu na `POST /api/quote` (zatím zobrazuje orientační výchozí cenu).
 - Generování platebních QR kódů.
 - Automatické odesílání e-mailových oznámení.
 
@@ -519,7 +522,7 @@ npx wrangler d1 execute chalupa-vsetice-rezervace --remote \
 přesné shodě obou dat; pobyt delší než 30 nocí nebo mimo horizont 365 dní neprojde validací termínu.
 
 Cenu konkrétního termínu ověří `POST /api/quote`. Výchozí cena za noc je v kódu
-(`PRICE_PER_NIGHT`) – její změna znamená nový deploy; frontend ji zatím zobrazuje jen orientačně.
+(`PRICE_PER_NIGHT`) – její změna znamená nový deploy. Web cenu nepočítá, zobrazuje `totalCzk` z `POST /api/quote`.
 
 ### Vlastní rezervace vrácená exportem e-chalup
 
@@ -709,9 +712,13 @@ components/booking/
   BookingSection.tsx    společný stav pobytu (kalendář + panel), WebMCP nástroj
   AvailabilityCalendar.tsx  navigace, responzivní počet měsíců, klávesnice, legenda, stav dat
   CalendarMonth.tsx     mřížka jednoho měsíce
-  BookingPanel.tsx      zelený panel: data, hosté, cena, poptávka
+  BookingPanel.tsx      zelený panel: data, hosté, cena ze serveru, poptávka
   useAvailability.ts    načítání /api/availability
-  config.ts, format.ts  cena, kapacita, české texty a formátování
+  quote.ts, useQuote.ts cenová nabídka z /api/quote (zrušení starších požadavků, stav načítání a chyb)
+  quoteView.ts          co panel zobrazí pro nabídku (nightly / exact-stay, sleva, chybové hlášky)
+  config.ts, format.ts  kapacita, odkaz na poptávku, texty kalendáře a formátování
+components/i18n.ts      useI18n() – texty a formátování aktuálního jazyka (zatím čeština)
+lib/i18n/               překladové klíče (messages/cs.ts), množná čísla, Intl formát data a ceny
 lib/booking/            pravidla pobytu, výchozí cena za noc, veřejný kód a iCal UID rezervace
 lib/availability/       sdílená logika (klient i Worker)
   dates.ts              práce s daty YYYY-MM-DD, dnešek v Europe/Prague

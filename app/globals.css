@@ -105,3 +105,13 @@
 .estimate > div { display:flex; justify-content:space-between; gap:10px; width:100%; }
 .estimate dd { margin:0; font-weight:600; }
 @media(max-width:640px) { .bk-day { font-size:15px; } .bk-legend { justify-content:flex-start; } }
+.price.is-placeholder { font-size:24px; color:#cad7ce; }
+.price.is-loading { opacity:.7; }
+.estimate { flex-direction:column; gap:8px; }
+.estimate dt { color:#d2ddd7; }
+.estimate dd { text-align:right; }
+.estimate .quote-note { flex-direction:column; gap:2px; padding-top:6px; }
+.estimate .quote-note dt { color:#dbe8bd; font-weight:600; }
+.estimate .quote-note dd { text-align:left; font-weight:400; color:#d2ddd7; }
+.booking .result.is-error { color:#f3d9c9; }
+.link-button { background:none; border:0; padding:0; color:inherit; font:inherit; text-decoration:underline; text-underline-offset:3px; cursor:pointer; }
