@@ -281,5 +281,5 @@ test('D1 CHECK odmítne poznámku mimo pravidla i při obejití validace', async
 
 test('žádný log z testů poznámek neobsahuje obsah poznámky', () => {
   assert.ok(allLogs.length > 0);
-  assert.ok(allLogs.every((line) => !line.includes(MARKER) && !/DROP TABLE|<script>|Café|kočka/.test(line)), allLogs.join('\n'));
+  assert.ok(allLogs.every((line) => !line.includes(MARKER) && !/DROP TABLE|<script>|Café|kočka/i.test(line)), allLogs.join('\n'));
 });
