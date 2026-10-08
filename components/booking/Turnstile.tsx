@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import type { Locale } from '../../lib/i18n/index.ts';
 import { useI18n } from '../i18n.ts';
 
 // Cloudflare Turnstile (explicitní render). Skript se načte až s formulářem. Site key je veřejný
@@ -35,8 +36,12 @@ function loadTurnstile(): Promise<TurnstileApi> {
   return loading;
 }
 
-/** Jazyk widgetu podle jazyka webu (Turnstile používá ISO 639-1: ukrajinština = uk). */
-const WIDGET_LANGUAGE = { cs: 'cs', en: 'en', de: 'de', ua: 'uk' } as const;
+/**
+ * Jazyk widgetu podle jazyka webu. Turnstile očekává standardní jazykový kód; pro `ua` se odvozuje
+ * přes Intl z regionu (stejný princip jako INTL_LOCALE v lib/i18n), ve zdroji se používá jen `ua`.
+ */
+const UA_WIDGET_LANGUAGE = new Intl.Locale('und-UA').maximize().language;
+const WIDGET_LANGUAGE: Record<Locale, string> = { cs: 'cs', en: 'en', de: 'de', ua: UA_WIDGET_LANGUAGE };
 
 interface Props {
   siteKey: string;
