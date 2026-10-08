@@ -231,7 +231,7 @@ test('neplatné požadavky: 4xx s názvy polí, bez hodnot', async () => {
   assert.deepEqual(await invalid.json(), { error: 'invalid-request', fields: ['arrival', 'departure', 'guests', 'phone', 'email'] });
   assert.equal((await s.post('{nevalidní json')).status, 400);
   assert.equal((await s.post(stay('2030-02-01', '2030-02-03'), { 'content-type': 'text/plain' })).status, 415);
-  assert.equal((await s.post(stay('2030-02-01', '2030-02-03', { lastName: 'x'.repeat(9000) }))).status, 413);
+  assert.equal((await s.post(stay('2030-02-01', '2030-02-03', { lastName: 'x'.repeat(17000) }))).status, 413);
   assert.equal((await s.post(stay('2030-02-01', '2030-02-03'), { 'idempotency-key': 'kratky' })).status, 400);
   assert.equal(s.requests.length, 0, 'neplatný požadavek nevede ke stažení exportu');
   assert.equal(await t.count('reservations'), 0);

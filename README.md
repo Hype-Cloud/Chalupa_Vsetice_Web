@@ -117,7 +117,7 @@ Produkční endpoint pro vytváření rezervací zůstává vypnutý. Testovací
 
 Projekt využívá Node.js Test Runner. Databázové testy probíhají nad lokální Cloudflare D1 prostřednictvím Miniflare/workerd. Testovací údaje jsou syntetické.
 
-**Výsledek posledního vývojového běhu: 197/197 úspěšných testů.**
+**Výsledek posledního vývojového běhu: 214/214 úspěšných testů.**
 
 | Testovací soubor | Počet | Zaměření |
 |---|---:|---|
@@ -132,7 +132,8 @@ Projekt využívá Node.js Test Runner. Databázové testy probíhají nad loká
 | conflict-cron.test.ts | 12 | Cron detekce a e-mailové upozornění: odeslání a notified_at, žádný druhý e-mail, retry po chybě providera, nesoulad prostředí, výpadek a neúplný export, souběh s /api/availability, bez osobních údajů. |
 | booking-public.test.ts | 16 | Veřejný POST: Turnstile (platný, neplatný, chybějící, nedostupný), rate limit, idempotentní retry a dvojklik, chybové kódy, bez úniku osobních údajů a secrets. |
 | pricing.test.ts | 31 | Ceník: výchozí a vlastní ceny nocí, prahy slev, zaokrouhlení, přelom měsíce a roku, pevná cena pobytu (přesná shoda, priorita, neplatná data, beze vlivu na dostupnost), `/api/quote` (kontrakt, validace, neplatný ceník, výpadek D1, žádné zápisy), shoda ceny nabídky a rezervace, `price-mismatch`. |
-| **Celkem** | **197** | |
+| reservation-note.test.ts | 17 | Poznámka hosta: NULL pro prázdné hodnoty, víceřádkový text, Unicode a NFC, limit 2000 znaků, zakázané řídicí a bidi znaky, SQL/HTML text jen jako text, není ve veřejné odpovědi ani v logách, idempotence, escapování v iCal exportu, CHECK v D1. |
+| **Celkem** | **214** | |
 
 ### Testované scénáře
 
@@ -248,7 +249,8 @@ POST /api/reservations → validace → čerstvý export e-chalup → D1 batch (
   - jméno, příjmení, telefon, e-mail,
   - cena v Kč, variabilní symbol (UNIQUE),
   - stav a stabilní iCal UID (`rezervace-<uuid>@chalupavsetice.cz`, UNIQUE, spolu s `ical_sequence`),
-  - volitelný `idempotency_key` pro opakované odeslání.
+  - volitelný `idempotency_key` pro opakované odeslání,
+  - volitelná poznámka hosta `note` (`migrations/0007_poznamka_hosta.sql`, NULL nebo 1–2000 znaků).
 - **Stavy:** `pending_payment` (čeká na ruční ověření platby), `paid`, `cancelled`.
   Nezaplacené rezervace se automaticky neruší.
 - **`reserved_nights`:** jedna řádka na noc, `night` je PRIMARY KEY. Databáze tak sama
@@ -295,7 +297,8 @@ VS se nespotřebuje. Kolize se neověřuje dotazem před zápisem, ten by nebyl 
    - datum příjezdu není v minulosti a je nejvýš 365 dní dopředu,
    - 1–30 nocí,
    - 1–7 hostů,
-   - jméno, telefon a e-mail bez řídicích znaků.
+   - jméno, telefon a e-mail bez řídicích znaků,
+   - volitelná poznámka `note` (viz [Poznámka hosta](#poznámka-hosta-note)).
 3. Cena se počítá jen na serveru stejným výpočtem jako `POST /api/quote`
    (`worker/booking/pricing.ts`, viz [Ceník](#ceník-a-cenová-nabídka)) – po ověření Turnstile.
    Hodnota z prohlížeče se neukládá. Volitelné `expectedPriceCzk` (frontend posílá `totalCzk`
@@ -308,12 +311,36 @@ VS se nespotřebuje. Kolize se neověřuje dotazem před zápisem, ten by nebyl 
    - kolize 409 `dates-unavailable`.
 6. Atomický zápis do D1. Kolize nocí vrátí 409, jiná chyba databáze 503 `database-error`.
 7. Odpověď 201 obsahuje kód, termín, počet hostů, cenu, VS a stav, ale žádné kontaktní
-   údaje. Stejný `Idempotency-Key` se stejným obsahem vrátí původní rezervaci (200,
+   údaje ani poznámku. Stejný `Idempotency-Key` se stejným obsahem vrátí původní rezervaci (200,
    `replayed: true`) – ještě před ověřením Turnstile, protože token je jednorázový. Siteverify
    dostává `idempotency_key` odvozený z `Idempotency-Key`, takže souběžný dvojklik se stejným
    klíčem a tokenem skončí jednou rezervací. Bez klíče druhý požadavek odmítne Turnstile
    (použitý token) nebo D1 (obsazené noci). Frontend má posílat náhodný `Idempotency-Key`
    (16–100 znaků `A–Z a–z 0–9 _ -`) jednou na odeslání formuláře; klíč nesmí obsahovat osobní údaje.
+
+#### Poznámka hosta (`note`)
+
+Volitelné pole `note?: string | null` v těle `POST /api/reservations`. Prostý text, žádné HTML.
+
+- Chybějící, `null`, prázdná nebo jen bílé znaky → v D1 `NULL`. Jiný typ než řetězec → 422.
+- Normalizace: konce řádků `\r\n` a `\r` → `\n`, Unicode NFC, ořez bílých znaků na začátku
+  a konci. Uvnitř se text nemění (nové řádky, odsazení, emoji zůstávají).
+- Maximálně **2000 znaků** po normalizaci (Unicode code pointy; stejně počítá `length()`
+  v SQLite). Limit těla požadavku je proto 16 KB.
+- Povolený je běžný Unicode text včetně diakritiky, emoji (i ZWJ sekvencí), nových řádků
+  a tabulátoru. Odmítne se (422 `invalid-request`, `fields: ["note"]`): NUL a ostatní řídicí
+  znaky C0/C1, DEL, U+2028/U+2029, bidi přepisy U+202A–202E a U+2066–2069 a neplatné UTF-16
+  (osamocené surrogaty) – kdekoli v textu, i na okrajích.
+- Ukládá se normalizovaný prostý text; nic se destruktivně nesanitizuje. Escapuje se až při
+  výstupu podle cílového formátu: iCal TEXT (`escapeText`), budoucí HTML výstup musí text
+  escapovat pro HTML. Zápis do D1 jen parametrizovaně (`.bind`), D1 má navíc CHECK na typ a délku.
+- Poznámka **není** ve veřejné odpovědi rezervace (201 ani replay), v `/api/availability`
+  ani v chybových odpovědích a její obsah se **neloguje**. Je jen v autorizovaném iCal exportu
+  (`DESCRIPTION` aktivní události; zrušená událost ji nenese).
+- Idempotence: do otisku požadavku vstupuje normalizovaná poznámka (jen když je vyplněná –
+  otisk požadavku bez poznámky je stejný jako dřív). Stejný `Idempotency-Key` + stejná
+  poznámka (i v jiném zápisu, např. CRLF nebo NFD) = replay; jiná poznámka =
+  422 `idempotency-key-reused`.
 
 #### Chybové kódy (`{ "error": "<kód>" }`)
 
@@ -582,7 +609,7 @@ D1 (reservations) → GET /api/reservations.ics?token=… → import v e-chalup�
     stále stejný text; dále `SEQUENCE`,
   - `SUMMARY` `Web CV-XXXXXX – Jméno Příjmení`,
   - `DESCRIPTION` s kódem rezervace, hostem, telefonem, e-mailem, počtem hostů, cenou, VS
-    a stavem platby. Tyto údaje se do e-chalup přenesou v poznámce rezervace (ověřeno
+    a stavem platby; vyplněná poznámka hosta je na konci jako blok `Poznámka hosta:` a text. Tyto údaje se do e-chalup přenesou v poznámce rezervace (ověřeno
     testem importu).
 - **Zrušené rezervace** (`cancelled`) zůstávají ve feedu jako „tombstone“: stejné `UID`,
   aktuální (zvýšené) `SEQUENCE`, původní `DTSTART`/`DTEND` a `STATUS:CANCELLED`, bez osobních

@@ -24,6 +24,8 @@ export interface NewReservation {
   lastName: string;
   phone: string;
   email: string;
+  /** Volitelná poznámka hosta (už validovaná a normalizovaná). Nikdy ne do ReservationSummary. */
+  note?: string | null;
   priceCzk: number;
   idempotencyKey: string | null;
   requestHash: string | null;
@@ -32,7 +34,7 @@ export interface NewReservation {
   createdAt: string;
 }
 
-/** Veřejně bezpečný souhrn rezervace (bez jména a kontaktů). */
+/** Veřejně bezpečný souhrn rezervace (bez jména, kontaktů a poznámky). */
 export interface ReservationSummary {
   code: string;
   arrival: IsoDate;
@@ -91,12 +93,12 @@ export async function insertReservation(db: D1Database, r: NewReservation): Prom
     db
       .prepare(
         `INSERT INTO reservations (id, public_code, arrival, departure, guests, first_name, last_name, phone, email, price_czk,
-           variable_symbol, status, ical_uid, idempotency_key, request_hash, created_at, updated_at)
+           variable_symbol, status, ical_uid, idempotency_key, request_hash, created_at, updated_at, note)
          VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10,
            (SELECT printf('%s%06d', ?11, value) FROM sequences WHERE name = 'variable_symbol'),
-           'pending_payment', ?12, ?13, ?14, ?15, ?15)`,
+           'pending_payment', ?12, ?13, ?14, ?15, ?15, ?16)`,
       )
-      .bind(r.id, r.publicCode, r.arrival, r.departure, r.guests, r.firstName, r.lastName, r.phone, r.email, r.priceCzk, r.vsPrefix, r.icalUid, r.idempotencyKey, r.requestHash, r.createdAt),
+      .bind(r.id, r.publicCode, r.arrival, r.departure, r.guests, r.firstName, r.lastName, r.phone, r.email, r.priceCzk, r.vsPrefix, r.icalUid, r.idempotencyKey, r.requestHash, r.createdAt, r.note ?? null),
     // Jeden řádek na noc; PRIMARY KEY (night) odmítne noc, kterou už má jiná rezervace.
     ...nights.map((night) => db.prepare('INSERT INTO reserved_nights (night, reservation_id) VALUES (?1, ?2)').bind(night, r.id)),
     db.prepare(`SELECT variable_symbol FROM reservations WHERE id = ?1`).bind(r.id),
@@ -167,6 +169,8 @@ export interface ExportReservation {
   lastName: string;
   phone: string;
   email: string;
+  /** Poznámka hosta (prostý text, při výstupu escapovat podle formátu), jinak null. */
+  note: string | null;
   priceCzk: number;
   variableSymbol: string;
   status: ReservationStatus;
@@ -178,7 +182,7 @@ export async function listExportReservations(db: D1Database): Promise<ExportRese
   const { results } = await db
     .prepare(
       `SELECT public_code AS code, ical_uid AS icalUid, ical_sequence AS icalSequence, arrival, departure, guests,
-         first_name AS firstName, last_name AS lastName, phone, email, price_czk AS priceCzk,
+         first_name AS firstName, last_name AS lastName, phone, email, note, price_czk AS priceCzk,
          variable_symbol AS variableSymbol, status, created_at AS createdAt, updated_at AS updatedAt
        FROM reservations ORDER BY arrival, ical_uid`,
     )
