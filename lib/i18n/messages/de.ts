@@ -52,6 +52,8 @@ export const de = {
   'calendar.hintArrival': 'Klicken Sie auf den Anreisetag.',
   'calendar.hintDeparture': 'Wählen Sie jetzt den Abreisetag.',
   'calendar.legend.label': 'Legende',
+  'calendar.legend.toggle': 'Was bedeuten die Farben?',
+  'calendar.legend.close': 'Legende schließen',
   'calendar.legend.free': 'Frei',
   'calendar.legend.busy': 'Belegt',
   'calendar.legend.changeover': 'An- / Abreise anderer Gäste',

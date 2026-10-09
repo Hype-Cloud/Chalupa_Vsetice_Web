@@ -1,5 +1,5 @@
-import { useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent } from 'react';
-import { ChevronLeft, ChevronRight } from 'lucide-react';
+import { useEffect, useId, useLayoutEffect, useRef, useState, type KeyboardEvent } from 'react';
+import { ChevronLeft, ChevronRight, X } from 'lucide-react';
 import { addDays, addMonths, startOfMonth, type IsoDate } from '../../lib/availability/dates.ts';
 import { isIncomplete, type Occupancy } from '../../lib/availability/occupancy.ts';
 import type { Stay } from '../../lib/availability/stay.ts';
@@ -112,6 +112,21 @@ export function AvailabilityCalendar({ today, availability, occupancy, stay, mes
   })();
 
   const hint = !stay.arrival || stay.departure ? t('calendar.hintArrival') : t('calendar.hintDeparture');
+  // Legenda a tlačítko „Co znamenají barvy?“ sdílí jednu buňku gridu: výšku slotu vždy určuje
+  // legenda, takže otevření ani zavření nemění výšku kalendáře ani nic pod ním.
+  const legendId = useId();
+  const [legendOpen, setLegendOpen] = useState(false);
+  const legendToggle = useRef<HTMLButtonElement>(null);
+  const legendClose = useRef<HTMLButtonElement>(null);
+  const legendFocus = useRef(false);
+  useEffect(() => {
+    if (!legendFocus.current) return;
+    (legendOpen ? legendClose : legendToggle).current?.focus();
+  }, [legendOpen]);
+  const toggleLegend = (open: boolean) => {
+    legendFocus.current = true;
+    setLegendOpen(open);
+  };
 
   return (
     <div className="bk-calendar">
@@ -130,13 +145,23 @@ export function AvailabilityCalendar({ today, availability, occupancy, stay, mes
           <CalendarMonth key={monthStart} monthStart={monthStart} today={today} occupancy={occupancy} stay={stay} focusDate={tabbable} onPick={onPick} onFocusDate={setFocusDate} />
         ))}
       </div>
-      <ul className="bk-legend" aria-label={t('calendar.legend.label')}>
-        <li><i className="is-free" /> {t('calendar.legend.free')}</li>
-        <li><i className="is-busy" /> {t('calendar.legend.busy')}</li>
-        <li><i className="is-checkin" /> {t('calendar.legend.changeover')}</li>
-        <li><i className="is-selected" /> {t('calendar.legend.selected')}</li>
-        <li><i className="is-today" /> {t('calendar.legend.today')}</li>
-      </ul>
+      <div className={`bk-legend-slot${legendOpen ? ' is-open' : ''}`}>
+        <button ref={legendToggle} type="button" className="bk-legend-toggle" aria-expanded={legendOpen} aria-controls={legendId} onClick={() => toggleLegend(true)}>
+          {t('calendar.legend.toggle')}
+        </button>
+        <div className="bk-legend-panel" id={legendId}>
+          <ul className="bk-legend" aria-label={t('calendar.legend.label')}>
+            <li><i className="is-free" /> {t('calendar.legend.free')}</li>
+            <li><i className="is-busy" /> {t('calendar.legend.busy')}</li>
+            <li><i className="is-checkin" /> {t('calendar.legend.changeover')}</li>
+            <li><i className="is-selected" /> {t('calendar.legend.selected')}</li>
+            <li><i className="is-today" /> {t('calendar.legend.today')}</li>
+          </ul>
+          <button ref={legendClose} type="button" className="bk-legend-close" aria-label={t('calendar.legend.close')} aria-expanded={legendOpen} aria-controls={legendId} onClick={() => toggleLegend(false)}>
+            <X size={16} strokeWidth={1.8} />
+          </button>
+        </div>
+      </div>
       {status}
     </div>
   );

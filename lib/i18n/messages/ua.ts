@@ -52,6 +52,8 @@ export const ua = {
   'calendar.hintArrival': 'Натисніть на день заїзду.',
   'calendar.hintDeparture': 'Тепер оберіть день виїзду.',
   'calendar.legend.label': 'Легенда',
+  'calendar.legend.toggle': 'Що означають кольори?',
+  'calendar.legend.close': 'Закрити легенду',
   'calendar.legend.free': 'Вільно',
   'calendar.legend.busy': 'Зайнято',
   'calendar.legend.changeover': 'Заїзд / виїзд інших гостей',

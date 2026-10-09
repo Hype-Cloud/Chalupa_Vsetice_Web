@@ -52,6 +52,8 @@ export const en = {
   'calendar.hintArrival': 'Click your arrival day.',
   'calendar.hintDeparture': 'Now select your departure day.',
   'calendar.legend.label': 'Legend',
+  'calendar.legend.toggle': 'What do the colours mean?',
+  'calendar.legend.close': 'Close legend',
   'calendar.legend.free': 'Available',
   'calendar.legend.busy': 'Booked',
   'calendar.legend.changeover': 'Other guests’ arrival / departure',

@@ -88,7 +88,20 @@
 .bk-day.in-range { background:var(--bk-range); }
 .bk-day.is-arrival, .bk-day.is-departure { background:var(--bk-ink); color:#fff; font-weight:600; }
 .bk-day.is-today::after { content:""; position:absolute; left:50%; bottom:5px; width:4px; height:4px; margin-left:-2px; border-radius:50%; background:currentColor; }
-.bk-legend { display:flex; flex-wrap:wrap; justify-content:center; gap:8px 18px; margin:20px 0 0; padding:16px 0 0; border-top:1px solid #e2e7e0; list-style:none; font-size:13px; color:#657267; }
+.bk-legend { display:flex; flex-wrap:wrap; justify-content:center; gap:8px 18px; margin:0; padding:0 36px; list-style:none; font-size:13px; color:#657267; }
+/* Slot legendy: tlačítko „Co znamenají barvy?“ a legenda v jedné buňce gridu (vrstvy přes sebe).
+   Výšku slotu určuje vždy vyšší z obou vrstev, takže přepnutí nemění výšku kalendáře. */
+.bk-legend-slot { display:grid; margin:20px 0 0; padding:16px 0 0; border-top:1px solid #e2e7e0; }
+.bk-legend-slot > * { grid-area:1 / 1; transition:opacity .2s ease, visibility 0s; }
+/* Skrývaná vrstva zmizí až po prolnutí; zobrazovaná je hned viditelná (a fokusovatelná). */
+.bk-legend-slot:not(.is-open) > .bk-legend-panel, .bk-legend-slot.is-open > .bk-legend-toggle { opacity:0; visibility:hidden; transition:opacity .2s ease, visibility 0s linear .2s; }
+.bk-legend-toggle { align-self:center; justify-self:center; padding:2px 8px; border:0; border-radius:var(--bk-radius-sm, 7px); background:none; font:inherit; font-size:13px; line-height:1.6; color:#657267; text-decoration:underline; text-decoration-style:dotted; text-underline-offset:4px; cursor:pointer; }
+.bk-legend-toggle:hover { color:#163d33; }
+.bk-legend-panel { position:relative; align-self:center; }
+.bk-legend-close { position:absolute; top:50%; right:0; transform:translateY(-50%); display:flex; align-items:center; justify-content:center; width:28px; height:28px; padding:0; border:0; border-radius:50%; background:none; color:#657267; cursor:pointer; }
+.bk-legend-close:hover { background:#e9eee5; color:#163d33; }
+.bk-legend-toggle:focus-visible, .bk-legend-close:focus-visible { outline:2px solid #b5913e; outline-offset:2px; }
+@media (prefers-reduced-motion: reduce) { .bk-legend-slot > * { transition:none; } }
 .bk-legend li { display:flex; align-items:center; gap:7px; }
 .bk-legend i { position:relative; width:16px; height:16px; border-radius:4px; background:var(--bk-free); }
 .bk-legend i.is-busy { background:var(--bk-busy); }
@@ -104,7 +117,7 @@
 .booking .result:empty { margin:0; }
 .estimate > div { display:flex; justify-content:space-between; gap:10px; width:100%; }
 .estimate dd { margin:0; font-weight:600; }
-@media(max-width:640px) { .bk-day { font-size:15px; } .bk-legend { justify-content:flex-start; } }
+@media(max-width:640px) { .bk-day { font-size:15px; } .bk-legend { justify-content:flex-start; padding:0 36px 0 0; } .bk-legend-close { top:0; transform:none; } }
 .price.is-placeholder { font-size:24px; color:#cad7ce; }
 .price.is-loading { opacity:.7; }
 .estimate { flex-direction:column; gap:8px; }
@@ -140,7 +153,7 @@ header nav a, .nav-cta { white-space:nowrap; }
 /* Orientační cena před výběrem termínu (konstanta serveru, ne výpočet) – centrovaná úvodní část. */
 .booking > .price.is-indicative { font-size:28px; line-height:1.2; text-align:center; text-wrap:balance; }
 .booking > p.price-note { margin:8px auto 0; max-width:30ch; font-size:13px; line-height:1.55; color:#b9c9be; text-align:center; text-wrap:balance; }
-.booking > .price { line-height:1.15; }
+.booking > .price { line-height:1.15; text-align:center; }
 .booking > .price + p { margin:6px 0 0; }
 .booking .date-fields { margin-top:20px; }
 .booking .estimate { margin-top:16px; padding:14px 0 16px; gap:6px; border-top-color:rgba(219,232,189,.2); }
@@ -196,7 +209,7 @@ header nav a, .nav-cta { white-space:nowrap; }
 .booking-form button.button { display:flex; width:100%; min-height:56px; margin-top:20px; border:0; border-radius:var(--bk-radius-md); background:#163d33; color:#fff; font-family:inherit; cursor:pointer; transition:background-color .2s, color .2s; }
 .booking-form button.button:hover { background:#0f2e26; }
 /* Neaktivní: světlá zelená výplň a tlumený text, bez obrysu – zřetelně neaktivní, ne „zakázané“. */
-.booking-form button.button[disabled] { background:#d3dfcb; color:#6b7c71; cursor:not-allowed; }
+.booking-form button.button[disabled] { background:#bfd0b7; color:#3f574a; cursor:not-allowed; }
 .booking-form button.button[disabled] svg { opacity:.55; }
 .booking-form button.button[aria-busy="true"] { background:#163d33; color:#fff; opacity:.8; cursor:progress; }
 /* Potvrzení: krátký čistě CSS reveal (opacity + transform), nic nečeká na jeho dokončení. */
@@ -216,4 +229,26 @@ header nav a, .nav-cta { white-space:nowrap; }
   .date-picker-button { right:2px; }
   .booking .date-field input[type="text"], .booking .guests-field select, .booking-form .form-field input, .booking-form .form-field textarea { font-size:16px; }
   .booking-form .form-grid { grid-template-columns:1fr; gap:14px; }
+}
+/* Desktop: zelený panel stejně vysoký jako karta kalendáře (stretch ve stejném řádku gridu),
+   obsah ve sloupci – cena nahoře, CTA dole. Mobil zůstává na přirozené výšce. */
+@media(min-width:1001px) {
+  .booking-grid { align-items:stretch; }
+  .booking-grid > .booking { display:flex; flex-direction:column; padding:38px 34px 34px; }
+  .booking-grid > .booking > .button { margin-top:auto; }
+  .booking-grid > .booking > :has(+ .button) { margin-bottom:24px; }
+  .booking-grid > .booking.is-success { justify-content:center; }
+  .booking-grid > .booking > .price { font-size:42px; }
+  .booking-grid > .booking > .price span { font-size:18px; }
+  .booking-grid > .booking > .price.is-indicative { font-size:32px; }
+  .booking-grid > .booking > .price.is-placeholder { font-size:26px; }
+  .booking-grid > .booking > p.price-note { margin-top:10px; font-size:14px; }
+  /* Volné místo se dělí mezi cenu → pole a pole → CTA; padding drží minimální odstup. */
+  .booking-grid > .booking .date-fields { margin-top:auto; padding-top:30px; gap:14px; }
+  .booking-grid > .booking .date-field-control input[type="text"] { padding-right:38px; }
+  .booking-grid > .booking .date-field-control input[type="text"]::placeholder { font-size:14px; letter-spacing:0; }
+  .booking-grid > .booking label { font-size:14px; }
+  .booking-grid > .booking .date-field input[type="text"], .booking-grid > .booking .guests-field select { height:48px; font-size:16px; }
+  .booking-grid > .booking .guests-field { margin-top:16px; }
+  .booking-grid > .booking .estimate { margin-top:20px; padding:18px 0 4px; gap:9px; font-size:15px; }
 }

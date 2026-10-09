@@ -835,7 +835,7 @@ app/
   globals.css           styly webu včetně kalendáře
 components/booking/
   BookingSection.tsx    společný stav pobytu (kalendář + panel), WebMCP nástroj
-  AvailabilityCalendar.tsx  navigace, responzivní počet měsíců, klávesnice, legenda, stav dat
+  AvailabilityCalendar.tsx  navigace, responzivní počet měsíců, klávesnice, legenda (skrytá za „Co znamenají barvy?“ ve slotu s pevnou výškou), stav dat
   CalendarMonth.tsx     mřížka jednoho měsíce
   BookingPanel.tsx      zelený panel: data, hosté, cena ze serveru, poptávka / pokračování k rezervaci
   DateField.tsx, dateInput.ts  vstup data DD.MM.RRRR ↔ ISO (rozepsaný text, validace, picker)

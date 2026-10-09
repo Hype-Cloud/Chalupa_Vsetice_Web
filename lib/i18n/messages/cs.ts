@@ -54,6 +54,8 @@ export const cs = {
   'calendar.hintArrival': 'Klikněte na den příjezdu.',
   'calendar.hintDeparture': 'Teď vyberte den odjezdu.',
   'calendar.legend.label': 'Legenda',
+  'calendar.legend.toggle': 'Co znamenají barvy?',
+  'calendar.legend.close': 'Zavřít legendu',
   'calendar.legend.free': 'Volno',
   'calendar.legend.busy': 'Obsazeno',
   'calendar.legend.changeover': 'Příjezd / odjezd jiných hostů',
