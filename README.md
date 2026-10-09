@@ -22,8 +22,9 @@ Cloudflare Workers.
   - rozlišuje volné a obsazené dny i dny příjezdu a odjezdu jiných hostů,
   - první klik vybere příjezd a druhý odjezd; opakovaný klik na zvolený příjezd
     výběr zruší; pobyt přes obsazené období ani v minulosti vybrat nejde,
-  - pokus o pobyt kratší než `MIN_NIGHTS` krátce zvýrazní kliknutý den (flash ~400 ms,
-    bez trvalého stavu) a hláška se zobrazí v tlumené terakotové barvě s krátkým pulsem
+  - pokus o pobyt kratší než `MIN_NIGHTS` krátce terakotově probliká ring kolem
+    kliknutého dne (~650 ms, pozadí a číslo dne beze změny, bez trvalého stavu)
+    a hláška se zobrazí v tlumené terakotové barvě s krátkým pulsem
     (`transform: scale`); každý další neplatný pokus odezvu spustí znovu, s
     `prefers-reduced-motion` zůstane jen změna barvy,
   - ovládá se myší, dotykem i klávesnicí (šipky, Enter, mezerník) a každý den má

@@ -52,9 +52,9 @@ test('validní klik ani jiné chyby flash dne nespustí', () => {
 
 test('flash dne není trvalý stav: krátká animace bez fill a bez pohybu, den nezíská třídu', () => {
   assert.equal(DAY_FLASH_OPTIONS.fill, 'none');
-  assert.ok(Number(DAY_FLASH_OPTIONS.duration) >= 300 && Number(DAY_FLASH_OPTIONS.duration) <= 450);
-  assert.ok(DAY_FLASH_KEYFRAMES.every((k) => !('transform' in k) && !('scale' in k) && !('translate' in k)));
-  assert.match(String(DAY_FLASH_KEYFRAMES.at(-1)!.boxShadow), /, 0\)$/, 'poslední snímek je průhledný');
+  assert.ok(Number(DAY_FLASH_OPTIONS.duration) >= 600 && Number(DAY_FLASH_OPTIONS.duration) <= 700);
+  assert.ok(DAY_FLASH_KEYFRAMES.every((k) => Object.keys(k).every((key) => key === 'boxShadow' || key === 'offset')), 'mění se jen ring, ne pozadí, barva ani pozice');
+  assert.ok(DAY_FLASH_KEYFRAMES.every((k) => k.offset! > 0 && k.offset! < 1), 'začátek a konec = vzhled dne podle CSS');
   const month = readFileSync(join(ROOT, 'components/booking/CalendarMonth.tsx'), 'utf8');
   assert.doesNotMatch(month, /flash|rejected|too-short/i, 'den v kalendáři nemá error třídu');
 });
