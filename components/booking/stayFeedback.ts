@@ -30,14 +30,15 @@ export function nextStayFeedback(
 }
 
 /**
- * Krátké probliknutí odmítnutého dne (Web Animations API, bez fill): po skončení se den vrátí
- * do svého vzhledu podle CSS, nezíská třídu ani trvalý stav. Jen barva (inset stín přes pozadí
- * i přechody příjezd/odjezd), žádný pohyb – stejné i při prefers-reduced-motion.
+ * Krátké probliknutí ringu kolem odmítnutého dne (Web Animations API, bez fill). Mění se jen
+ * inset ring stejné tloušťky jako při hoveru – pozadí ani barva čísla dne zůstávají. Počáteční
+ * a koncový snímek jsou implicitní (aktuální vzhled podle CSS, např. zelený hover ring), takže
+ * se den po skončení vrátí do svého vzhledu a nezíská třídu ani trvalý stav. Žádný pohyb –
+ * stejné i při prefers-reduced-motion.
  */
-export const DAY_FLASH_COLOR = 'rgba(154, 63, 31, 0.9)'; // #9a3f1f
+export const DAY_FLASH_COLOR = '#9a3f1f';
 export const DAY_FLASH_KEYFRAMES: Keyframe[] = [
-  { boxShadow: 'inset 0 0 0 999px rgba(154, 63, 31, 0)' },
-  { boxShadow: `inset 0 0 0 999px ${DAY_FLASH_COLOR}`, color: '#fff', offset: 0.35 },
-  { boxShadow: 'inset 0 0 0 999px rgba(154, 63, 31, 0)' },
+  { boxShadow: `inset 0 0 0 2px ${DAY_FLASH_COLOR}`, offset: 0.2 },
+  { boxShadow: `inset 0 0 0 2px ${DAY_FLASH_COLOR}`, offset: 0.6 },
 ];
-export const DAY_FLASH_OPTIONS: KeyframeAnimationOptions = { duration: 400, easing: 'ease-out', fill: 'none' };
+export const DAY_FLASH_OPTIONS: KeyframeAnimationOptions = { duration: 650, easing: 'ease-out', fill: 'none' };
