@@ -289,22 +289,25 @@ test('komponenty a stránka nemají pevné české texty ani textové aria-label
   for (const file of files) assert.ok(!/STAY_ERRORS|WEEKDAYS|DAY_STATUS\b/.test(readFileSync(file, 'utf8')), file);
 });
 
-test('žádná pevná cena „3 000 Kč“ v UI ani v katalozích; orientační cena noci jen ze serverové konstanty', () => {
+test('žádná pevná cena (3 000 / 2 990 Kč) v UI ani v katalozích; orientační cena noci jen ze serverové konstanty', () => {
   for (const file of frontendFiles()) {
     const code = readFileSync(file, 'utf8');
-    assert.ok(!/3[\s ]?000\s*Kč|Kč\s*\/\s*noc/.test(code), file);
+    assert.ok(!/(3[\s ]?000|2[\s ]?990)\s*Kč|Kč\s*\/\s*noc/.test(code), file);
   }
   for (const locale of LOCALES) {
     const text = JSON.stringify(CATALOGS[locale]);
-    assert.ok(!/3[\s .,]?000/.test(text), `${locale}: 3 000 v katalogu`);
+    assert.ok(!/3[\s .,]?000|2[\s .,]?990/.test(text), `${locale}: pevná částka v katalogu`);
   }
-  // Před výběrem termínu: „standardně … / noc“ s cenou z PRICE_PER_NIGHT (výchozí cena serveru).
+  // Před výběrem termínu: „běžně … / noc“ s cenou z PRICE_PER_NIGHT (výchozí cena serveru).
   const panel = readFileSync(join(ROOT, 'components/booking/BookingPanel.tsx'), 'utf8');
   assert.match(panel, /t\('booking\.panel\.priceStandard', \{ price: formatPrice\(PRICE_PER_NIGHT\) \}\)/);
   for (const locale of LOCALES) {
     const i18n = createI18n(locale);
-    assert.ok(i18n.t('booking.panel.priceStandard', { price: i18n.formatPrice(PRICE_PER_NIGHT) }).includes(i18n.formatPrice(3000)), locale);
+    assert.ok(i18n.t('booking.panel.priceStandard', { price: i18n.formatPrice(PRICE_PER_NIGHT) }).includes(i18n.formatPrice(PRICE_PER_NIGHT)), locale);
   }
+  // Typografie: „Běžně 2 990 Kč / noc“ (mezera tisíců, mezera před Kč, lomítko s mezerami).
+  assert.equal(PRICE_PER_NIGHT, 2990);
+  assert.equal(createI18n('cs').t('booking.panel.priceStandard', { price: createI18n('cs').formatPrice(PRICE_PER_NIGHT) }).replace(/[\u00a0\u202f]/g, ' '), 'Běžně 2 990 Kč / noc');
   assert.equal(createI18n('cs').t('pricing.rent.value'), 'Cena podle zvoleného termínu');
   assert.equal(createI18n('en').t('pricing.rent.value'), 'Price depends on your dates');
 });

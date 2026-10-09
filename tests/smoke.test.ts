@@ -72,7 +72,7 @@ test('produkce: všechny kontroly projdou, rezervační POST je vypnutý (404)',
   assert.equal(checks.length, 9);
   assert.equal(byName(checks, '/api/booking-config').detail, 'bookingEnabled false');
   assert.equal(byName(checks, 'POST /api/reservations').detail, 'vypnutý');
-  assert.match(byName(checks, 'POST /api/quote – cenová').detail!, /: 6000 Kč \(nightly\)$/);
+  assert.match(byName(checks, 'POST /api/quote – cenová').detail!, /: 5980 Kč \(nightly\)$/);
   assert.equal(formatSmoke(checks).ok, true);
 });
 

@@ -68,8 +68,10 @@ Skutečný stav (nastaveno ručně v dashboardu, v diffu není vidět):
   rezervace (`worker/booking/pricing.ts`, `validation.ts`, `/api/availability`).
 - Frontend nesmí duplikovat business logiku: jen sbírá vstupy, volá backend (`POST /api/quote`,
   `POST /api/reservations`, `GET /api/availability`) a zobrazuje/formátuje výsledek.
-- Cena na frontendu se **nepočítá** jako počet nocí × 3 000 Kč; zobrazuje se `totalCzk`
+- Cena na frontendu se **nepočítá** jako počet nocí × výchozí cena; zobrazuje se `totalCzk`
   z `/api/quote` a podle `pricingMode` (`nightly` / `exact-stay`) případně rozpis nocí.
+  Před výběrem termínu smí panel jen zobrazit orientační „Běžně … / noc“ z `PRICE_PER_NIGHT`
+  (`lib/booking/rules.ts`, výchozí cena serveru) přes `formatPrice` – bez výpočtu a bez pevné částky.
 - Frontend je vícejazyčný (cs, en, de, ua – `lib/i18n`): žádné pevné texty v komponentách
   (ani `aria-label`/`alt`), každý nový klíč do všech čtyř katalogů (tsc to vynutí), formátování
   přes `Intl`. Jazyk a měna jsou oddělené (vždy CZK). API vrací jen stabilní kódy (`error`), ne texty.

@@ -295,10 +295,3 @@ export function submitBlock(input: {
   if (!contactComplete(input.contact)) return 'contact';
   return null;
 }
-
-export const SUBMIT_BLOCK_KEYS: Record<Exclude<SubmitBlock, null | 'submitting'>, MessageKey> = {
-  stay: 'reservation.blocked.stay',
-  'quote-loading': 'reservation.blocked.quoteLoading',
-  'quote-unavailable': 'reservation.blocked.quoteUnavailable',
-  contact: 'reservation.blocked.contact',
-};

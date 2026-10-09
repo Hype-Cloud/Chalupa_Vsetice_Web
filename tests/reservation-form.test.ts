@@ -12,7 +12,6 @@ import {
   reservationErrorKey,
   reservationPayload,
   submitBlock,
-  SUBMIT_BLOCK_KEYS,
   type ContactDraft,
   type ReservationPayload,
   type SubmissionState,
@@ -34,7 +33,7 @@ import { fixture } from './helpers.ts';
 const CONTACT: ContactDraft = { firstName: 'Jan', lastName: 'Testovací', email: 'host@example.invalid', phone: '+420 000 000 000', note: '' };
 const TOKEN = 'XXXX.DUMMY.TOKEN.XXXX';
 const payload = (overrides: Partial<{ arrival: string; departure: string; guests: number; contact: ContactDraft; expectedPriceCzk: number }> = {}): ReservationPayload =>
-  reservationPayload({ arrival: '2030-02-01', departure: '2030-02-04', guests: 2, contact: CONTACT, expectedPriceCzk: 9000, ...overrides });
+  reservationPayload({ arrival: '2030-02-01', departure: '2030-02-04', guests: 2, contact: CONTACT, expectedPriceCzk: 8970, ...overrides });
 
 // --- request a pravidla odeslání ---
 
@@ -48,7 +47,7 @@ test('request: pole podle backendového kontraktu, prázdná poznámka = null, c
     email: 'host@example.invalid',
     phone: '+420 000 000 000',
     note: null,
-    expectedPriceCzk: 9000,
+    expectedPriceCzk: 8970,
   });
   assert.equal(payload({ contact: { ...CONTACT, note: '   ' } }).note, null);
   assert.equal(payload({ contact: { ...CONTACT, note: 'Přijedeme pozdě.' } }).note, 'Přijedeme pozdě.');
@@ -77,12 +76,13 @@ test('odeslání: neplatný termín, načítaná nebo chybějící cena a kontak
   assert.equal(submitBlock({ ...ok, submission: { status: 'submitting' } }), 'submitting');
   // Poznámka je volitelná.
   assert.ok(contactComplete({ ...CONTACT, note: '' }));
+  // Důvod blokace se nezobrazuje jako výchozí text pod formulářem („Vyplňte jméno…“, „počkejte na
+  // ověření“); zůstává jen hláška ke „Pokračovat k rezervaci“ bez termínu.
   for (const locale of LOCALES) {
-    for (const key of Object.values(SUBMIT_BLOCK_KEYS)) assert.ok(CATALOGS[locale][key], `${locale} ${key}`);
+    const keys = Object.keys(CATALOGS[locale]);
+    assert.deepEqual(keys.filter((k) => k.startsWith('reservation.blocked.')), ['reservation.blocked.stay'], locale);
+    assert.ok(!keys.some((k) => k.startsWith('reservation.turnstile.') || k === 'reservation.form.optional'), locale);
   }
-  // Žádný blokující stav ani text „počkejte na ověření“ – Turnstile běží až po kliknutí.
-  assert.ok(!Object.keys(SUBMIT_BLOCK_KEYS).includes('turnstile'));
-  for (const locale of LOCALES) assert.ok(!Object.keys(CATALOGS[locale]).some((k) => k.startsWith('reservation.blocked.turnstile') || k.startsWith('reservation.turnstile.')), locale);
 });
 
 // --- stavový automat, Invisible Turnstile a Idempotency-Key ---
@@ -118,7 +118,7 @@ function controller(results: SubmitResult[], tokens: TokenOutcome[] = []) {
   });
   return { c, calls, states, events, last: () => states[states.length - 1], executions: () => events.filter((e) => e.startsWith('turnstile:')).length, priceRefreshes: () => priceRefreshes };
 }
-const SUCCESS: SubmitResult = { kind: 'success', reservation: { code: 'CV-ABC234', arrival: '2030-02-01', departure: '2030-02-04', guests: 2, priceCzk: 9000, nights: 3 }, replayed: false };
+const SUCCESS: SubmitResult = { kind: 'success', reservation: { code: 'CV-ABC234', arrival: '2030-02-01', departure: '2030-02-04', guests: 2, priceCzk: 8970, nights: 3 }, replayed: false };
 
 test('kliknutí nejdřív spustí Invisible Turnstile, POST až s získaným tokenem; stav success', async () => {
   const t = controller([SUCCESS]);
@@ -218,7 +218,7 @@ test('price-mismatch: žádné automatické odeslání; vědomé potvrzení = no
 });
 
 test('price-mismatch a potvrzení původní ceny (stejný obsah): přesto nová operace s novým tokenem', async () => {
-  const t = controller([{ kind: 'price-mismatch', priceCzk: 9000 }, SUCCESS]);
+  const t = controller([{ kind: 'price-mismatch', priceCzk: 8970 }, SUCCESS]);
   await t.c.submit(payload());
   await t.c.submit(payload());
   assert.deepEqual(t.calls.map((c) => c.token), ['TOKEN-1', 'TOKEN-2']);
@@ -324,14 +324,14 @@ test('POST: správný request (JSON, Idempotency-Key, turnstileToken, expectedPr
   const b = backend();
   const key = crypto.randomUUID();
   const result = await postReservation(payload({ contact: { ...CONTACT, note: 'Přijedeme večer.' } }), TOKEN, key, b.fetchFn);
-  assert.deepEqual(result, { kind: 'success', reservation: { code: (result as { reservation: { code: string } }).reservation.code, arrival: '2030-02-01', departure: '2030-02-04', guests: 2, priceCzk: 9000, nights: 3 }, replayed: false });
+  assert.deepEqual(result, { kind: 'success', reservation: { code: (result as { reservation: { code: string } }).reservation.code, arrival: '2030-02-01', departure: '2030-02-04', guests: 2, priceCzk: 8970, nights: 3 }, replayed: false });
   const [request] = b.requests;
   assert.equal(request.method, 'POST');
   assert.equal(new URL(request.url).pathname, '/api/reservations');
   assert.equal(request.headers.get('content-type'), 'application/json');
   assert.equal(request.headers.get('idempotency-key'), key);
   assert.deepEqual(await request.json(), { ...payload({ contact: { ...CONTACT, note: 'Přijedeme večer.' } }), turnstileToken: TOKEN });
-  assert.deepEqual(await t.db.prepare('SELECT first_name, note, price_czk FROM reservations').first(), { first_name: 'Jan', note: 'Přijedeme večer.', price_czk: 9000 });
+  assert.deepEqual(await t.db.prepare('SELECT first_name, note, price_czk FROM reservations').first(), { first_name: 'Jan', note: 'Přijedeme večer.', price_czk: 8970 });
   // Opakování stejné operace (např. ztracená odpověď) → idempotentní replay, žádná druhá rezervace.
   const replay = await postReservation(payload({ contact: { ...CONTACT, note: 'Přijedeme večer.' } }), TOKEN, key, b.fetchFn);
   assert.equal(replay.kind, 'success');
@@ -341,7 +341,7 @@ test('POST: správný request (JSON, Idempotency-Key, turnstileToken, expectedPr
 
 test('POST: změna ceny na serveru → price-mismatch s novou cenou; po vědomém potvrzení nový klíč a úspěch, kontakty beze změny', async () => {
   const b = backend();
-  // Host viděl 9 000 Kč; mezitím se ceník změnil (noc 2. 2. = 4 500 Kč → 10 500 Kč).
+  // Host viděl 8 970 Kč (3 × 2 990); mezitím se ceník změnil (noc 2. 2. = 4 500 Kč → 2 990 + 4 500 + 2 990 = 10 480 Kč).
   await t.db.prepare(`INSERT INTO daily_prices (date, price_czk) VALUES ('2030-02-02', 4500)`).run();
   const states: SubmissionState[] = [];
   let refreshed = 0;
@@ -354,18 +354,18 @@ test('POST: změna ceny na serveru → price-mismatch s novou cenou; po vědomé
     onPriceChanged: () => refreshed++,
   });
   const contact = { ...CONTACT, note: 'Poznámka zůstává' };
-  await c.submit(payload({ contact, expectedPriceCzk: 9000 }));
-  assert.deepEqual(c.state(), { status: 'price-changed', fromCzk: 9000, toCzk: 10500 });
+  await c.submit(payload({ contact, expectedPriceCzk: 8970 }));
+  assert.deepEqual(c.state(), { status: 'price-changed', fromCzk: 8970, toCzk: 10480 });
   assert.equal(refreshed, 1);
   assert.equal(b.requests.length, 1, 'žádné automatické druhé odeslání');
   assert.equal(await t.count('reservations'), 0);
-  await c.submit(payload({ contact, expectedPriceCzk: 10500 }));
+  await c.submit(payload({ contact, expectedPriceCzk: 10480 }));
   assert.equal(c.state().status, 'success');
   assert.notEqual(b.requests[0].headers.get('idempotency-key'), b.requests[1].headers.get('idempotency-key'));
   // Potvrzení nové ceny nese nový Turnstile token (spotřebovaný se znovu nepoužije).
   const tokens = await Promise.all(b.requests.map(async (r) => ((await r.clone().json()) as { turnstileToken: string }).turnstileToken));
   assert.deepEqual(tokens, ['XXXX.DUMMY.TOKEN.1', 'XXXX.DUMMY.TOKEN.2']);
-  assert.deepEqual(await t.db.prepare('SELECT note, price_czk FROM reservations').first(), { note: 'Poznámka zůstává', price_czk: 10500 });
+  assert.deepEqual(await t.db.prepare('SELECT note, price_czk FROM reservations').first(), { note: 'Poznámka zůstává', price_czk: 10480 });
 });
 
 test('POST: 422 s poli, neplatný Turnstile a vypnutý endpoint → mapované stavy', async () => {

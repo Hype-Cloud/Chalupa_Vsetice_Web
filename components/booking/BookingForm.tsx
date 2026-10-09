@@ -1,7 +1,7 @@
 import { useEffect, useId, useRef } from 'react';
 import { ArrowUpRight } from 'lucide-react';
 import { useI18n } from '../i18n.ts';
-import { FIELD_ERROR_KEYS, reservationErrorKey, SUBMIT_BLOCK_KEYS, type ContactDraft, type ReservationConfirmation, type SubmissionState, type SubmitBlock } from './reservation.ts';
+import { FIELD_ERROR_KEYS, reservationErrorKey, type ContactDraft, type ReservationConfirmation, type SubmissionState, type SubmitBlock } from './reservation.ts';
 import type { TokenSource } from './invisibleTurnstile.ts';
 import { Turnstile } from './Turnstile.tsx';
 
@@ -43,12 +43,12 @@ export function BookingForm({ contact, onContact, submission, block, priceChange
   const update = (name: keyof ContactDraft, value: string) => onContact({ ...contact, [name]: value });
   const submitting = submission.status === 'submitting';
 
-  // Jedna stavová zpráva u tlačítka (oznamuje ji čtečka obrazovky).
+  // Jedna stavová zpráva u tlačítka (oznamuje ji čtečka obrazovky) – jen chyby a změna ceny;
+  // výchozí stav bez textu (neaktivní tlačítko a pole jsou srozumitelné samy).
   let status: { text: string; error: boolean } | null = null;
   if (submission.status === 'error') status = { text: t(reservationErrorKey(submission.code)), error: true };
   else if (submission.status === 'invalid') status = { text: t('reservation.error.invalidRequest'), error: true };
   else if (priceChanged) status = { text: priceChanged, error: true };
-  else if (block && block !== 'submitting') status = { text: t(SUBMIT_BLOCK_KEYS[block]), error: false };
 
   return (
     <section ref={section} className="booking-form" aria-labelledby={`${id}-title`}>
@@ -82,7 +82,7 @@ export function BookingForm({ contact, onContact, submission, block, priceChange
           })}
           <div className="form-field is-note">
             <label htmlFor={`${id}-note`}>
-              {t('reservation.form.note')} <span className="optional">({t('reservation.form.optional')})</span>
+              {t('reservation.form.note')}
             </label>
             <textarea
               id={`${id}-note`}

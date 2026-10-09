@@ -29,8 +29,10 @@ Cloudflare Workers.
   počet nocí a cenu ze serveru (`POST /api/quote`, při každé změně termínu nebo hostů).
   Web cenu nepočítá: pevnou cenu termínu (exact-stay) označí „Pevná cena pro tento termín“,
   u slevy ukáže rozpis ze serveru. Během načítání se žádná částka nezobrazuje, chyby jsou
-  srozumitelné hlášky v jazyce webu (u chyby serveru s „Zkusit znovu“). Ceník na stránce
-  neuvádí univerzální cenu za noc – cena pobytu závisí na termínu.
+  srozumitelné hlášky v jazyce webu (u chyby serveru s „Zkusit znovu“). Před výběrem termínu
+  panel ukáže jen orientační „Běžně 2 990 Kč / noc“ (`PRICE_PER_NIGHT` přes `formatPrice`)
+  s poznámkou, že se cena může lišit podle termínu; nic nepočítá.
+  Ceník na stránce neuvádí univerzální cenu za noc – cena pobytu závisí na termínu.
 - **Data v panelu** se zadávají a zobrazují vždy v pořadí den → měsíc → rok: vlastní pole
   `DD.MM.RRRR` (nezávislé na formátu nativního `<input type="date">`, který může být americký)
   s volitelným nativním výběrem data; interně a v API jen ISO `YYYY-MM-DD`.
@@ -201,7 +203,7 @@ Projekt využívá Node.js Test Runner. Databázové testy probíhají nad loká
 | d1-migrations.test.ts | 21 | Kontrola D1 migrací před deployem: číslování, konzistence konfigurací (oddělené D1, produkční POST vypnutý), čekající a neznámé migrace, fail-closed při chybě, detekce destruktivních migrací, ruční aplikace jen v terminálu s potvrzením, záloha před destruktivní migrací produkce. |
 | smoke.test.ts | 8 | Smoke test veřejných endpointů proti skutečnému Workeru: produkce (POST 404, `booking-config` vypnutý) a Preview, bez tokenů a zápisů, odhalení zapnutého POST, výpadku D1, úniku osobních údajů a veřejného exportu. |
 | frontend-quote.test.ts | 14 | Frontend rezervační sekce: cena jen z `/api/quote` (kontrakt proti skutečnému handleru), nightly se slevou, exact-stay, 422 a chyby serveru/sítě jako české hlášky, načítání bez staré ceny, souběh (starší odpověď nepřepíše novější), nový požadavek při změně termínu a hostů, žádný klientský výpočet ceny. |
-| i18n.test.ts | 17 | Jazykové verze: úplnost katalogů cs/en/de/ua (klíče, parametry, plurály, žádný český text ani HTML), fallback, volba jazyka (?lang, localStorage, čeština) a persistence, množná čísla, data a CZK v každém jazyce, kalendář, rezervační panel po přepnutí, přepínač, žádné pevné texty v komponentách ani univerzální cena 3 000 Kč. |
+| i18n.test.ts | 17 | Jazykové verze: úplnost katalogů cs/en/de/ua (klíče, parametry, plurály, žádný český text ani HTML), fallback, volba jazyka (?lang, localStorage, čeština) a persistence, množná čísla, data a CZK v každém jazyce, kalendář, rezervační panel po přepnutí, přepínač, žádné pevné texty v komponentách ani pevná cena noci (3 000 / 2 990 Kč); orientační cena jen z `PRICE_PER_NIGHT`. |
 | date-input.test.ts | 8 | Vstup data DD.MM.RRRR ↔ ISO: přestupný rok, neexistující den a měsíc, rozepsané datum bez chyby, odmítnutí amerického a ISO tvaru, všechna zobrazená data den → měsíc → rok (angličtina bez měsíc/den). |
 | reservation-form.test.ts | 19 | Rezervační formulář: request podle kontraktu, blokace odeslání (termín, cena, kontakty; Turnstile tlačítko neblokuje), kliknutí → Invisible Turnstile → POST, selhání Turnstile bez POST, Idempotency-Key a token svázané s operací (retry = stejný klíč i token bez nové challenge, nová operace = nový token i klíč, i po price-mismatch), chybové kódy → hlášky ve všech jazycích, POST proti skutečnému handleru, `GET /api/booking-config`, Preview Invisible site key jen ve `previews`. |
 | invisible-turnstile.test.ts | 8 | Invisible Turnstile na klientu: widget připravený předem bez spuštění challenge, po kliknutí jen `execute`, nejvýš jeden token na widget a čerstvý widget na pozadí, bez automatického obnovování, ignorování pozdních callbacků, chyba / timeout / prázdný token → `turnstile-failed`, nenačtený skript → `turnstile-unavailable` s opakováním přípravy, odpojení formuláře. |
@@ -524,7 +526,7 @@ ani metadata balíčků.
 **Výpočet po nocích** (vše v celých Kč):
 
 1. Pro každou noc pobytu (od příjezdu včetně do odjezdu bez noci odjezdu) se vezme
-   `daily_prices.price_czk`, jinak výchozí cena `PRICE_PER_NIGHT` (3 000 Kč, `lib/booking/rules.ts`).
+   `daily_prices.price_czk`, jinak výchozí cena `PRICE_PER_NIGHT` (2 990 Kč, `lib/booking/rules.ts`).
 2. `subtotalCzk` = součet cen nocí.
 3. Sleva: pravidlo s nejvyšším `min_nights`, které je ≤ počtu nocí. Žádné pravidlo = bez slevy.
    Slevy se nesčítají.
@@ -555,10 +557,10 @@ Odpověď 200 (`Cache-Control: no-store`):
   "departureDate": "2030-12-17",
   "nights": 10,
   "pricingMode": "nightly",
-  "subtotalCzk": 30000,
-  "discount": { "type": "length", "minNights": 7, "percent": 5, "amountCzk": 1500 },
-  "totalCzk": 28500,
-  "nightlyPrices": [{ "date": "2030-12-07", "priceCzk": 3000 }, "…"]
+  "subtotalCzk": 29900,
+  "discount": { "type": "length", "minNights": 7, "percent": 5, "amountCzk": 1495 },
+  "totalCzk": 28405,
+  "nightlyPrices": [{ "date": "2030-12-07", "priceCzk": 2990 }, "…"]
 }
 ```
 

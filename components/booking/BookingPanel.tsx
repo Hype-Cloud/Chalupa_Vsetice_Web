@@ -61,7 +61,6 @@ export function BookingPanel(props: Props) {
           <p className="price-note">{t('booking.panel.priceNote')}</p>
         </>
       )}
-      <p>{t('booking.panel.capacity', { capacity: CAPACITY })}</p>
       {/* Vlastní pole DD.MM.RRRR (ne vizuální formát nativního date inputu, který může být americký). */}
       <div className="date-fields">
         <DateField label={t('booking.panel.arrival')} value={stay.arrival} min={today ?? undefined} onCommit={onArrival} />
