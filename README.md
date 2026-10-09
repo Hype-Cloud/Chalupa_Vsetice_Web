@@ -31,7 +31,9 @@ Cloudflare Workers.
   u slevy ukáže rozpis ze serveru. Během načítání se žádná částka nezobrazuje, chyby jsou
   srozumitelné hlášky v jazyce webu (u chyby serveru s „Zkusit znovu“). Před výběrem termínu
   panel ukáže jen orientační „Běžně 2 990 Kč / noc“ (`PRICE_PER_NIGHT` přes `formatPrice`)
-  s poznámkou, že se cena může lišit podle termínu; nic nepočítá.
+  s poznámkou (cena se může lišit podle termínu, minimální délka pobytu 2 noci, delší pobyty
+  mohou být zvýhodněné); nic nepočítá. Minimální délka pobytu je jen informační text
+  (`MIN_STAY_NOTICE_NIGHTS`), server ji nevynucuje.
   Ceník na stránce neuvádí univerzální cenu za noc – cena pobytu závisí na termínu.
 - **Data v panelu** se zadávají a zobrazují vždy v pořadí den → měsíc → rok: vlastní pole
   `DD.MM.RRRR` (nezávislé na formátu nativního `<input type="date">`, který může být americký)

@@ -3,7 +3,7 @@ import { ArrowDown, ArrowUpRight } from 'lucide-react';
 import type { IsoDate } from '../../lib/availability/dates.ts';
 import type { Stay } from '../../lib/availability/stay.ts';
 import { useI18n } from '../i18n.ts';
-import { CAPACITY, INQUIRY_URL, PRICE_PER_NIGHT } from './config.ts';
+import { CAPACITY, INQUIRY_URL, MIN_STAY_NOTICE_NIGHTS, PRICE_PER_NIGHT } from './config.ts';
 import { DateField } from './DateField.tsx';
 import type { QuoteView } from './quoteView.ts';
 
@@ -58,7 +58,12 @@ export function BookingPanel(props: Props) {
       ) : (
         <>
           <div className="price is-indicative" aria-live="polite">{t('booking.panel.priceStandard', { price: formatPrice(PRICE_PER_NIGHT) })}</div>
-          <p className="price-note">{t('booking.panel.priceNote')}</p>
+          {/* Každá věta na vlastním řádku; minimální délka pobytu je jen informace (nevynucuje se). */}
+          <p className="price-note">
+            <span>{t('booking.panel.priceNoteVaries')}</span>
+            <span>{t('booking.panel.priceNoteMinStay', { nights: plural('booking.nights', MIN_STAY_NOTICE_NIGHTS) })}</span>
+            <span>{t('booking.panel.priceNoteLonger')}</span>
+          </p>
         </>
       )}
       {/* Vlastní pole DD.MM.RRRR (ne vizuální formát nativního date inputu, který může být americký). */}

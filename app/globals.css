@@ -152,7 +152,9 @@ header nav a, .nav-cta { white-space:nowrap; }
 @media(min-width:1001px) { .booking-grid { grid-template-columns:minmax(0,1.8fr) minmax(340px,1fr); } .booking { padding:28px 30px; } }
 /* Orientační cena před výběrem termínu (konstanta serveru, ne výpočet) – centrovaná úvodní část. */
 .booking > .price.is-indicative { font-size:28px; line-height:1.2; text-align:center; text-wrap:balance; }
-.booking > .price + p.price-note { margin:8px auto 0; max-width:30ch; font-size:13px; line-height:1.55; color:#b9c9be; text-align:center; text-wrap:balance; }
+.booking > .price + p.price-note { margin:8px auto 0; font-size:13px; line-height:1.55; color:#b9c9be; text-align:center; }
+/* Každá věta poznámky na vlastním řádku; delší věta (de) se zalomí vyváženě. */
+.booking > p.price-note > span { display:block; text-wrap:balance; }
 .booking > .price { line-height:1.15; text-align:center; }
 .booking > .price + p { margin:6px 0 0; }
 .booking .date-fields { margin-top:20px; }
@@ -196,7 +198,7 @@ header nav a, .nav-cta { white-space:nowrap; }
 .booking-form .form-field input, .booking-form .form-field textarea {
   display:block; width:100%; min-width:0; height:46px; margin-top:6px; padding:0 14px; border:1px solid #cdd6ce; border-radius:var(--bk-radius-md); background:#fff; color:#163d33; font:inherit; font-size:15px; transition:border-color .15s, box-shadow .15s;
 }
-.booking-form .form-field textarea { height:auto; min-height:72px; padding:11px 14px; line-height:1.5; resize:vertical; }
+.booking-form .form-field textarea { height:auto; min-height:72px; padding:11px 14px; line-height:1.5; resize:vertical; overflow-y:auto; }
 .booking-form .form-field input:hover, .booking-form .form-field textarea:hover { border-color:#9fb0a5; }
 .booking-form .form-field input:focus-visible, .booking-form .form-field textarea:focus-visible { border-color:#163d33; outline:2px solid #b5913e; outline-offset:2px; }
 .booking-form .field-error { color:#9a3f1f; }

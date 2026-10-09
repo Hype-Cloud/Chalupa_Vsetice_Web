@@ -3,6 +3,7 @@ import { ArrowUpRight } from 'lucide-react';
 import { useI18n } from '../i18n.ts';
 import { FIELD_ERROR_KEYS, reservationErrorKey, type ContactDraft, type ReservationConfirmation, type SubmissionState, type SubmitBlock } from './reservation.ts';
 import type { TokenSource } from './invisibleTurnstile.ts';
+import { NOTE_MAX_LENGTH, NOTE_MAX_ROWS } from './config.ts';
 import { Turnstile } from './Turnstile.tsx';
 
 interface Props {
@@ -87,7 +88,9 @@ export function BookingForm({ contact, onContact, submission, block, priceChange
             <textarea
               id={`${id}-note`}
               rows={2}
-              maxLength={2000}
+              maxLength={NOTE_MAX_LENGTH}
+              // Svislý resize zůstává, ale nejvýš na NOTE_MAX_ROWS řádků (+ padding a rámeček).
+              style={{ maxHeight: `calc(${NOTE_MAX_ROWS} * 1.5em + 24px)` }}
               value={contact.note}
               aria-invalid={fieldError('note') ? true : undefined}
               aria-describedby={fieldError('note') ? `${id}-note-error` : undefined}

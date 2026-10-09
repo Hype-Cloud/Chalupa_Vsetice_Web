@@ -86,7 +86,9 @@ export const cs = {
   'stayError.noArrival': 'Nejdříve vyberte datum příjezdu.',
 
   'booking.panel.priceStandard': 'Běžně {price} / noc',
-  'booking.panel.priceNote': 'Cena se může lišit podle termínu. Delší pobyty mohou být zvýhodněné.',
+  'booking.panel.priceNoteVaries': 'Cena se může lišit podle termínu.',
+  'booking.panel.priceNoteMinStay': 'Minimální délka pobytu jsou {nights}.',
+  'booking.panel.priceNoteLonger': 'Delší pobyty mohou být zvýhodněné.',
   'booking.panel.arrival': 'Příjezd',
   'booking.panel.departure': 'Odjezd',
   'booking.panel.guests': 'Počet hostů',
