@@ -6,6 +6,7 @@ import { useI18n } from '../i18n.ts';
 import { MIN_NIGHTS } from '../../lib/booking/rules.ts';
 import { CAPACITY, INQUIRY_URL, PRICE_PER_NIGHT } from './config.ts';
 import { DateField } from './DateField.tsx';
+import { StayMessageText, type StayMessage } from './StayMessageText.tsx';
 import type { QuoteView } from './quoteView.ts';
 
 interface Props {
@@ -16,7 +17,7 @@ interface Props {
   nights: number;
   /** Cena ze serveru (/api/quote) připravená k zobrazení. */
   quote: QuoteView;
-  message: string | null;
+  message: StayMessage | null;
   onArrival: (date: IsoDate | null) => void;
   onDeparture: (date: IsoDate | null) => void;
   onGuests: (guests: number) => void;
@@ -38,7 +39,7 @@ export function BookingPanel(props: Props) {
   const { today, stay, guests, nights, quote, message, onArrival, onDeparture, onGuests, onRetry, bookingEnabled, formOpen, onOpenForm, continueHint, success } = props;
   const { t, plural, formatDate, formatPrice } = useI18n();
   const complete = nights > 0;
-  const status = message ?? (quote.kind === 'error' ? quote.message : complete ? null : (continueHint ?? (stay.arrival ? t('booking.panel.selectDeparture') : null)));
+  const status = message ? <StayMessageText message={message} /> : (quote.kind === 'error' ? quote.message : complete ? null : (continueHint ?? (stay.arrival ? t('booking.panel.selectDeparture') : null)));
 
   if (success) {
     return (

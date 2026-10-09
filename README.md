@@ -22,6 +22,10 @@ Cloudflare Workers.
   - rozlišuje volné a obsazené dny i dny příjezdu a odjezdu jiných hostů,
   - první klik vybere příjezd a druhý odjezd; pobyt přes obsazené období ani
     v minulosti vybrat nejde,
+  - pokus o pobyt kratší než `MIN_NIGHTS` krátce zvýrazní kliknutý den (flash ~400 ms,
+    bez trvalého stavu) a hláška se zobrazí v tlumené terakotové barvě s krátkým pulsem
+    (`transform: scale`); každý další neplatný pokus odezvu spustí znovu, s
+    `prefers-reduced-motion` zůstane jen změna barvy,
   - ovládá se myší, dotykem i klávesnicí (šipky, Enter, mezerník) a každý den má
     přístupný popisek.
 - **Rezervační panel** sdílí s kalendářem jeden stav pobytu. Datumová pole
@@ -209,7 +213,8 @@ Projekt využívá Node.js Test Runner. Databázové testy probíhají nad loká
 | date-input.test.ts | 8 | Vstup data DD.MM.RRRR ↔ ISO: přestupný rok, neexistující den a měsíc, rozepsané datum bez chyby, odmítnutí amerického a ISO tvaru, všechna zobrazená data den → měsíc → rok (angličtina bez měsíc/den). |
 | reservation-form.test.ts | 19 | Rezervační formulář: request podle kontraktu, blokace odeslání (termín, cena, kontakty; Turnstile tlačítko neblokuje), kliknutí → Invisible Turnstile → POST, selhání Turnstile bez POST, Idempotency-Key a token svázané s operací (retry = stejný klíč i token bez nové challenge, nová operace = nový token i klíč, i po price-mismatch), chybové kódy → hlášky ve všech jazycích, POST proti skutečnému handleru, `GET /api/booking-config`, Preview Invisible site key jen ve `previews`. |
 | invisible-turnstile.test.ts | 8 | Invisible Turnstile na klientu: widget připravený předem bez spuštění challenge, po kliknutí jen `execute`, nejvýš jeden token na widget a čerstvý widget na pozadí, bez automatického obnovování, ignorování pozdních callbacků, chyba / timeout / prázdný token → `turnstile-failed`, nenačtený skript → `turnstile-unavailable` s opakováním přípravy, odpojení formuláře. |
-| **Celkem** | **313** | |
+| stay-feedback.test.ts | 5 | Vizuální odezva na pobyt kratší než `MIN_NIGHTS`: validace a stav pobytu beze změny, nový trigger s kliknutým dnem při každém pokusu, validní klik ani jiné chyby flash nespustí, flash dne bez trvalého stavu a bez pohybu, pulse hlášky jen přes `transform`, `prefers-reduced-motion` bez animace. |
+| **Celkem** | **318** | |
 
 ### Testované scénáře
 

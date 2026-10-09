@@ -4,6 +4,8 @@ import { addDays, addMonths, startOfMonth, type IsoDate } from '../../lib/availa
 import { isIncomplete, type Occupancy } from '../../lib/availability/occupancy.ts';
 import type { Stay } from '../../lib/availability/stay.ts';
 import { CalendarMonth } from './CalendarMonth.tsx';
+import { StayMessageText, type StayMessage } from './StayMessageText.tsx';
+import { DAY_FLASH_KEYFRAMES, DAY_FLASH_OPTIONS } from './stayFeedback.ts';
 import { HORIZON_MONTHS, INQUIRY_LABEL, INQUIRY_URL } from './config.ts';
 import { useI18n } from '../i18n.ts';
 import type { AvailabilityState } from './useAvailability.ts';
@@ -20,11 +22,13 @@ interface Props {
   availability: AvailabilityState;
   occupancy: Occupancy | null;
   stay: Stay;
-  message: string | null;
+  message: StayMessage | null;
+  /** Odmítnutý den ke krátkému zvýraznění; attempt znovu spustí flash i pro stejný den. */
+  flash: { day: IsoDate; attempt: number } | null;
   onPick: (date: IsoDate) => void;
 }
 
-export function AvailabilityCalendar({ today, availability, occupancy, stay, message, onPick }: Props) {
+export function AvailabilityCalendar({ today, availability, occupancy, stay, message, flash, onPick }: Props) {
   const { t, formatDateTime, formatMonthRange } = useI18n();
   const firstMonth = startOfMonth(today);
   const lastDay = addDays(addMonths(firstMonth, HORIZON_MONTHS), -1);
@@ -63,6 +67,12 @@ export function AvailabilityCalendar({ today, availability, occupancy, stay, mes
     if (stay.arrival && stay.arrival >= firstMonth && stay.arrival <= lastDay && !visible(stay.arrival)) reveal(stay.arrival);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [stay.arrival]);
+
+  // Krátké zvýraznění odmítnutého dne (pobyt kratší než MIN_NIGHTS) při každém pokusu.
+  useEffect(() => {
+    if (!flash) return;
+    monthsRef.current?.querySelector<HTMLButtonElement>(`.bk-day[data-date="${flash.day}"]`)?.animate?.(DAY_FLASH_KEYFRAMES, DAY_FLASH_OPTIONS);
+  }, [flash?.day, flash?.attempt]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Tabulátorem dosažitelný den musí být vidět.
   const tabbable = visible(focusDate) ? focusDate : months[0] < today && visible(today) ? today : months[0];
@@ -140,7 +150,7 @@ export function AvailabilityCalendar({ today, availability, occupancy, stay, mes
           <ChevronRight size={18} strokeWidth={1.6} />
         </button>
       </div>
-      <p className="bk-hint" aria-live="polite">{message ?? hint}</p>
+      <p className="bk-hint" aria-live="polite">{message ? <StayMessageText message={message} /> : hint}</p>
       <div ref={monthsRef} className="bk-months" style={{ gridTemplateColumns: `repeat(${perView}, minmax(0, 1fr))` }} onKeyDown={onKeyDown}>
         {months.map((monthStart) => (
           <CalendarMonth key={monthStart} monthStart={monthStart} today={today} occupancy={occupancy} stay={stay} focusDate={tabbable} onPick={onPick} onFocusDate={setFocusDate} />
