@@ -8,7 +8,7 @@
 export const PRICE_PER_NIGHT = 2990;
 /** Kapacita chalupy. */
 export const CAPACITY = 7;
-export const MIN_NIGHTS = 1;
+export const MIN_NIGHTS = 2;
 export const MAX_NIGHTS = 30;
 /** Nejpozdější příjezd: kolik dní dopředu lze rezervovat (odpovídá 12 měsícům kalendáře). */
 export const BOOKING_HORIZON_DAYS = 365;

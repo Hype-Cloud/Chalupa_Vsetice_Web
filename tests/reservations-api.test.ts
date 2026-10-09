@@ -88,7 +88,7 @@ test('cena z prohlížeče se nepoužije: nesouhlasí-li očekávaná cena, reze
 test('kolize s exportem e-chalup (Airbnb/Booking/ruční rezervace) → 409, nic se nezapíše', async () => {
   const s = setup();
   for (const [arrival, departure] of [
-    ['2030-01-15', '2030-01-16'],
+    ['2030-01-15', '2030-01-17'],
     ['2030-01-14', '2030-01-17'],
     ['2030-01-24', '2030-01-26'],
   ]) {
@@ -128,10 +128,10 @@ test('selhání kontroly e-chalup (HTTP chyba, síť, neplatný iCal) → 503, n
 test('kontrola vůči e-chalupám nepoužívá cache: nová cizí rezervace se projeví hned', async () => {
   let version = '09-sync-before.ics';
   const s = setup(async () => new Response(fixture(version)));
-  assert.equal((await s.post(stay('2030-01-26', '2030-01-27'))).status, 201);
+  assert.equal((await s.post(stay('2030-01-26', '2030-01-28'))).status, 201);
   await t.reset();
   version = '09-sync-after.ics'; // obsazuje noci 26.–28. 1. 2030
-  assert.equal((await s.post(stay('2030-01-26', '2030-01-27'))).status, 409);
+  assert.equal((await s.post(stay('2030-01-26', '2030-01-28'))).status, 409);
   assert.equal(s.requests.length, 2);
 });
 
@@ -263,4 +263,16 @@ test('příliš velký export e-chalup → 503, rezervace se nezaloží', async 
   assert.deepEqual(await response.json(), { error: 'availability-check-failed' });
   assert.ok(s.logs.some((m) => m.includes('upstream-too-large')));
   assert.equal(await t.count('reservations'), 0);
+});
+
+test('minimální délka pobytu: přímý POST na 1 noc → 422 departure, nic se nezapíše; 2 noci → 201', async () => {
+  const s = setup();
+  const one = await s.post(stay('2030-02-10', '2030-02-11'));
+  assert.equal(one.status, 422);
+  assert.deepEqual(await one.json(), { error: 'invalid-request', fields: ['departure'] });
+  assert.equal(await t.count('reservations'), 0);
+  assert.equal(s.requests.length, 0, 'odmítnuto validací ještě před kontrolou e-chalup');
+  const two = await s.post(stay('2030-02-10', '2030-02-12'));
+  assert.equal(two.status, 201);
+  assert.equal(((await two.json()) as { reservation: { nights: number } }).reservation.nights, 2);
 });

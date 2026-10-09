@@ -83,6 +83,7 @@ export const cs = {
   'stayError.rangeBusy': 'Vybraný pobyt zasahuje do obsazeného termínu. Zvolte prosím dřívější odjezd nebo jiný příjezd.',
   'stayError.unknown': 'Obsazenost pro tento termín teď neznáme. Ověřte ji prosím přímo na e-chalupy.cz.',
   'stayError.order': 'Odjezd musí být alespoň den po příjezdu.',
+  'stayError.tooShort': 'Minimální délka pobytu jsou {nights}. Vyberte prosím pozdější odjezd.',
   'stayError.noArrival': 'Nejdříve vyberte datum příjezdu.',
 
   'booking.panel.priceStandard': 'Běžně {price} / noc',

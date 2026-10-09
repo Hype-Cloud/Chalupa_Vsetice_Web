@@ -164,7 +164,9 @@ test('11: /api/quote odmítne neplatné termíny a počet hostů (422 s názvy p
     [{ arrivalDate: '2030-02-05', departureDate: '2030-02-01', guests: 2 }, ['departureDate']],
     [{ arrivalDate: '2030-02-01', departureDate: '2030-03-05', guests: 2 }, ['departureDate']],
     [{ arrivalDate: '2030-02-30', departureDate: '2030-03-02', guests: 2 }, ['arrivalDate']],
-    [{ arrivalDate: '2031-01-11', departureDate: '2031-01-12', guests: 2 }, ['arrivalDate']],
+    [{ arrivalDate: '2031-01-11', departureDate: '2031-01-13', guests: 2 }, ['arrivalDate']],
+    // Minimální délka pobytu (MIN_NIGHTS = 2): 1 noc → chyba odjezdu.
+    [{ arrivalDate: '2030-02-01', departureDate: '2030-02-02', guests: 2 }, ['departureDate']],
     [{ arrivalDate: '2030-02-01', departureDate: '2030-02-03', guests: 8 }, ['guests']],
     [{ arrivalDate: '2030-02-01', departureDate: '2030-02-03' }, ['guests']],
   ];
@@ -532,4 +534,26 @@ test('exact-stay 11: pravidlo nemění dostupnost – nic neblokuje a obsazení 
   assert.equal(whole.status, 409);
   assert.deepEqual(await read(whole), { error: 'dates-unavailable' });
   assert.equal(await t.count('reservations'), 1);
+});
+
+test('minimální délka pobytu: /api/quote 2 noci → 200, 1 noc → 422 departureDate', async () => {
+  const two = await post({ arrivalDate: '2030-02-01', departureDate: '2030-02-03', guests: 2 });
+  assert.equal(two.status, 200);
+  assert.deepEqual({ nights: (await read(two)).nights }, { nights: 2 });
+  const one = await post({ arrivalDate: '2030-02-01', departureDate: '2030-02-02', guests: 2 });
+  assert.equal(one.status, 422);
+  assert.deepEqual(await read(one), { error: 'invalid-request', fields: ['departureDate'] });
+});
+
+test('minimální délka pobytu: exact-stay cena na 1 noc pravidlo neobejde (quote ani rezervace)', async () => {
+  await setStayPrice('2030-12-31', '2031-01-01', 9900);
+  const q = await post({ arrivalDate: '2030-12-31', departureDate: '2031-01-01', guests: 2 });
+  assert.equal(q.status, 422);
+  assert.deepEqual(await read(q), { error: 'invalid-request', fields: ['departureDate'] });
+  const r = await booking().post({ arrival: '2030-12-31', departure: '2031-01-01', ...GUEST, expectedPriceCzk: 9900 });
+  assert.equal(r.status, 422);
+  assert.deepEqual(await read(r), { error: 'invalid-request', fields: ['departure'] });
+  assert.equal(await t.count('reservations'), 0);
+  // Pravidlo samo zůstává jen cenou – dvounocní pobyt kolem něj se počítá běžně (2 × 2 990 Kč).
+  assert.equal((await read(await post({ arrivalDate: '2030-12-30', departureDate: '2031-01-01', guests: 2 }))).totalCzk, 5980);
 });

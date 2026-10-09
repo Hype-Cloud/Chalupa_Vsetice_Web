@@ -1,3 +1,4 @@
+import { MIN_NIGHTS } from '../booking/rules.ts';
 import { diffDays, type IsoDate } from './dates.ts';
 import type { Occupancy } from './occupancy.ts';
 
@@ -16,6 +17,7 @@ export type StayError =
   | 'range-busy'      // pobyt zasahuje do obsazeného období
   | 'unknown'         // obsazenost pro zvolený termín není známá
   | 'order'           // odjezd není po příjezdu
+  | 'too-short'       // pobyt kratší než MIN_NIGHTS (lib/booking/rules.ts)
   | 'no-arrival';     // odjezd bez příjezdu
 
 export interface StayContext {
@@ -43,11 +45,12 @@ function arrivalError(day: IsoDate, ctx: StayContext): StayError | null {
   return night === 'busy' ? 'arrival-busy' : null;
 }
 
-/** Ověří pobyt [arrival, departure): všechny noci musí být známé a volné. */
+/** Ověří pobyt [arrival, departure): aspoň MIN_NIGHTS nocí, všechny noci známé a volné. */
 export function rangeError(arrival: IsoDate, departure: IsoDate, ctx: StayContext): StayError | null {
   const first = arrivalError(arrival, ctx);
   if (first) return first;
   if (departure <= arrival) return 'order';
+  if (diffDays(arrival, departure) < MIN_NIGHTS) return 'too-short';
   const blocked = ctx.occupancy!.firstBlockedNight(arrival, departure);
   if (!blocked) return null;
   return ctx.occupancy!.night(blocked) === 'unknown' ? 'unknown' : 'range-busy';

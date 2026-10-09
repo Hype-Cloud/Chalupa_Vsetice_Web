@@ -10,7 +10,7 @@ import { fetchQuote, quoteKey, quoteRequestFor } from './quote.ts';
 import { TurnstileError, type TokenSource } from './invisibleTurnstile.ts';
 import { EMPTY_CONTACT, reservationPayload, submitBlock, type ContactDraft } from './reservation.ts';
 import { quoteView } from './quoteView.ts';
-import { STAY_ERROR_KEYS } from './stayErrors.ts';
+import { stayErrorMessage } from './stayErrors.ts';
 import { useAvailability } from './useAvailability.ts';
 import { useQuote } from './useQuote.ts';
 import { useBookingConfig, useReservation } from './useReservation.ts';
@@ -101,7 +101,7 @@ export function BookingSection() {
             const { ctx: current, guests: currentGuests, i18n: currentI18n } = latest.current;
             if (!current || !isIsoDate(input.arrival) || !isIsoDate(input.departure)) throw new Error(currentI18n.t('agent.estimateStay.invalid'));
             const error = rangeError(input.arrival, input.departure, current);
-            if (error && error !== 'range-busy' && error !== 'arrival-busy') throw new Error(currentI18n.t(STAY_ERROR_KEYS[error]));
+            if (error && error !== 'range-busy' && error !== 'arrival-busy') throw new Error(stayErrorMessage(currentI18n, error));
             if (!error) {
               latest.current.setStay({ arrival: input.arrival, departure: input.departure });
               latest.current.setMessage(null);
@@ -154,7 +154,7 @@ export function BookingSection() {
               availability={availability}
               occupancy={occupancy}
               stay={stay}
-              message={message?.source === 'calendar' ? i18n.t(STAY_ERROR_KEYS[message.error]) : null}
+              message={message?.source === 'calendar' ? stayErrorMessage(i18n, message.error) : null}
               onPick={(date) => apply('calendar', (c) => pickDay(stay, date, c))}
             />
           ) : (
@@ -167,7 +167,7 @@ export function BookingSection() {
           guests={guests}
           nights={nights(stay)}
           quote={quoteView(quote.state, i18n)}
-          message={message?.source === 'panel' ? i18n.t(STAY_ERROR_KEYS[message.error]) : null}
+          message={message?.source === 'panel' ? stayErrorMessage(i18n, message.error) : null}
           onArrival={(date) => apply('panel', (c) => setArrival(stay, date, c))}
           onDeparture={(date) => apply('panel', (c) => setDeparture(stay, date, c))}
           onGuests={setGuests}

@@ -82,6 +82,7 @@ export const de = {
   'stayError.rangeBusy': 'Der gewählte Aufenthalt überschneidet sich mit belegten Tagen. Bitte wählen Sie eine frühere Abreise oder eine andere Anreise.',
   'stayError.unknown': 'Die Belegung für diesen Zeitraum ist gerade nicht bekannt. Bitte prüfen Sie sie direkt auf e-chalupy.cz.',
   'stayError.order': 'Die Abreise muss mindestens einen Tag nach der Anreise liegen.',
+  'stayError.tooShort': 'Der Mindestaufenthalt beträgt {nights}. Bitte wählen Sie eine spätere Abreise.',
   'stayError.noArrival': 'Wählen Sie zuerst das Anreisedatum.',
 
   'booking.panel.priceStandard': 'Üblicherweise {price} / Nacht',

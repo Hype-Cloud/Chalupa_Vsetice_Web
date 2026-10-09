@@ -1,3 +1,4 @@
+import { MIN_NIGHTS } from '../lib/booking/rules.ts';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { validateBooking } from '../worker/booking/validation.ts';
@@ -25,10 +26,14 @@ test('validace: platný požadavek, cena vždy ze serveru', () => {
 
 test('validace termínu: minulost, pořadí, délka pobytu, horizont', () => {
   assert.deepEqual(fields({ ...VALID, arrival: '2030-01-09' }), ['arrival']);
-  assert.deepEqual(fields({ ...VALID, arrival: TODAY, departure: '2030-01-11' }), []);
+  assert.deepEqual(fields({ ...VALID, arrival: TODAY, departure: '2030-01-12' }), []);
+  // Minimální délka pobytu MIN_NIGHTS = 2: 1 noc se odmítne, 2 noci projdou.
+  assert.equal(MIN_NIGHTS, 2);
+  assert.deepEqual(fields({ ...VALID, arrival: '2030-02-01', departure: '2030-02-02' }), ['departure'], '1 noc');
+  assert.deepEqual(fields({ ...VALID, arrival: '2030-02-01', departure: '2030-02-03' }), [], '2 noci');
   assert.deepEqual(fields({ ...VALID, departure: '2030-02-01' }), ['departure']);
   assert.deepEqual(fields({ ...VALID, departure: '2030-03-04' }), ['departure'], 'víc než 30 nocí');
-  assert.deepEqual(fields({ ...VALID, arrival: '2031-01-11', departure: '2031-01-12' }), ['arrival'], 'víc než 365 dní dopředu');
+  assert.deepEqual(fields({ ...VALID, arrival: '2031-01-11', departure: '2031-01-13' }), ['arrival'], 'víc než 365 dní dopředu');
   assert.deepEqual(fields({ ...VALID, arrival: '2030-02-30' }), ['arrival']);
   assert.deepEqual(fields({ ...VALID, arrival: '2030-2-1' }), ['arrival']);
 });

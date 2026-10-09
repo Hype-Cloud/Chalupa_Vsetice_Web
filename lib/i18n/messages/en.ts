@@ -81,6 +81,7 @@ export const en = {
   'stayError.rangeBusy': 'The selected stay overlaps booked dates. Please choose an earlier departure or a different arrival.',
   'stayError.unknown': 'We don’t know the availability for these dates right now. Please check it directly on e-chalupy.cz.',
   'stayError.order': 'Departure must be at least one day after arrival.',
+  'stayError.tooShort': 'The minimum stay is {nights}. Please choose a later departure.',
   'stayError.noArrival': 'Please select your arrival date first.',
 
   'booking.panel.priceStandard': 'Typically {price} / night',

@@ -2,11 +2,6 @@
 // noci na serveru) slouží jen jako orientační údaj „standardně … / noc“ před výběrem termínu.
 export { CAPACITY, PRICE_PER_NIGHT } from '../../lib/booking/rules.ts';
 /**
- * Minimální délka pobytu uváděná v cenové poznámce panelu – jen informační text. Server ji zatím
- * nevynucuje (závazné limity jsou MIN_NIGHTS / MAX_NIGHTS v lib/booking/rules.ts).
- */
-export const MIN_STAY_NOTICE_NIGHTS = 2;
-/**
  * Maximální délka poznámky ve formuláři (znaky). Server přijme až NOTE_MAX_LENGTH z
  * worker/booking/validation.ts (2000) – formulář je přísnější, kontrakt se nemění.
  */
