@@ -56,8 +56,12 @@ export function rangeError(arrival: IsoDate, departure: IsoDate, ctx: StayContex
   return ctx.occupancy!.night(blocked) === 'unknown' ? 'unknown' : 'range-busy';
 }
 
-/** Kliknutí na den v kalendáři: první kliknutí příjezd, druhé odjezd. */
+/**
+ * Kliknutí na den v kalendáři: první kliknutí příjezd, druhé odjezd.
+ * Opakované kliknutí na zvolený příjezd (bez odjezdu) výběr zruší.
+ */
 export function pickDay(stay: Stay, day: IsoDate, ctx: StayContext): StayUpdate {
+  if (stay.arrival === day && stay.departure === null) return { stay: EMPTY_STAY, error: null };
   const choosingDeparture = stay.arrival !== null && stay.departure === null && day > stay.arrival;
   if (!choosingDeparture) {
     const error = arrivalError(day, ctx);

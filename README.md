@@ -20,8 +20,8 @@ Cloudflare Workers.
     12 měsíců dopředu,
   - názvy měsíců a dnů má v jazyce webu (Intl), začíná pondělím a zvýrazňuje dnešek,
   - rozlišuje volné a obsazené dny i dny příjezdu a odjezdu jiných hostů,
-  - první klik vybere příjezd a druhý odjezd; pobyt přes obsazené období ani
-    v minulosti vybrat nejde,
+  - první klik vybere příjezd a druhý odjezd; opakovaný klik na zvolený příjezd
+    výběr zruší; pobyt přes obsazené období ani v minulosti vybrat nejde,
   - pokus o pobyt kratší než `MIN_NIGHTS` krátce zvýrazní kliknutý den (flash ~400 ms,
     bez trvalého stavu) a hláška se zobrazí v tlumené terakotové barvě s krátkým pulsem
     (`transform: scale`); každý další neplatný pokus odezvu spustí znovu, s
@@ -196,7 +196,7 @@ Projekt využívá Node.js Test Runner. Databázové testy probíhají nad loká
 |---|---:|---|
 | ical.test.ts | 20 | Parsování iCalendar, časová pásma, opakované a zrušené události, chybné exporty. |
 | availability.test.ts | 21 | Načítání obsazenosti, cache, výpadky externí služby a neúplná data. |
-| occupancy.test.ts | 16 | Slučování obsazených intervalů, kontrola termínů a chování kalendáře, minimální délka pobytu (kalendář i datumová pole). |
+| occupancy.test.ts | 18 | Slučování obsazených intervalů, kontrola termínů a chování kalendáře (včetně zrušení výběru opakovaným klikem na příjezd), minimální délka pobytu (kalendář i datumová pole). |
 | booking.test.ts | 9 | Validace rezervací, ceny, kontakty, vlastní iCal UID a propojení D1 s kalendářem. |
 | reservations-api.test.ts | 18 | Rezervační API, autorizace, idempotence, souběh požadavků a chybové stavy, minimální délka pobytu. |
 | reservations-db.test.ts | 19 | Databázová omezení, atomické transakce, rollback a ochrana proti kolizím. |
@@ -214,7 +214,7 @@ Projekt využívá Node.js Test Runner. Databázové testy probíhají nad loká
 | reservation-form.test.ts | 19 | Rezervační formulář: request podle kontraktu, blokace odeslání (termín, cena, kontakty; Turnstile tlačítko neblokuje), kliknutí → Invisible Turnstile → POST, selhání Turnstile bez POST, Idempotency-Key a token svázané s operací (retry = stejný klíč i token bez nové challenge, nová operace = nový token i klíč, i po price-mismatch), chybové kódy → hlášky ve všech jazycích, POST proti skutečnému handleru, `GET /api/booking-config`, Preview Invisible site key jen ve `previews`. |
 | invisible-turnstile.test.ts | 8 | Invisible Turnstile na klientu: widget připravený předem bez spuštění challenge, po kliknutí jen `execute`, nejvýš jeden token na widget a čerstvý widget na pozadí, bez automatického obnovování, ignorování pozdních callbacků, chyba / timeout / prázdný token → `turnstile-failed`, nenačtený skript → `turnstile-unavailable` s opakováním přípravy, odpojení formuláře. |
 | stay-feedback.test.ts | 5 | Vizuální odezva na pobyt kratší než `MIN_NIGHTS`: validace a stav pobytu beze změny, nový trigger s kliknutým dnem při každém pokusu, validní klik ani jiné chyby flash nespustí, flash dne bez trvalého stavu a bez pohybu, pulse hlášky jen přes `transform`, `prefers-reduced-motion` bez animace. |
-| **Celkem** | **318** | |
+| **Celkem** | **320** | |
 
 ### Testované scénáře
 

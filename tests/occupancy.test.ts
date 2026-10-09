@@ -67,6 +67,26 @@ test('po dokončeném výběru začne nový výběr', () => {
   assert.deepEqual(pickDay(stay, '2030-02-26', ctx).stay, { arrival: '2030-02-26', departure: null });
 });
 
+test('opakované kliknutí na zvolený příjezd zruší výběr, další výběr funguje normálně', () => {
+  const first = pickDay(EMPTY_STAY, '2030-02-24', ctx);
+  assert.deepEqual(first, { stay: { arrival: '2030-02-24', departure: null }, error: null });
+  const cleared = pickDay(first.stay, '2030-02-24', ctx);
+  assert.deepEqual(cleared, { stay: EMPTY_STAY, error: null });
+  const again = pickDay(cleared.stay, '2030-02-21', ctx);
+  assert.deepEqual(again, { stay: { arrival: '2030-02-21', departure: null }, error: null });
+  assert.deepEqual(pickDay(again.stay, '2030-02-24', ctx), { stay: { arrival: '2030-02-21', departure: '2030-02-24' }, error: null });
+});
+
+test('výběr odjezdu, too-short i klik na dřívější den zůstávají beze změny', () => {
+  const withArrival = pickDay(EMPTY_STAY, '2030-02-24', ctx).stay;
+  assert.deepEqual(pickDay(withArrival, '2030-02-26', ctx), { stay: { arrival: '2030-02-24', departure: '2030-02-26' }, error: null });
+  assert.deepEqual(pickDay(withArrival, '2030-02-25', ctx), { stay: withArrival, error: 'too-short' });
+  assert.deepEqual(pickDay(withArrival, '2030-02-22', ctx), { stay: { arrival: '2030-02-22', departure: null }, error: null });
+  // Kompletní pobyt: klik na den příjezdu začne nový výběr se stejným příjezdem, nic se neruší.
+  const full = { arrival: '2030-02-24', departure: '2030-02-26' };
+  assert.deepEqual(pickDay(full, '2030-02-24', ctx), { stay: { arrival: '2030-02-24', departure: null }, error: null });
+});
+
 test('datumová pole používají stejnou validaci jako kalendář', () => {
   assert.equal(setDeparture(EMPTY_STAY, '2030-02-25', ctx).error, 'no-arrival');
   const stay = setArrival(EMPTY_STAY, '2030-02-24', ctx).stay;
