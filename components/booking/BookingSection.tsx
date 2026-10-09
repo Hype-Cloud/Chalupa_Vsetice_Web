@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { isIsoDate, todayInPrague, type IsoDate } from '../../lib/availability/dates.ts';
 import { occupancyFromResponse } from '../../lib/availability/occupancy.ts';
-import { EMPTY_STAY, nights, pickDay, rangeError, setArrival, setDeparture, type Stay, type StayContext, type StayError, type StayUpdate } from '../../lib/availability/stay.ts';
+import { EMPTY_STAY, nights, pickDay, rangeError, setArrival, setDeparture, type Stay, type StayContext, type StayUpdate } from '../../lib/availability/stay.ts';
 import { useI18n } from '../i18n.ts';
 import { AvailabilityCalendar } from './AvailabilityCalendar.tsx';
 import { BookingForm, BookingSuccess } from './BookingForm.tsx';
@@ -11,6 +11,8 @@ import { TurnstileError, type TokenSource } from './invisibleTurnstile.ts';
 import { EMPTY_CONTACT, reservationPayload, submitBlock, type ContactDraft } from './reservation.ts';
 import { quoteView } from './quoteView.ts';
 import { stayErrorMessage } from './stayErrors.ts';
+import type { StayMessage } from './StayMessageText.tsx';
+import { nextStayFeedback, type StayFeedback } from './stayFeedback.ts';
 import { useAvailability } from './useAvailability.ts';
 import { useQuote } from './useQuote.ts';
 import { useBookingConfig, useReservation } from './useReservation.ts';
@@ -34,7 +36,7 @@ export function BookingSection() {
   const [stay, setStay] = useState<Stay>(EMPTY_STAY);
   const [guests, setGuests] = useState(2);
   // Kód chyby výběru (ne text) – hláška se přeloží až při zobrazení, takže po přepnutí jazyka sedí.
-  const [message, setMessage] = useState<{ error: StayError; source: Source } | null>(null);
+  const [message, setMessage] = useState<StayFeedback | null>(null);
   const i18n = useI18n();
   const request = quoteRequestFor(stay, guests);
   const quote = useQuote(request);
@@ -76,12 +78,16 @@ export function BookingSection() {
       ? i18n.t('reservation.priceChanged', { from: i18n.formatPrice(submission.fromCzk), to: i18n.formatPrice(quoteReady?.totalCzk ?? submission.toCzk) })
       : null;
 
+  const stayMessage: StayMessage | null = message
+    ? { text: stayErrorMessage(i18n, message.error), emphasized: message.error === 'too-short', attempt: message.attempt }
+    : null;
+
   const ctx: StayContext | null = today ? { today, occupancy } : null;
-  const apply = (source: Source, update: (ctx: StayContext) => StayUpdate) => {
+  const apply = (source: Source, update: (ctx: StayContext) => StayUpdate, pickedDay: IsoDate | null = null) => {
     if (!ctx) return;
     const result = update(ctx);
     setStay(result.stay);
-    setMessage(result.error ? { error: result.error, source } : null);
+    setMessage((previous) => nextStayFeedback(previous, result.error, source, pickedDay));
   };
 
   // Nástroj pro prohlížeče s WebMCP (document.modelContext): vybere termín stejnou validací.
@@ -154,8 +160,9 @@ export function BookingSection() {
               availability={availability}
               occupancy={occupancy}
               stay={stay}
-              message={message?.source === 'calendar' ? stayErrorMessage(i18n, message.error) : null}
-              onPick={(date) => apply('calendar', (c) => pickDay(stay, date, c))}
+              message={message?.source === 'calendar' ? stayMessage : null}
+              onPick={(date) => apply('calendar', (c) => pickDay(stay, date, c), date)}
+              flash={message?.source === 'calendar' && message.flashDay ? { day: message.flashDay, attempt: message.attempt } : null}
             />
           ) : (
             <div className="bk-calendar is-placeholder" role="status">{i18n.t('calendar.loading')}</div>
@@ -167,7 +174,7 @@ export function BookingSection() {
           guests={guests}
           nights={nights(stay)}
           quote={quoteView(quote.state, i18n)}
-          message={message?.source === 'panel' ? stayErrorMessage(i18n, message.error) : null}
+          message={message?.source === 'panel' ? stayMessage : null}
           onArrival={(date) => apply('panel', (c) => setArrival(stay, date, c))}
           onDeparture={(date) => apply('panel', (c) => setDeparture(stay, date, c))}
           onGuests={setGuests}
