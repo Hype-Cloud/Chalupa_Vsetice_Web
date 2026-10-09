@@ -1,3 +1,4 @@
+import { PRICE_PER_NIGHT } from '../lib/booking/rules.ts';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
@@ -19,6 +20,8 @@ const csKeys = Object.keys(cs).sort();
 const placeholders = (text: string) => [...text.matchAll(/\{(\w+)\}/g)].map((m) => m[1]).sort();
 /** Klíče, které jsou záměrně stejné ve všech jazycích (název chalupy). */
 const SAME_IN_ALL = new Set(['brand.name', 'brand.place']);
+/** Slova, která jsou v daném jazyce stejná jako česky (ne nepřeložený text). */
+const SAME_AS_CZECH = new Set(['de:reservation.form.phone']);
 
 // --- typová kontrola katalogů (tsc --noEmit; za běhu nic nedělá) ---
 const { 'meta.title': _omitted, ...withoutTitle } = en;
@@ -59,7 +62,7 @@ test('katalogy en, de, ua jsou skutečně přeložené (žádný český text) a
     for (const key of csKeys) {
       const value = (CATALOGS[locale] as Record<string, unknown>)[key];
       const text = typeof value === 'string' ? value : JSON.stringify(value);
-      if (!SAME_IN_ALL.has(key)) assert.notDeepEqual(value, (cs as Record<string, unknown>)[key], `${locale} ${key} je stejné jako česky`);
+      if (!SAME_IN_ALL.has(key) && !SAME_AS_CZECH.has(`${locale}:${key}`)) assert.notDeepEqual(value, (cs as Record<string, unknown>)[key], `${locale} ${key} je stejné jako česky`);
       assert.ok(!/[ěščřůňťď]/i.test(text.replace(/VŠETICE|Všetice|e-chalupy\.cz|Čeština/g, '')), `${locale} ${key}: český text`);
     }
   }
@@ -95,7 +98,7 @@ test('množná čísla: každý jazyk má všechny kategorie Intl.PluralRules', 
 test('datum v každém jazyce (Intl.DateTimeFormat), interně ISO', () => {
   const expected: Record<Locale, [string, string, string]> = {
     cs: ['so 7. 12. 2030', 'sobota 7. prosince 2030', '8. 10. 22:06'],
-    en: ['Sat, 7 Dec 2030', 'Saturday, 7 December 2030', '08/10, 22:06'],
+    en: ['Sat, 7 Dec 2030', 'Saturday, 7 December 2030', '8 Oct, 22:06'],
     de: ['Sa., 7. Dez. 2030', 'Samstag, 7. Dezember 2030', '8.10., 22:06'],
     ua: ['сб, 7 груд. 2030 р.', 'субота, 7 грудня 2030 р.', '08.10, 22:06'],
   };
@@ -257,7 +260,7 @@ test('přepínač jazyků: CS EN DE UA, právě jeden aktivní, názvy jazyků (
 
 test('přepnutí jazyka: všechny texty se změní a žádný přeložený jazyk nevrací češtinu', () => {
   const texts = (locale: Locale) => createI18n(locale);
-  for (const key of ['nav.about', 'hero.titleLine1', 'calendar.title', 'booking.panel.inquiry', 'pricing.rent.value', 'footer.tagline'] as const) {
+  for (const key of ['nav.about', 'hero.titleLine1', 'calendar.legend.toggle', 'booking.panel.inquiry', 'pricing.rent.value', 'footer.tagline'] as const) {
     const values = LOCALES.map((l) => texts(l).t(key));
     assert.equal(new Set(values).size, 4, `${key}: ${values.join(' | ')}`);
   }
@@ -286,15 +289,25 @@ test('komponenty a stránka nemají pevné české texty ani textové aria-label
   for (const file of files) assert.ok(!/STAY_ERRORS|WEEKDAYS|DAY_STATUS\b/.test(readFileSync(file, 'utf8')), file);
 });
 
-test('statická univerzální cena „3 000 Kč / noc“ už není v UI ani v katalozích', () => {
+test('žádná pevná cena (3 000 / 2 990 Kč) v UI ani v katalozích; orientační cena noci jen ze serverové konstanty', () => {
   for (const file of frontendFiles()) {
     const code = readFileSync(file, 'utf8');
-    assert.ok(!/3[\s ]?000\s*Kč|Kč\s*\/\s*noc/.test(code), file);
+    assert.ok(!/(3[\s ]?000|2[\s ]?990)\s*Kč|Kč\s*\/\s*noc/.test(code), file);
   }
   for (const locale of LOCALES) {
     const text = JSON.stringify(CATALOGS[locale]);
-    assert.ok(!/3[\s .,]?000/.test(text), `${locale}: 3 000 v katalogu`);
+    assert.ok(!/3[\s .,]?000|2[\s .,]?990/.test(text), `${locale}: pevná částka v katalogu`);
   }
+  // Před výběrem termínu: „běžně … / noc“ s cenou z PRICE_PER_NIGHT (výchozí cena serveru).
+  const panel = readFileSync(join(ROOT, 'components/booking/BookingPanel.tsx'), 'utf8');
+  assert.match(panel, /t\('booking\.panel\.priceStandard', \{ price: formatPrice\(PRICE_PER_NIGHT\) \}\)/);
+  for (const locale of LOCALES) {
+    const i18n = createI18n(locale);
+    assert.ok(i18n.t('booking.panel.priceStandard', { price: i18n.formatPrice(PRICE_PER_NIGHT) }).includes(i18n.formatPrice(PRICE_PER_NIGHT)), locale);
+  }
+  // Typografie: „Běžně 2 990 Kč / noc“ (mezera tisíců, mezera před Kč, lomítko s mezerami).
+  assert.equal(PRICE_PER_NIGHT, 2990);
+  assert.equal(createI18n('cs').t('booking.panel.priceStandard', { price: createI18n('cs').formatPrice(PRICE_PER_NIGHT) }).replace(/[\u00a0\u202f]/g, ' '), 'Běžně 2 990 Kč / noc');
   assert.equal(createI18n('cs').t('pricing.rent.value'), 'Cena podle zvoleného termínu');
   assert.equal(createI18n('en').t('pricing.rent.value'), 'Price depends on your dates');
 });

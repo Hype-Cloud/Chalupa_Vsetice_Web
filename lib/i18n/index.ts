@@ -77,7 +77,8 @@ export function createI18n(locale: Locale = DEFAULT_LOCALE, options: { currency?
   const rules = new Intl.PluralRules(intl);
   const shortDate = new Intl.DateTimeFormat(intl, { ...utc, ...SHORT_DATE[locale] });
   const fullDate = new Intl.DateTimeFormat(intl, { ...utc, weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
-  const dateTime = new Intl.DateTimeFormat(intl, { timeZone: 'Europe/Prague', day: 'numeric', month: 'numeric', hour: '2-digit', minute: '2-digit' });
+  // Angličtina se zkratkou měsíce: číselné „08/10“ by se dalo číst jako americké měsíc/den.
+  const dateTime = new Intl.DateTimeFormat(intl, { timeZone: 'Europe/Prague', day: 'numeric', month: locale === 'en' ? 'short' : 'numeric', hour: '2-digit', minute: '2-digit' });
   const month = new Intl.DateTimeFormat(intl, { ...utc, month: 'long', year: 'numeric' });
   const monthOnly = new Intl.DateTimeFormat(intl, { ...utc, month: 'long' });
   const weekday = new Intl.DateTimeFormat(intl, { ...utc, weekday: 'short' });

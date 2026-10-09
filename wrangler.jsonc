@@ -60,10 +60,14 @@
         "persist": true
       }
     },
+    // TURNSTILE_SITE_KEY je veřejný site key widgetu (ne secret): testovací Invisible klíč Cloudflare
+    // (1x…BB, vždy projde, nic nezobrazuje), patří k testovacímu TURNSTILE_SECRET_KEY v Preview.
+    // Frontend ho dostane z GET /api/booking-config. Produkce ho nemá – formulář se tam nenabízí.
     "vars": {
       "BOOKING_ENV": "preview",
       "BOOKING_API_ENABLED": "true",
-      "BOOKING_ICAL_EXPORT_ENABLED": "true"
+      "BOOKING_ICAL_EXPORT_ENABLED": "true",
+      "TURNSTILE_SITE_KEY": "1x00000000000000000000BB"
     },
     // Vlastní namespace, aby se Preview a produkce nepočítaly dohromady.
     "ratelimits": [

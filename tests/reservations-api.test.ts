@@ -62,16 +62,16 @@ const stay = (arrival: string, departure: string, extra: Record<string, unknown>
 
 test('úspěšná rezervace: 201, cena ze serveru, VS, bez kontaktních údajů v odpovědi', async () => {
   const s = setup();
-  const response = await s.post(stay('2030-02-01', '2030-02-04', { priceCzk: 1, price: 1, expectedPriceCzk: 9000 }));
+  const response = await s.post(stay('2030-02-01', '2030-02-04', { priceCzk: 1, price: 1, expectedPriceCzk: 8970 }));
   assert.equal(response.status, 201);
   assert.equal(response.headers.get('cache-control'), 'no-store');
   const body = await read(response);
-  assert.deepEqual({ ...body.reservation, code: 'x' }, { code: 'x', arrival: '2030-02-01', departure: '2030-02-04', nights: 3, guests: 2, priceCzk: 9000, variableSymbol: '30000001', status: 'pending_payment' });
+  assert.deepEqual({ ...body.reservation, code: 'x' }, { code: 'x', arrival: '2030-02-01', departure: '2030-02-04', nights: 3, guests: 2, priceCzk: 8970, variableSymbol: '30000001', status: 'pending_payment' });
   assert.match(body.reservation.code, /^CV-[0-9A-HJKMNP-TV-Z]{6}$/);
   const text = JSON.stringify(body) + s.logs.join('\n');
   for (const secret of ['Testovací', 'test@example.invalid', '000 000', 'SECRET-TOKEN-123']) assert.ok(!text.includes(secret), secret);
   const row = await t.db.prepare('SELECT price_czk, ical_uid, first_name FROM reservations').first<{ price_czk: number; ical_uid: string; first_name: string }>();
-  assert.equal(row!.price_czk, 9000);
+  assert.equal(row!.price_czk, 8970); // 3 × 2 990
   assert.equal(row!.first_name, 'Jan');
   assert.equal(row!.ical_uid, 'rezervace-00000000-0000-4000-8000-000000000001@chalupavsetice.cz');
   assert.equal(s.requests.length, 1, 'export se před zápisem stáhne čerstvě');
@@ -79,9 +79,9 @@ test('úspěšná rezervace: 201, cena ze serveru, VS, bez kontaktních údajů 
 
 test('cena z prohlížeče se nepoužije: nesouhlasí-li očekávaná cena, rezervace nevznikne', async () => {
   const s = setup();
-  const response = await s.post(stay('2030-02-01', '2030-02-04', { expectedPriceCzk: 3000 }));
+  const response = await s.post(stay('2030-02-01', '2030-02-04', { expectedPriceCzk: 2990 }));
   assert.equal(response.status, 409);
-  assert.deepEqual(await response.json(), { error: 'price-mismatch', priceCzk: 9000 });
+  assert.deepEqual(await response.json(), { error: 'price-mismatch', priceCzk: 8970 });
   assert.equal(await t.count('reservations'), 0);
 });
 

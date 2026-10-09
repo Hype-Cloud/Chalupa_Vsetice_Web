@@ -39,6 +39,7 @@ const PREVIEW: Partial<WorkerEnv> = {
   BOOKING_ENV: 'preview',
   BOOKING_API_ENABLED: 'true',
   TURNSTILE_SECRET_KEY: 'turnstile-secret',
+  TURNSTILE_SITE_KEY: '1x00000000000000000000BB',
   BOOKING_RATE_LIMITER: { limit: async () => ({ success: true }) },
 };
 
@@ -68,9 +69,10 @@ test('produkce: všechny kontroly projdou, rezervační POST je vypnutý (404)',
   const { fetchFn } = workerFetch(PRODUCTION);
   const checks = await runSmoke(BASE, 'production', fetchFn);
   assert.deepEqual(checks.filter((c) => !c.ok), [], formatSmoke(checks).text);
-  assert.equal(checks.length, 8);
+  assert.equal(checks.length, 9);
+  assert.equal(byName(checks, '/api/booking-config').detail, 'bookingEnabled false');
   assert.equal(byName(checks, 'POST /api/reservations').detail, 'vypnutý');
-  assert.match(byName(checks, 'POST /api/quote – cenová').detail!, /: 6000 Kč \(nightly\)$/);
+  assert.match(byName(checks, 'POST /api/quote – cenová').detail!, /: 5980 Kč \(nightly\)$/);
   assert.equal(formatSmoke(checks).ok, true);
 });
 

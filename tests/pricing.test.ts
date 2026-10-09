@@ -38,13 +38,14 @@ test('1: bez vlastních cen a bez slevy → výchozí cena za každou noc', asyn
     departureDate: '2030-02-04',
     nights: 3,
     pricingMode: 'nightly',
-    subtotalCzk: 9000,
+    // 3 × 2 990 Kč (výchozí cena PRICE_PER_NIGHT)
+    subtotalCzk: 8970,
     discount: null,
-    totalCzk: 9000,
+    totalCzk: 8970,
     nightlyPrices: [
-      { date: '2030-02-01', priceCzk: 3000 },
-      { date: '2030-02-02', priceCzk: 3000 },
-      { date: '2030-02-03', priceCzk: 3000 },
+      { date: '2030-02-01', priceCzk: 2990 },
+      { date: '2030-02-02', priceCzk: 2990 },
+      { date: '2030-02-03', priceCzk: 2990 },
     ],
   });
 });
@@ -52,8 +53,8 @@ test('1: bez vlastních cen a bez slevy → výchozí cena za každou noc', asyn
 test('2: jedna noc s vlastní cenou', async () => {
   await setPrices({ '2030-02-02': 5000 });
   const q = await quote('2030-02-01', '2030-02-04');
-  assert.deepEqual(q.nightlyPrices.map((n) => n.priceCzk), [3000, 5000, 3000]);
-  assert.equal(q.totalCzk, 11000);
+  assert.deepEqual(q.nightlyPrices.map((n) => n.priceCzk), [2990, 5000, 2990]);
+  assert.equal(q.totalCzk, 10980);
 });
 
 test('3: několik nocí s různými cenami', async () => {
@@ -67,36 +68,38 @@ test('4: vlastní ceny jen u části pobytu; noc odjezdu ani dny mimo pobyt se n
   await setPrices({ '2030-01-31': 9999, '2030-02-03': 6000, '2030-02-04': 7000, '2030-02-05': 8000 });
   const q = await quote('2030-02-01', '2030-02-04');
   assert.deepEqual(q.nightlyPrices, [
-    { date: '2030-02-01', priceCzk: 3000 },
-    { date: '2030-02-02', priceCzk: 3000 },
+    { date: '2030-02-01', priceCzk: 2990 },
+    { date: '2030-02-02', priceCzk: 2990 },
     { date: '2030-02-03', priceCzk: 6000 },
   ]);
-  assert.equal(q.totalCzk, 12000);
+  assert.equal(q.totalCzk, 11980);
 });
 
 test('5: přesně na prahu množstevní slevy (7 nocí, 5 %)', async () => {
   await setDiscounts([[7, 5]]);
   const q = await quote('2030-03-01', '2030-03-08');
   assert.equal(q.nights, 7);
-  assert.equal(q.subtotalCzk, 21000);
-  assert.deepEqual(q.discount, { type: 'length', minNights: 7, percent: 5, amountCzk: 1050 });
-  assert.equal(q.totalCzk, 19950);
+  // 7 × 2 990 = 20 930 Kč; 5 % = 1 046,5 → 1 046 Kč; celkem 19 884 Kč.
+  assert.equal(q.subtotalCzk, 20930);
+  assert.deepEqual(q.discount, { type: 'length', minNights: 7, percent: 5, amountCzk: 1046 });
+  assert.equal(q.totalCzk, 19884);
 });
 
 test('6: těsně pod prahem slevy (6 nocí) → bez slevy', async () => {
   await setDiscounts([[7, 5]]);
   const q = await quote('2030-03-01', '2030-03-07');
   assert.equal(q.discount, null);
-  assert.equal(q.totalCzk, 18000);
+  assert.equal(q.totalCzk, 17940);
 });
 
 test('7: více pravidel → nejvyšší odpovídající práh (16 nocí → 10 %)', async () => {
   await setDiscounts([[21, 15], [7, 5], [14, 10]]);
   const q = await quote('2030-03-01', '2030-03-17');
   assert.equal(q.nights, 16);
-  assert.equal(q.subtotalCzk, 48000);
-  assert.deepEqual(q.discount, { type: 'length', minNights: 14, percent: 10, amountCzk: 4800 });
-  assert.equal(q.totalCzk, 43200);
+  // 16 × 2 990 = 47 840 Kč; 10 % = 4 784 Kč; celkem 43 056 Kč.
+  assert.equal(q.subtotalCzk, 47840);
+  assert.deepEqual(q.discount, { type: 'length', minNights: 14, percent: 10, amountCzk: 4784 });
+  assert.equal(q.totalCzk, 43056);
   assert.equal((await quote('2030-03-01', '2030-03-22')).discount?.percent, 15, '21 nocí → 15 %');
 });
 
@@ -119,18 +122,18 @@ test('9: pobyt přes konec měsíce', async () => {
   await setPrices({ '2030-02-01': 4000 });
   const q = await quote('2030-01-30', '2030-02-02');
   assert.deepEqual(q.nightlyPrices.map((n) => n.date), ['2030-01-30', '2030-01-31', '2030-02-01']);
-  assert.equal(q.totalCzk, 10000);
+  assert.equal(q.totalCzk, 9980); // 2 × 2 990 + 4 000
 });
 
 test('10: pobyt přes konec roku', async () => {
   await setPrices({ '2030-12-31': 6000, '2031-01-01': 5000 });
   const q = await quote('2030-12-30', '2031-01-02');
   assert.deepEqual(q.nightlyPrices, [
-    { date: '2030-12-30', priceCzk: 3000 },
+    { date: '2030-12-30', priceCzk: 2990 },
     { date: '2030-12-31', priceCzk: 6000 },
     { date: '2031-01-01', priceCzk: 5000 },
   ]);
-  assert.equal(q.totalCzk, 14000);
+  assert.equal(q.totalCzk, 13990);
 });
 
 // POST /api/quote
@@ -147,10 +150,11 @@ test('/api/quote: kontrakt odpovědi, no-store', async () => {
   assert.equal(response.headers.get('cache-control'), 'no-store');
   const body = await read(response);
   assert.deepEqual({ ...body, nightlyPrices: body.nightlyPrices.length }, {
-    arrivalDate: '2030-12-07', departureDate: '2030-12-17', nights: 10, pricingMode: 'nightly', subtotalCzk: 30000,
-    discount: { type: 'length', minNights: 7, percent: 5, amountCzk: 1500 }, totalCzk: 28500, nightlyPrices: 10,
+    // 10 × 2 990 = 29 900 Kč; 5 % = 1 495 Kč; celkem 28 405 Kč.
+    arrivalDate: '2030-12-07', departureDate: '2030-12-17', nights: 10, pricingMode: 'nightly', subtotalCzk: 29900,
+    discount: { type: 'length', minNights: 7, percent: 5, amountCzk: 1495 }, totalCzk: 28405, nightlyPrices: 10,
   });
-  assert.deepEqual(body.nightlyPrices[0], { date: '2030-12-07', priceCzk: 3000 });
+  assert.deepEqual(body.nightlyPrices[0], { date: '2030-12-07', priceCzk: 2990 });
 });
 
 test('11: /api/quote odmítne neplatné termíny a počet hostů (422 s názvy polí)', async () => {
@@ -271,24 +275,24 @@ test('15: /api/quote a rezervace dávají pro stejný termín stejnou cenu', asy
   await setPrices({ '2030-02-03': 4500, '2030-02-08': 6000 });
   await setDiscounts([[7, 10]]);
   const q = await read(await post({ arrivalDate: '2030-02-01', departureDate: '2030-02-09', guests: 2 }));
-  // 6 × 3 000 + 4 500 + 6 000 = 28 500; 10 % = 2 850 → 25 650 Kč.
-  assert.equal(q.totalCzk, 25650);
+  // 6 × 2 990 + 4 500 + 6 000 = 28 440; 10 % = 2 844 → 25 596 Kč.
+  assert.equal(q.totalCzk, 25596);
   const response = await booking().post({ arrival: '2030-02-01', departure: '2030-02-09', ...GUEST, expectedPriceCzk: q.totalCzk });
   assert.equal(response.status, 201);
-  assert.equal((await read(response)).reservation.priceCzk, 25650);
-  assert.equal((await t.db.prepare('SELECT price_czk FROM reservations').first<{ price_czk: number }>())!.price_czk, 25650);
-  // Bez expectedPriceCzk se uloží cena ze serveru.
+  assert.equal((await read(response)).reservation.priceCzk, 25596);
+  assert.equal((await t.db.prepare('SELECT price_czk FROM reservations').first<{ price_czk: number }>())!.price_czk, 25596);
+  // Bez expectedPriceCzk se uloží cena ze serveru (2 × 2 990 Kč).
   const b = await booking().post({ arrival: '2030-03-01', departure: '2030-03-03', ...GUEST });
-  assert.equal((await read(b)).reservation.priceCzk, 6000);
+  assert.equal((await read(b)).reservation.priceCzk, 5980);
 });
 
 test('16: změna ceníku mezi nabídkou a rezervací → 409 price-mismatch s novou cenou, nic se nezapíše', async () => {
   const q = await read(await post({ arrivalDate: '2030-02-01', departureDate: '2030-02-03', guests: 2 }));
-  assert.equal(q.totalCzk, 6000);
+  assert.equal(q.totalCzk, 5980);
   await setPrices({ '2030-02-02': 4000 });
   const response = await booking().post({ arrival: '2030-02-01', departure: '2030-02-03', ...GUEST, expectedPriceCzk: q.totalCzk });
   assert.equal(response.status, 409);
-  assert.deepEqual(await read(response), { error: 'price-mismatch', priceCzk: 7000 });
+  assert.deepEqual(await read(response), { error: 'price-mismatch', priceCzk: 6990 }); // 2 990 + 4 000
   assert.equal(await t.count('reservations'), 0);
   assert.equal(await t.sequence(), 0, 'VS se nespotřebuje');
 });
@@ -343,7 +347,7 @@ test('exact-stay 2: o den jiný příjezd → pravidlo se ignoruje, běžný vý
   for (const arrival of ['2030-12-28', '2030-12-30']) {
     const q = await quote(arrival, '2031-01-02');
     assert.equal(q.pricingMode, 'nightly', arrival);
-    assert.equal(q.totalCzk, arrival === '2030-12-28' ? 15000 : 9000, arrival);
+    assert.equal(q.totalCzk, arrival === '2030-12-28' ? 14950 : 8970, arrival); // 5 resp. 3 × 2 990
   }
 });
 
@@ -351,10 +355,10 @@ test('exact-stay 3: o den jiný odjezd → pravidlo se ignoruje, běžný výpo�
   await setStayPrice('2030-12-29', '2031-01-02', 29900);
   const shorter = await quote('2030-12-29', '2031-01-01');
   assert.equal(shorter.pricingMode, 'nightly');
-  assert.equal(shorter.totalCzk, 9000);
+  assert.equal(shorter.totalCzk, 8970); // 3 × 2 990
   const longer = await quote('2030-12-29', '2031-01-03');
   assert.equal(longer.pricingMode, 'nightly');
-  assert.equal(longer.totalCzk, 15000);
+  assert.equal(longer.totalCzk, 14950); // 5 × 2 990
 });
 
 test('exact-stay 4: přednost před daily_prices (i výchozí cenou)', async () => {
@@ -364,9 +368,9 @@ test('exact-stay 4: přednost před daily_prices (i výchozí cenou)', async () 
   assert.equal(q.pricingMode, 'exact-stay');
   assert.equal(q.totalCzk, 29900);
   assert.deepEqual(q.nightlyPrices, []);
-  // Bez pravidla by to bylo 3 000 + 9 000 + 12 000 + 3 000 = 27 000 Kč.
+  // Bez pravidla by to bylo 2 990 + 9 000 + 12 000 + 2 990 = 26 980 Kč.
   await t.db.prepare('DELETE FROM stay_prices').run();
-  assert.equal((await quote('2030-12-29', '2031-01-02')).totalCzk, 27000);
+  assert.equal((await quote('2030-12-29', '2031-01-02')).totalCzk, 26980);
 });
 
 test('exact-stay 5: přednost před length_discounts – sleva se na pevnou cenu neuplatní', async () => {
@@ -382,20 +386,20 @@ test('exact-stay 6: bez pravidla (nebo s pravidlem pro jiný termín) se počít
   await setPrices({ '2030-12-31': 6000 });
   await setDiscounts([[4, 10]]);
   await setStayPrice('2030-07-01', '2030-07-08', 50000);
-  // 3 000 + 3 000 + 6 000 + 3 000 = 15 000; 10 % = 1 500 → 13 500 Kč.
+  // 2 990 + 2 990 + 6 000 + 2 990 = 14 970; 10 % = 1 497 → 13 473 Kč.
   assert.deepEqual(await quote('2030-12-29', '2031-01-02'), {
     arrivalDate: '2030-12-29',
     departureDate: '2031-01-02',
     nights: 4,
     pricingMode: 'nightly',
-    subtotalCzk: 15000,
-    discount: { type: 'length', minNights: 4, percent: 10, amountCzk: 1500 },
-    totalCzk: 13500,
+    subtotalCzk: 14970,
+    discount: { type: 'length', minNights: 4, percent: 10, amountCzk: 1497 },
+    totalCzk: 13473,
     nightlyPrices: [
-      { date: '2030-12-29', priceCzk: 3000 },
-      { date: '2030-12-30', priceCzk: 3000 },
+      { date: '2030-12-29', priceCzk: 2990 },
+      { date: '2030-12-30', priceCzk: 2990 },
       { date: '2030-12-31', priceCzk: 6000 },
-      { date: '2031-01-01', priceCzk: 3000 },
+      { date: '2031-01-01', priceCzk: 2990 },
     ],
   });
 });
@@ -408,11 +412,11 @@ test('exact-stay 7: změna pevné ceny mezi /api/quote a rezervací → 409 pric
   const response = await booking().post({ arrival: '2030-12-29', departure: '2031-01-02', ...GUEST, expectedPriceCzk: q.totalCzk });
   assert.equal(response.status, 409);
   assert.deepEqual(await read(response), { error: 'price-mismatch', priceCzk: 32900 });
-  // Smazání pravidla mezi nabídkou a rezervací → zpět na cenu po nocích (12 000 Kč).
+  // Smazání pravidla mezi nabídkou a rezervací → zpět na cenu po nocích (4 × 2 990 = 11 960 Kč).
   await t.db.prepare('DELETE FROM stay_prices').run();
   const removed = await booking().post({ arrival: '2030-12-29', departure: '2031-01-02', ...GUEST, expectedPriceCzk: q.totalCzk });
   assert.equal(removed.status, 409);
-  assert.deepEqual(await read(removed), { error: 'price-mismatch', priceCzk: 12000 });
+  assert.deepEqual(await read(removed), { error: 'price-mismatch', priceCzk: 11960 });
   assert.equal(await t.count('reservations'), 0);
   assert.equal(await t.sequence(), 0, 'VS se nespotřebuje');
 });
@@ -517,9 +521,9 @@ test('exact-stay 11: pravidlo nemění dostupnost – nic neblokuje a obsazení 
   const range = { from: '2030-12-01', to: '2031-02-01' };
   assert.deepEqual(await listReservedNights(t.db, range), [], 'samotné pravidlo žádnou noc neobsadí');
   // Kratší pobyt uvnitř intervalu pravidla jde rezervovat, za běžnou cenu po nocích.
-  const inner = await booking().post({ arrival: '2030-12-30', departure: '2031-01-01', ...GUEST, expectedPriceCzk: 6000 });
+  const inner = await booking().post({ arrival: '2030-12-30', departure: '2031-01-01', ...GUEST, expectedPriceCzk: 5980 });
   assert.equal(inner.status, 201);
-  assert.equal((await read(inner)).reservation.priceCzk, 6000);
+  assert.equal((await read(inner)).reservation.priceCzk, 5980); // 2 × 2 990
   // Pravidlo zůstává uložené a cenu dál vrací (nabídka dostupnost neověřuje)…
   assert.equal(await stayCount(), 1);
   assert.equal((await quote('2030-12-29', '2031-01-02')).totalCzk, 29900);

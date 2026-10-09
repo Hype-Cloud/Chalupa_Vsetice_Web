@@ -33,10 +33,10 @@ test('validní nightly nabídka ze skutečného /api/quote → cena, noci, bez s
   const result = await fetchQuote(request('2030-02-01', '2030-02-04'), live(), backendFetch);
   assert.ok(result.ok && 'quote' in result);
   assert.equal(result.quote.pricingMode, 'nightly');
-  assert.equal(result.quote.totalCzk, 9000);
+  assert.equal(result.quote.totalCzk, 8970); // 3 × 2 990
   const view = quoteView({ status: 'ready', request: request('2030-02-01', '2030-02-04'), quote: result.quote }, cs);
   assert.ok(view.kind === 'ready');
-  assert.equal(plain(view.total), '9 000 Kč');
+  assert.equal(plain(view.total), '8 970 Kč');
   assert.equal(view.forStay, 'za 3 noci');
   assert.equal(view.exactStay, null);
   assert.equal(view.discount, null);
@@ -50,13 +50,13 @@ test('nightly nabídka se slevou → rozpis jen z hodnot serveru', async () => {
   assert.ok(result.ok && 'quote' in result);
   const view = quoteView({ status: 'ready', request: req, quote: result.quote }, cs);
   assert.ok(view.kind === 'ready');
-  // Server: 6 × 3 000 + 4 333 = 22 333; sleva 5 % = 1 116 → 21 217 Kč.
-  assert.equal(plain(view.total), '21 217 Kč');
+  // Server: 6 × 2 990 + 4 333 = 22 273; sleva 5 % = floor(1 113,65) = 1 113 → 21 160 Kč.
+  assert.equal(plain(view.total), '21 160 Kč');
   assert.deepEqual(view.discount && { ...view.discount, subtotal: plain(view.discount.subtotal), amount: plain(view.discount.amount) }, {
     subtotalLabel: 'Cena za noci',
-    subtotal: '22 333 Kč',
+    subtotal: '22 273 Kč',
     label: 'Sleva 5 % (pobyt min. 7 nocí)',
-    amount: '−1 116 Kč',
+    amount: '−1 113 Kč',
   });
 });
 
@@ -282,14 +282,18 @@ function sourceFiles(dir: string): string[] {
   });
 }
 
-test('frontend nikde nepočítá cenu: žádné PRICE_PER_NIGHT, 3000 ani násobení nocí', () => {
+test('frontend nikde nepočítá cenu: PRICE_PER_NIGHT jen jako orientační údaj, žádná pevná cena noci ani násobení nocí', () => {
   const root = new URL('..', import.meta.url).pathname;
   const files = [...sourceFiles(join(root, 'components')), ...sourceFiles(join(root, 'app')), ...sourceFiles(join(root, 'lib', 'i18n'))];
   assert.ok(files.some((f) => f.endsWith('BookingPanel.tsx')) && files.some((f) => f.endsWith('BookingSection.tsx')));
   for (const file of files) {
-    const code = readFileSync(file, 'utf8').replace(/\/\/[^\n]*|\/\*[\s\S]*?\*\//g, '');
-    assert.ok(!/PRICE_PER_NIGHT/.test(code), `${file}: PRICE_PER_NIGHT`);
-    assert.ok(!/\b3_?000\b/.test(code), `${file}: číslo 3000`);
+    const raw = readFileSync(file, 'utf8').replace(/\/\/[^\n]*|\/\*[\s\S]*?\*\//g, '');
+    // Jediné povolené použití: re-export/import konstanty a zobrazení „standardně … / noc“
+    // přes formatPrice(PRICE_PER_NIGHT) v panelu – žádný výpočet s ní.
+    const allowed = file.endsWith('BookingPanel.tsx') || file.endsWith('booking/config.ts');
+    const code = allowed ? raw.replace(/(import|export) \{[^}]*\} from '[^']*';/g, '').replace(/formatPrice\(PRICE_PER_NIGHT\)/g, '') : raw;
+    assert.ok(!/PRICE_PER_NIGHT/.test(code), `${file}: PRICE_PER_NIGHT mimo orientační zobrazení`);
+    assert.ok(!/\b(3_?000|2_?990)\b/.test(code), `${file}: pevná cena noci`);
     assert.ok(!/(nights|count|nocí)\s*\*|\*\s*(nights|count)\b/i.test(code), `${file}: násobení nocí`);
     assert.ok(!/discount_percent|percent\s*\/\s*100|\/\s*100\s*\)/.test(code), `${file}: klientská kopie slevových pravidel`);
   }

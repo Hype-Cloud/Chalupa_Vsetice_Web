@@ -3,13 +3,14 @@
 import { getAvailability } from './availability.ts';
 import { runConflictReconciliation } from './booking/conflicts.ts';
 import { runScheduledConflictCheck, type CronEnv } from './booking/cron.ts';
+import { handleBookingConfig, type BookingConfigEnv } from './booking/config.ts';
 import { listReservedNights } from './booking/db.ts';
 import { handleIcalExport, type ExportEnv } from './booking/export.ts';
 import { handleCreateReservation, type BookingEnv } from './booking/handler.ts';
 import { handleQuote } from './booking/quote.ts';
 import { json } from './http.ts';
 
-interface Env extends BookingEnv, ExportEnv, CronEnv {
+interface Env extends BookingEnv, ExportEnv, CronEnv, BookingConfigEnv {
   ASSETS: Fetcher;
 }
 
@@ -45,6 +46,7 @@ export default {
         log: (message) => console.warn(message),
       });
     }
+    if (pathname === '/api/booking-config') return handleBookingConfig(request, env);
     if (pathname === '/api/quote') return handleQuote(request, env, { now: () => new Date(), log: (message) => console.warn(message) });
     if (pathname === '/api/reservations.ics') return handleIcalExport(request, env, { log: (message) => console.warn(message) });
     if (pathname.startsWith('/api/')) return json({ error: 'not-found' }, { status: 404, cacheControl: 'no-store' });
