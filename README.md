@@ -32,8 +32,8 @@ Cloudflare Workers.
   srozumitelné hlášky v jazyce webu (u chyby serveru s „Zkusit znovu“). Před výběrem termínu
   panel ukáže jen orientační „Běžně 2 990 Kč / noc“ (`PRICE_PER_NIGHT` přes `formatPrice`)
   s poznámkou (cena se může lišit podle termínu, minimální délka pobytu 2 noci, delší pobyty
-  mohou být zvýhodněné); nic nepočítá. Minimální délka pobytu je jen informační text
-  (`MIN_STAY_NOTICE_NIGHTS`), server ji nevynucuje.
+  mohou být zvýhodněné); nic nepočítá. Počet nocí v poznámce je `MIN_NIGHTS`
+  (`lib/booking/rules.ts`) – stejné pravidlo vynucuje výběr termínu, `/api/quote` i rezervace.
   Ceník na stránce neuvádí univerzální cenu za noc – cena pobytu závisí na termínu.
 - **Data v panelu** se zadávají a zobrazují vždy v pořadí den → měsíc → rok: vlastní pole
   `DD.MM.RRRR` (nezávislé na formátu nativního `<input type="date">`, který může být americký)
@@ -192,15 +192,15 @@ Projekt využívá Node.js Test Runner. Databázové testy probíhají nad loká
 |---|---:|---|
 | ical.test.ts | 20 | Parsování iCalendar, časová pásma, opakované a zrušené události, chybné exporty. |
 | availability.test.ts | 21 | Načítání obsazenosti, cache, výpadky externí služby a neúplná data. |
-| occupancy.test.ts | 15 | Slučování obsazených intervalů, kontrola termínů a chování kalendáře. |
+| occupancy.test.ts | 16 | Slučování obsazených intervalů, kontrola termínů a chování kalendáře, minimální délka pobytu (kalendář i datumová pole). |
 | booking.test.ts | 9 | Validace rezervací, ceny, kontakty, vlastní iCal UID a propojení D1 s kalendářem. |
-| reservations-api.test.ts | 17 | Rezervační API, autorizace, idempotence, souběh požadavků a chybové stavy. |
+| reservations-api.test.ts | 18 | Rezervační API, autorizace, idempotence, souběh požadavků a chybové stavy, minimální délka pobytu. |
 | reservations-db.test.ts | 19 | Databázová omezení, atomické transakce, rollback a ochrana proti kolizím. |
 | ical-export.test.ts | 19 | Výstupní iCal: formát RFC 5545, escaping, stabilita UID, zrušení (STATUS:CANCELLED), autorizace, chyby D1 a prostředí, únik osobních údajů. |
 | conflicts.test.ts | 18 | Detekce kolizí během zpoždění synchronizace: překryvy a hranice, ozvěny, idempotence, souběh, úplný/neúplný snapshot, výpadek e-chalup, upozornění. |
 | conflict-cron.test.ts | 12 | Cron detekce a e-mailové upozornění: odeslání a notified_at, žádný druhý e-mail, retry po chybě providera, nesoulad prostředí, výpadek a neúplný export, souběh s /api/availability, bez osobních údajů. |
 | booking-public.test.ts | 16 | Veřejný POST: Turnstile (platný, neplatný, chybějící, nedostupný), rate limit, idempotentní retry a dvojklik, chybové kódy, bez úniku osobních údajů a secrets. |
-| pricing.test.ts | 31 | Ceník: výchozí a vlastní ceny nocí, prahy slev, zaokrouhlení, přelom měsíce a roku, pevná cena pobytu (přesná shoda, priorita, neplatná data, beze vlivu na dostupnost), `/api/quote` (kontrakt, validace, neplatný ceník, výpadek D1, žádné zápisy), shoda ceny nabídky a rezervace, `price-mismatch`. |
+| pricing.test.ts | 33 | Ceník: výchozí a vlastní ceny nocí, prahy slev, zaokrouhlení, přelom měsíce a roku, pevná cena pobytu (přesná shoda, priorita, neplatná data, beze vlivu na dostupnost), `/api/quote` (kontrakt, validace, neplatný ceník, výpadek D1, žádné zápisy), shoda ceny nabídky a rezervace, `price-mismatch`. |
 | reservation-note.test.ts | 17 | Poznámka hosta: NULL pro prázdné hodnoty, víceřádkový text, Unicode a NFC, limit 2000 znaků, zakázané řídicí a bidi znaky, SQL/HTML text jen jako text, není ve veřejné odpovědi ani v logách, idempotence, escapování v iCal exportu, CHECK v D1. |
 | d1-migrations.test.ts | 21 | Kontrola D1 migrací před deployem: číslování, konzistence konfigurací (oddělené D1, produkční POST vypnutý), čekající a neznámé migrace, fail-closed při chybě, detekce destruktivních migrací, ruční aplikace jen v terminálu s potvrzením, záloha před destruktivní migrací produkce. |
 | smoke.test.ts | 8 | Smoke test veřejných endpointů proti skutečnému Workeru: produkce (POST 404, `booking-config` vypnutý) a Preview, bez tokenů a zápisů, odhalení zapnutého POST, výpadku D1, úniku osobních údajů a veřejného exportu. |
@@ -209,7 +209,7 @@ Projekt využívá Node.js Test Runner. Databázové testy probíhají nad loká
 | date-input.test.ts | 8 | Vstup data DD.MM.RRRR ↔ ISO: přestupný rok, neexistující den a měsíc, rozepsané datum bez chyby, odmítnutí amerického a ISO tvaru, všechna zobrazená data den → měsíc → rok (angličtina bez měsíc/den). |
 | reservation-form.test.ts | 19 | Rezervační formulář: request podle kontraktu, blokace odeslání (termín, cena, kontakty; Turnstile tlačítko neblokuje), kliknutí → Invisible Turnstile → POST, selhání Turnstile bez POST, Idempotency-Key a token svázané s operací (retry = stejný klíč i token bez nové challenge, nová operace = nový token i klíč, i po price-mismatch), chybové kódy → hlášky ve všech jazycích, POST proti skutečnému handleru, `GET /api/booking-config`, Preview Invisible site key jen ve `previews`. |
 | invisible-turnstile.test.ts | 8 | Invisible Turnstile na klientu: widget připravený předem bez spuštění challenge, po kliknutí jen `execute`, nejvýš jeden token na widget a čerstvý widget na pozadí, bez automatického obnovování, ignorování pozdních callbacků, chyba / timeout / prázdný token → `turnstile-failed`, nenačtený skript → `turnstile-unavailable` s opakováním přípravy, odpojení formuláře. |
-| **Celkem** | **309** | |
+| **Celkem** | **313** | |
 
 ### Testované scénáře
 
@@ -373,7 +373,7 @@ VS se nespotřebuje. Kolize se neověřuje dotazem před zápisem, ten by nebyl 
      V produkci se testovací secret Cloudflare odmítne (503 `not-configured`).
 2. Validace (`worker/booking/validation.ts`):
    - datum příjezdu není v minulosti a je nejvýš 365 dní dopředu,
-   - 1–30 nocí,
+   - 2–30 nocí (`MIN_NIGHTS` / `MAX_NIGHTS` v `lib/booking/rules.ts`),
    - 1–7 hostů,
    - jméno, telefon a e-mail bez řídicích znaků,
    - volitelná poznámka `note` (viz [Poznámka hosta](#poznámka-hosta-note)).
@@ -584,7 +584,7 @@ Pevná cena pobytu (`stay_prices`):
 `pricingMode` je `"nightly"` nebo `"exact-stay"`; frontend podle něj pozná pevnou cenu celého
 pobytu a u ní nezobrazuje rozpis po nocích (nespoléhá na `nightlyPrices.length === nights`).
 Závazná částka je vždy `totalCzk`. `discount` je `null`, když se žádná sleva neuplatní. Validace termínu a počtu hostů je stejná
-jako u rezervace (minulost, horizont 365 dní, 1–30 nocí, 1–7 hostů); chyba = 422 `invalid-request`
+jako u rezervace (minulost, horizont 365 dní, 2–30 nocí, 1–7 hostů); chyba = 422 `invalid-request`
 s `fields` (`arrivalDate`, `departureDate`, `guests`). Další chyby: 400 `invalid-json`,
 405, 413, 415, 503 `pricing-unavailable` / `database-error` / `not-configured`, 500 `internal-error`.
 Endpoint jen čte (žádný zápis do D1), neobsahuje osobní údaje a je dostupný i v produkci.

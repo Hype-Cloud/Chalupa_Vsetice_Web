@@ -202,7 +202,7 @@ test('obsazený termín: 409 dates-unavailable (export e-chalup i vlastní D1)',
   assert.equal(external.status, 409);
   assert.deepEqual(await read(external), { error: 'dates-unavailable' });
   assert.equal((await s.post(stay())).status, 201);
-  const own = await s.post(stay({ arrival: '2030-02-02', departure: '2030-02-03' }));
+  const own = await s.post(stay({ arrival: '2030-02-02', departure: '2030-02-04' }));
   assert.equal(own.status, 409);
   assert.deepEqual(await read(own), { error: 'dates-unavailable' });
 });

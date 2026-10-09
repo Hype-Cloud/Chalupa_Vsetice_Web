@@ -1,4 +1,4 @@
-import { PRICE_PER_NIGHT } from '../lib/booking/rules.ts';
+import { MIN_NIGHTS, PRICE_PER_NIGHT } from '../lib/booking/rules.ts';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
@@ -7,7 +7,7 @@ import { CATALOGS, createI18n, DEFAULT_LOCALE, INTL_LOCALE, isLocale, LOCALES, t
 import { cs } from '../lib/i18n/messages/cs.ts';
 import { en } from '../lib/i18n/messages/en.ts';
 import { languageOptions, LOCALE_STORAGE_KEY, localeFromSearch, readStoredLocale, resolveLocale, storeLocale, urlWithLocale, type LocaleStorage } from '../lib/i18n/preference.ts';
-import { DAY_STATUS_KEYS, STAY_ERROR_KEYS } from '../components/booking/stayErrors.ts';
+import { DAY_STATUS_KEYS, STAY_ERROR_KEYS, stayErrorMessage } from '../components/booking/stayErrors.ts';
 import { quoteView } from '../components/booking/quoteView.ts';
 import type { QuoteRequest } from '../components/booking/quote.ts';
 
@@ -145,7 +145,7 @@ test('kalendář: dny v týdnu, měsíce a rozsahy přes Intl v každém jazyce'
 });
 
 test('hlášky výběru termínu a stavy dnů: technický kód → klíč, přeloženo ve všech jazycích', () => {
-  assert.deepEqual(Object.keys(STAY_ERROR_KEYS).sort(), ['arrival-busy', 'no-arrival', 'order', 'past', 'range-busy', 'unknown']);
+  assert.deepEqual(Object.keys(STAY_ERROR_KEYS).sort(), ['arrival-busy', 'no-arrival', 'order', 'past', 'range-busy', 'too-short', 'unknown']);
   assert.deepEqual(Object.keys(DAY_STATUS_KEYS).sort(), ['busy', 'checkin', 'checkout', 'free', 'past', 'unknown']);
   for (const locale of LOCALES) {
     const i18n = createI18n(locale);
@@ -155,6 +155,16 @@ test('hlášky výběru termínu a stavy dnů: technický kód → klíč, přel
   }
   assert.equal(createI18n('de').t(STAY_ERROR_KEYS['range-busy']), 'Der gewählte Aufenthalt überschneidet sich mit belegten Tagen. Bitte wählen Sie eine frühere Abreise oder eine andere Anreise.');
   assert.equal(createI18n('cs').t(STAY_ERROR_KEYS.order), 'Odjezd musí být alespoň den po příjezdu.');
+  // Minimální délka pobytu: počet nocí vždy z MIN_NIGHTS, ve všech jazycích.
+  assert.deepEqual(LOCALES.map((l) => stayErrorMessage(createI18n(l), 'too-short')), [
+    'Minimální délka pobytu jsou 2 noci. Vyberte prosím pozdější odjezd.',
+    'The minimum stay is 2 nights. Please choose a later departure.',
+    'Der Mindestaufenthalt beträgt 2 Nächte. Bitte wählen Sie eine spätere Abreise.',
+    'Мінімальне перебування — 2 ночі. Оберіть, будь ласка, пізнішу дату виїзду.',
+  ]);
+  // Cenová poznámka panelu používá stejné MIN_NIGHTS.
+  assert.match(readFileSync(join(ROOT, 'components/booking/BookingPanel.tsx'), 'utf8'), /plural\('booking\.nights', MIN_NIGHTS\)/);
+  assert.equal(createI18n('cs').t('booking.panel.priceNoteMinStay', { nights: createI18n('cs').plural('booking.nights', MIN_NIGHTS) }), 'Minimální délka pobytu jsou 2 noci.');
 });
 
 test('rezervační panel: stejný stav nabídky se po přepnutí jazyka zobrazí v novém jazyce', () => {

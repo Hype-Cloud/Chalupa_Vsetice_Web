@@ -77,6 +77,20 @@ test('datumová pole používají stejnou validaci jako kalendář', () => {
   assert.equal(setArrival({ arrival: '2030-02-24', departure: '2030-03-01' }, '2030-03-02', ctx).error, 'arrival-busy');
 });
 
+test('minimální délka pobytu (MIN_NIGHTS = 2): kalendář i datumová pole odmítnou 1 noc, 2 noci projdou', () => {
+  // Kalendář: příjezd 24. 2., klik na 25. 2. → chyba, příjezd zůstane vybraný.
+  const withArrival = pickDay(EMPTY_STAY, '2030-02-24', ctx).stay;
+  assert.deepEqual(pickDay(withArrival, '2030-02-25', ctx), { stay: withArrival, error: 'too-short' });
+  assert.deepEqual(pickDay(withArrival, '2030-02-26', ctx), { stay: { arrival: '2030-02-24', departure: '2030-02-26' }, error: null });
+  // Ruční odjezd následující den → chyba, termín se nezmění.
+  assert.deepEqual(setDeparture(withArrival, '2030-02-25', ctx), { stay: withArrival, error: 'too-short' });
+  assert.deepEqual(setDeparture(withArrival, '2030-02-26', ctx).stay, { arrival: '2030-02-24', departure: '2030-02-26' });
+  // Ruční posun příjezdu na den před odjezdem → odjezd se zruší s chybou (jako jiné konflikty).
+  assert.deepEqual(setArrival({ arrival: '2030-02-22', departure: '2030-02-25' }, '2030-02-24', ctx), { stay: { arrival: '2030-02-24', departure: null }, error: 'too-short' });
+  // Pobyt končící v den příjezdu cizích hostů musí mít také aspoň 2 noci.
+  assert.equal(pickDay(pickDay(EMPTY_STAY, '2030-02-28', ctx).stay, '2030-03-01', ctx).error, 'too-short');
+});
+
 test('bez načtené obsazenosti nelze vybrat žádný termín', () => {
   assert.equal(pickDay(EMPTY_STAY, '2030-02-25', { today: '2030-02-20', occupancy: null }).error, 'unknown');
 });

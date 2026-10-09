@@ -81,7 +81,7 @@ test('validní exact-stay nabídka → pevná cena pro tento termín, bez slevy 
 
 test('422 ze skutečného backendu → srozumitelná inline hláška podle pole, bez technického kódu', async () => {
   const cases: [QuoteRequest, string][] = [
-    [request('2030-02-01', '2030-03-05'), 'Pobyt může trvat 1–30 nocí. Upravte prosím datum odjezdu.'],
+    [request('2030-02-01', '2030-03-05'), 'Pobyt může trvat 2–30 nocí. Upravte prosím datum odjezdu.'],
     [request('2031-02-01', '2031-02-03'), 'Pro zvolené datum příjezdu nelze cenu spočítat. Příjezd je možný nejdříve dnes a nejpozději rok dopředu.'],
     [request('2030-02-01', '2030-02-03', 9), 'Počet hostů musí být 1–7.'],
   ];
