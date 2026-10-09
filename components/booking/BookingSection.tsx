@@ -148,7 +148,6 @@ export function BookingSection() {
     <div className="booking-block">
       <div className="booking-grid">
         <div className="calendar-panel">
-          <div className="calendar-title"><h3>{i18n.t('calendar.title')}</h3></div>
           {today ? (
             <AvailabilityCalendar
               today={today}

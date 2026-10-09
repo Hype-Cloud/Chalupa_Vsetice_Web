@@ -99,10 +99,14 @@ export function BookingForm({ contact, onContact, submission, block, priceChange
         <p className={`form-status${status?.error ? ' is-error' : ''}`} role="status" aria-live="polite">
           {status?.text}
         </p>
-        <button type="submit" className="button" disabled={block !== null} aria-busy={submitting}>
-          {submitting ? t('reservation.form.submitting') : submission.status === 'error' && submission.retryable ? t('reservation.retry') : t('reservation.form.submit')}
-          {!submitting && <ArrowUpRight size={18} />}
-        </button>
+        {/* Wrapper nese hover nápovědu k neaktivnímu tlačítku (disabled button sám události nepřijímá). */}
+        <div className={`submit-wrap${block === 'contact' ? ' has-hint' : ''}`}>
+          <button type="submit" className="button" disabled={block !== null} aria-busy={submitting} aria-describedby={block === 'contact' ? `${id}-submit-hint` : undefined}>
+            {submitting ? t('reservation.form.submitting') : submission.status === 'error' && submission.retryable ? t('reservation.retry') : t('reservation.form.submit')}
+            {!submitting && <ArrowUpRight size={18} />}
+          </button>
+          {block === 'contact' && <span className="submit-hint" id={`${id}-submit-hint`} role="tooltip">{t('reservation.form.submitHint')}</span>}
+        </div>
       </form>
       {/* Invisible Turnstile: mimo formulář i jeho grid, bez místa v layoutu. */}
       <Turnstile siteKey={siteKey} onSource={onTurnstile} />

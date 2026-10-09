@@ -45,7 +45,6 @@ export const en = {
   'stay.title': 'When shall we see you?',
   'stay.text': 'Pick a few days that will be yours alone.',
 
-  'calendar.title': 'Availability calendar',
   'calendar.loading': 'Loading the calendar…',
   'calendar.previousMonths': 'Previous months',
   'calendar.nextMonths': 'Next months',
@@ -76,8 +75,6 @@ export const en = {
   'availability.verifyOn': 'You can check available dates on',
   'availability.staleAt': 'Availability couldn’t be refreshed; showing the status from {time}. The owner will confirm your dates.',
   'availability.staleUnknown': 'Availability couldn’t be refreshed; showing the status from the last sync. The owner will confirm your dates.',
-  'availability.source': 'Availability from e-chalupy.cz',
-  'availability.sourceUpdated': 'Availability from e-chalupy.cz · updated {time}',
 
   'stayError.past': 'Dates in the past can’t be selected.',
   'stayError.arrivalBusy': 'This day is booked. Please choose a different arrival day.',
@@ -149,6 +146,7 @@ export const en = {
   'reservation.form.phone': 'Phone',
   'reservation.form.note': 'Note',
   'reservation.form.submit': 'Submit booking',
+  'reservation.form.submitHint': 'Please fill in your details first.',
   'reservation.form.submitting': 'Submitting your booking…',
   'reservation.blocked.stay': 'Please select valid dates for your stay.',
   'reservation.fieldError.firstName': 'Please enter your first name.',

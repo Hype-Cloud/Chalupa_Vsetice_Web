@@ -108,7 +108,8 @@ export function AvailabilityCalendar({ today, availability, occupancy, stay, mes
         </p>
       );
     }
-    return <p className="bk-status">{updatedAt ? t('availability.sourceUpdated', { time: formatDateTime(updatedAt) }) : t('availability.source')}</p>;
+    // Běžný stav (data aktuální): žádný technický řádek o zdroji a čase synchronizace.
+    return null;
   })();
 
   const hint = !stay.arrival || stay.departure ? t('calendar.hintArrival') : t('calendar.hintDeparture');

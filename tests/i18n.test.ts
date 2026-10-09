@@ -260,7 +260,7 @@ test('přepínač jazyků: CS EN DE UA, právě jeden aktivní, názvy jazyků (
 
 test('přepnutí jazyka: všechny texty se změní a žádný přeložený jazyk nevrací češtinu', () => {
   const texts = (locale: Locale) => createI18n(locale);
-  for (const key of ['nav.about', 'hero.titleLine1', 'calendar.title', 'booking.panel.inquiry', 'pricing.rent.value', 'footer.tagline'] as const) {
+  for (const key of ['nav.about', 'hero.titleLine1', 'calendar.legend.toggle', 'booking.panel.inquiry', 'pricing.rent.value', 'footer.tagline'] as const) {
     const values = LOCALES.map((l) => texts(l).t(key));
     assert.equal(new Set(values).size, 4, `${key}: ${values.join(' | ')}`);
   }

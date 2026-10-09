@@ -47,7 +47,6 @@ export const cs = {
   'stay.title': 'Kdy se uvidíme?',
   'stay.text': 'Vyberte si pár dní, které budou jen vaše.',
 
-  'calendar.title': 'Kalendář obsazenosti',
   'calendar.loading': 'Načítáme kalendář…',
   'calendar.previousMonths': 'Předchozí měsíce',
   'calendar.nextMonths': 'Další měsíce',
@@ -78,8 +77,6 @@ export const cs = {
   'availability.verifyOn': 'Volné termíny ověříte na',
   'availability.staleAt': 'Obsazenost se nepodařilo obnovit, zobrazujeme stav z {time}. Termín potvrdí majitel.',
   'availability.staleUnknown': 'Obsazenost se nepodařilo obnovit, zobrazujeme stav z poslední synchronizace. Termín potvrdí majitel.',
-  'availability.source': 'Obsazenost z e-chalupy.cz',
-  'availability.sourceUpdated': 'Obsazenost z e-chalupy.cz · aktualizováno {time}',
 
   'stayError.past': 'Termín v minulosti nelze vybrat.',
   'stayError.arrivalBusy': 'Tento den je obsazený. Vyberte prosím jiný den příjezdu.',
@@ -151,6 +148,7 @@ export const cs = {
   'reservation.form.phone': 'Telefon',
   'reservation.form.note': 'Poznámka',
   'reservation.form.submit': 'Odeslat rezervaci',
+  'reservation.form.submitHint': 'Nejdřív vyplňte údaje.',
   'reservation.form.submitting': 'Odesíláme rezervaci…',
   'reservation.blocked.stay': 'Vyberte platný termín pobytu.',
   'reservation.fieldError.firstName': 'Vyplňte jméno.',

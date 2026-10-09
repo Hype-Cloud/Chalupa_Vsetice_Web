@@ -45,7 +45,6 @@ export const de = {
   'stay.title': 'Wann sehen wir uns?',
   'stay.text': 'Wählen Sie ein paar Tage, die nur Ihnen gehören.',
 
-  'calendar.title': 'Belegungskalender',
   'calendar.loading': 'Kalender wird geladen…',
   'calendar.previousMonths': 'Vorherige Monate',
   'calendar.nextMonths': 'Nächste Monate',
@@ -77,8 +76,6 @@ export const de = {
   'availability.verifyOn': 'Freie Termine prüfen Sie auf',
   'availability.staleAt': 'Die Belegung konnte nicht aktualisiert werden; angezeigt wird der Stand vom {time}. Den Termin bestätigt der Eigentümer.',
   'availability.staleUnknown': 'Die Belegung konnte nicht aktualisiert werden; angezeigt wird der Stand der letzten Synchronisierung. Den Termin bestätigt der Eigentümer.',
-  'availability.source': 'Belegung von e-chalupy.cz',
-  'availability.sourceUpdated': 'Belegung von e-chalupy.cz · aktualisiert {time}',
 
   'stayError.past': 'Termine in der Vergangenheit können nicht gewählt werden.',
   'stayError.arrivalBusy': 'Dieser Tag ist belegt. Bitte wählen Sie einen anderen Anreisetag.',
@@ -150,6 +147,7 @@ export const de = {
   'reservation.form.phone': 'Telefon',
   'reservation.form.note': 'Anmerkung',
   'reservation.form.submit': 'Buchung absenden',
+  'reservation.form.submitHint': 'Bitte füllen Sie zuerst Ihre Angaben aus.',
   'reservation.form.submitting': 'Buchung wird gesendet…',
   'reservation.blocked.stay': 'Bitte wählen Sie einen gültigen Aufenthaltszeitraum.',
   'reservation.fieldError.firstName': 'Bitte geben Sie Ihren Vornamen ein.',

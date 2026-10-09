@@ -45,7 +45,6 @@ export const ua = {
   'stay.title': 'Коли побачимося?',
   'stay.text': 'Оберіть кілька днів, які будуть лише вашими.',
 
-  'calendar.title': 'Календар зайнятості',
   'calendar.loading': 'Завантажуємо календар…',
   'calendar.previousMonths': 'Попередні місяці',
   'calendar.nextMonths': 'Наступні місяці',
@@ -76,8 +75,6 @@ export const ua = {
   'availability.verifyOn': 'Вільні дати можна перевірити на',
   'availability.staleAt': 'Не вдалося оновити зайнятість, показуємо стан на {time}. Дати підтвердить власник.',
   'availability.staleUnknown': 'Не вдалося оновити зайнятість, показуємо стан останньої синхронізації. Дати підтвердить власник.',
-  'availability.source': 'Зайнятість з e-chalupy.cz',
-  'availability.sourceUpdated': 'Зайнятість з e-chalupy.cz · оновлено {time}',
 
   'stayError.past': 'Дати в минулому обрати не можна.',
   'stayError.arrivalBusy': 'Цей день зайнятий. Будь ласка, оберіть інший день заїзду.',
@@ -149,6 +146,7 @@ export const ua = {
   'reservation.form.phone': 'Телефон',
   'reservation.form.note': 'Примітка',
   'reservation.form.submit': 'Надіслати бронювання',
+  'reservation.form.submitHint': 'Спершу заповніть свої дані.',
   'reservation.form.submitting': 'Надсилаємо бронювання…',
   'reservation.blocked.stay': 'Оберіть дійсні дати перебування.',
   'reservation.fieldError.firstName': 'Введіть ім’я.',

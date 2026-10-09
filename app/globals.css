@@ -152,7 +152,7 @@ header nav a, .nav-cta { white-space:nowrap; }
 @media(min-width:1001px) { .booking-grid { grid-template-columns:minmax(0,1.8fr) minmax(340px,1fr); } .booking { padding:28px 30px; } }
 /* Orientační cena před výběrem termínu (konstanta serveru, ne výpočet) – centrovaná úvodní část. */
 .booking > .price.is-indicative { font-size:28px; line-height:1.2; text-align:center; text-wrap:balance; }
-.booking > p.price-note { margin:8px auto 0; max-width:30ch; font-size:13px; line-height:1.55; color:#b9c9be; text-align:center; text-wrap:balance; }
+.booking > .price + p.price-note { margin:8px auto 0; max-width:30ch; font-size:13px; line-height:1.55; color:#b9c9be; text-align:center; text-wrap:balance; }
 .booking > .price { line-height:1.15; text-align:center; }
 .booking > .price + p { margin:6px 0 0; }
 .booking .date-fields { margin-top:20px; }
@@ -206,11 +206,18 @@ header nav a, .nav-cta { white-space:nowrap; }
 .booking-form .form-status:empty { margin:0; }
 .booking-form .form-status.is-error { color:#9a3f1f; }
 /* Finální CTA pod poli přes celou šířku bloku; aktivní tmavě zelené, neaktivní tlumená zelená. */
-.booking-form button.button { display:flex; width:100%; min-height:56px; margin-top:20px; border:0; border-radius:var(--bk-radius-md); background:#163d33; color:#fff; font-family:inherit; cursor:pointer; transition:background-color .2s, color .2s; }
+.booking-form .submit-wrap { position:relative; margin-top:20px; }
+.booking-form button.button { display:flex; width:100%; min-height:56px; border:0; border-radius:var(--bk-radius-md); background:#163d33; color:#fff; font-family:inherit; cursor:pointer; transition:background-color .2s, color .2s; }
 .booking-form button.button:hover { background:#0f2e26; }
 /* Neaktivní: světlá zelená výplň a tlumený text, bez obrysu – zřetelně neaktivní, ne „zakázané“. */
-.booking-form button.button[disabled] { background:#bfd0b7; color:#3f574a; cursor:not-allowed; }
-.booking-form button.button[disabled] svg { opacity:.55; }
+.booking-form button.button[disabled] { background:#b2c5a8; color:#2f4a3c; cursor:default; }
+.booking-form button.button[disabled] svg { opacity:.6; }
+/* Nápověda k neaktivnímu CTA: jen na zařízeních s hoverem, mimo tok layoutu (absolutně nad tlačítkem). */
+.booking-form .submit-hint { position:absolute; left:50%; bottom:calc(100% + 10px); transform:translate(-50%, 4px); padding:7px 12px; border-radius:var(--bk-radius-sm); background:#163d33; color:#f8f9f5; font-size:13px; line-height:1.4; white-space:nowrap; pointer-events:none; opacity:0; visibility:hidden; transition:opacity .15s ease, transform .15s ease, visibility 0s linear .15s; z-index:2; }
+.booking-form .submit-hint::after { content:""; position:absolute; top:100%; left:50%; margin-left:-6px; border:6px solid transparent; border-top-color:#163d33; }
+.booking-form .submit-wrap.has-hint button[disabled] { pointer-events:none; }
+@media (hover: hover) { .booking-form .submit-wrap.has-hint:hover .submit-hint { opacity:1; visibility:visible; transform:translate(-50%, 0); transition:opacity .15s ease, transform .15s ease, visibility 0s; } }
+@media (prefers-reduced-motion: reduce) { .booking-form .submit-hint { transition:none; } }
 .booking-form button.button[aria-busy="true"] { background:#163d33; color:#fff; opacity:.8; cursor:progress; }
 /* Potvrzení: krátký čistě CSS reveal (opacity + transform), nic nečeká na jeho dokončení. */
 .booking.is-success { padding-top:34px; padding-bottom:30px; }
@@ -231,24 +238,26 @@ header nav a, .nav-cta { white-space:nowrap; }
   .booking-form .form-grid { grid-template-columns:1fr; gap:14px; }
 }
 /* Desktop: zelený panel stejně vysoký jako karta kalendáře (stretch ve stejném řádku gridu),
-   obsah ve sloupci – cena nahoře, CTA dole. Mobil zůstává na přirozené výšce. */
+   obsah ve sloupci – cena nahoře, pole uprostřed, CTA dole. Pevné odstupy jsou jen minima, volné
+   místo dělí `margin-top: auto`, aby obsah panelu nepřerostl přirozenou výšku kalendáře.
+   Mobil zůstává na přirozené výšce a původní typografii. */
 @media(min-width:1001px) {
   .booking-grid { align-items:stretch; }
-  .booking-grid > .booking { display:flex; flex-direction:column; padding:38px 34px 34px; }
+  .booking-grid > .booking { display:flex; flex-direction:column; padding:28px 30px 26px; }
   .booking-grid > .booking > .button { margin-top:auto; }
-  .booking-grid > .booking > :has(+ .button) { margin-bottom:24px; }
+  .booking-grid > .booking > :has(+ .button) { margin-bottom:16px; }
   .booking-grid > .booking.is-success { justify-content:center; }
   .booking-grid > .booking > .price { font-size:42px; }
-  .booking-grid > .booking > .price span { font-size:18px; }
-  .booking-grid > .booking > .price.is-indicative { font-size:32px; }
-  .booking-grid > .booking > .price.is-placeholder { font-size:26px; }
-  .booking-grid > .booking > p.price-note { margin-top:10px; font-size:14px; }
-  /* Volné místo se dělí mezi cenu → pole a pole → CTA; padding drží minimální odstup. */
-  .booking-grid > .booking .date-fields { margin-top:auto; padding-top:30px; gap:14px; }
+  .booking-grid > .booking > .price span { display:inline-block; font-size:18px; white-space:nowrap; }
+  .booking-grid > .booking > .price.is-indicative { font-size:34px; }
+  .booking-grid > .booking > .price.is-placeholder { font-size:27px; }
+  .booking-grid > .booking > .price + p.price-note { margin-top:12px; font-size:14.5px; }
+  .booking-grid > .booking .date-fields { margin-top:auto; padding-top:16px; gap:14px; }
+  .booking-grid > .booking label { font-size:15px; }
+  .booking-grid > .booking .date-field input[type="text"], .booking-grid > .booking .guests-field select { height:44px; font-size:16px; }
   .booking-grid > .booking .date-field-control input[type="text"] { padding-right:38px; }
   .booking-grid > .booking .date-field-control input[type="text"]::placeholder { font-size:14px; letter-spacing:0; }
-  .booking-grid > .booking label { font-size:14px; }
-  .booking-grid > .booking .date-field input[type="text"], .booking-grid > .booking .guests-field select { height:48px; font-size:16px; }
-  .booking-grid > .booking .guests-field { margin-top:16px; }
-  .booking-grid > .booking .estimate { margin-top:20px; padding:18px 0 4px; gap:9px; font-size:15px; }
+  .booking-grid > .booking .guests-field { margin-top:14px; }
+  .booking-grid > .booking .estimate { margin-top:14px; padding:14px 0 2px; gap:8px; font-size:15.5px; }
+  .booking-grid > .booking .estimate .quote-note { font-size:13.5px; }
 }
