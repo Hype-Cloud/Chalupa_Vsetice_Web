@@ -19,7 +19,7 @@ const plain = (text: string) => text.replace(/[  ]/g, ' ');
 const csKeys = Object.keys(cs).sort();
 const placeholders = (text: string) => [...text.matchAll(/\{(\w+)\}/g)].map((m) => m[1]).sort();
 /** Klíče, které jsou záměrně stejné ve všech jazycích (název chalupy). */
-const SAME_IN_ALL = new Set(['brand.name', 'brand.place', 'reservation.payment.iban']);
+const SAME_IN_ALL = new Set(['brand.name', 'brand.place', 'reservation.payment.iban', 'email.footer.ico']);
 /** Slova, která jsou v daném jazyce stejná jako česky (ne nepřeložený text). */
 const SAME_AS_CZECH = new Set(['de:reservation.form.phone']);
 
@@ -63,7 +63,7 @@ test('katalogy en, de, ua jsou skutečně přeložené (žádný český text) a
       const value = (CATALOGS[locale] as Record<string, unknown>)[key];
       const text = typeof value === 'string' ? value : JSON.stringify(value);
       if (!SAME_IN_ALL.has(key) && !SAME_AS_CZECH.has(`${locale}:${key}`)) assert.notDeepEqual(value, (cs as Record<string, unknown>)[key], `${locale} ${key} je stejné jako česky`);
-      assert.ok(!/[ěščřůňťď]/i.test(text.replace(/VŠETICE|Všetice|e-chalupy\.cz|Čeština/g, '')), `${locale} ${key}: český text`);
+      assert.ok(!/[ěščřůňťď]/i.test(text.replace(/VŠETICE|Všetice|e-chalupy\.cz|Čeština|IČO/g, '')), `${locale} ${key}: český text`);
     }
   }
   for (const locale of LOCALES) {
