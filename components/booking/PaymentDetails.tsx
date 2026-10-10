@@ -5,12 +5,12 @@ import { CopyButton } from './CopyButton.tsx';
 import { qrRendering } from './paymentQr.ts';
 
 /**
- * Platba v potvrzení rezervace: nadpis se splatností (jen datum v Europe/Prague), QR Platba jako skutečný obrázek (dlouhým podržením
- * jde na mobilu uložit) a sbalené ruční platební údaje s kopírováním. Nepodaří-li se QR vytvořit,
+ * Platba v potvrzení rezervace (bez nadpisu, navazuje na souhrn se splatností): QR Platba jako
+ * skutečný obrázek (dlouhým podržením jde na mobilu uložit) a sbalené ruční platební údaje s kopírováním. Nepodaří-li se QR vytvořit,
  * ruční údaje jsou rovnou rozbalené.
  */
 export function PaymentDetails({ payment }: { payment: PaymentInstructions }) {
-  const { t, formatPrice, formatDeadline, formatDeadlineDate } = useI18n();
+  const { t, formatPrice, formatDeadline } = useI18n();
   const qr = useMemo(() => qrRendering(payment.spayd), [payment.spayd]);
   const qrLabel = t('reservation.payment.qrLabel');
   const rows: { label: string; display: string; copy?: string; className?: string }[] = [
@@ -21,11 +21,7 @@ export function PaymentDetails({ payment }: { payment: PaymentInstructions }) {
     { label: t('reservation.payment.due'), display: formatDeadline(payment.dueAt) },
   ];
   return (
-    <section className="booking-payment" aria-labelledby="booking-payment-heading">
-      <div className="booking-payment-header">
-        <p className="booking-payment-heading" id="booking-payment-heading">{t('reservation.payment.heading')}</p>
-        <p className="booking-payment-due">{t('reservation.payment.dueBy', { date: formatDeadlineDate(payment.dueAt) })}</p>
-      </div>
+    <div className="booking-payment">
       {qr.kind === 'img' && (
         <>
           <img className="booking-payment-qr" src={qr.src} alt={qrLabel} width={184} height={184} />
@@ -53,6 +49,6 @@ export function PaymentDetails({ payment }: { payment: PaymentInstructions }) {
           ))}
         </dl>
       </details>
-    </section>
+    </div>
   );
 }

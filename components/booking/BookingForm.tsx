@@ -123,7 +123,7 @@ export function BookingForm({ contact, onContact, submission, block, priceChange
  * (interní identifikátor), host ho ale v UI nepotřebuje.
  */
 export function BookingSuccess({ reservation }: { reservation: ReservationConfirmation }) {
-  const { t, plural, formatDate, formatPrice } = useI18n();
+  const { t, plural, formatDate, formatPrice, formatDeadlineDate } = useI18n();
   const root = useRef<HTMLDivElement>(null);
   const heading = useRef<HTMLParagraphElement>(null);
   useEffect(() => {
@@ -151,6 +151,7 @@ export function BookingSuccess({ reservation }: { reservation: ReservationConfir
         <div><dt>{t('reservation.success.stay')}</dt><dd>{formatDate(reservation.arrival)} – {formatDate(reservation.departure)}</dd></div>
         <div><dt>{t('reservation.success.nights')}</dt><dd>{plural('booking.nights', reservation.nights)}</dd></div>
         <div><dt>{t('reservation.success.guests')}</dt><dd>{plural('booking.guests', reservation.guests)}</dd></div>
+        <div><dt>{t('reservation.payment.due')}</dt><dd>{formatDeadlineDate(reservation.paymentDueAt)}</dd></div>
         <div><dt>{t('reservation.success.price')}</dt><dd>{formatPrice(reservation.totalCzk)}</dd></div>
       </dl>
       <PaymentDetails payment={reservation.payment} />

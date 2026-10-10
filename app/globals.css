@@ -235,17 +235,14 @@ header nav a, .nav-cta { white-space:nowrap; }
 .booking-success .estimate { margin-top:0; padding:14px 0; gap:8px; border-bottom:1px solid rgba(219,232,189,.2); }
 .booking-success-note { margin:20px 0 0; font-size:13px; line-height:1.6; color:#b9c9be; text-align:center; }
 .booking-success-email { margin:0 0 14px; font-size:13px; line-height:1.5; color:#b9c9be; text-align:center; text-wrap:balance; }
-.booking-payment { margin-top:16px; }
-.booking-payment-header { display:flex; flex-wrap:wrap; align-items:baseline; justify-content:space-between; column-gap:12px; row-gap:0; margin:0 0 12px; }
-.booking-payment-heading { margin:0; font-family:Georgia,'Times New Roman',serif; font-size:20px; line-height:1.3; color:#fff; text-align:left; }
+.booking-payment { margin-top:18px; }
 .booking-payment dd { font-variant-numeric:tabular-nums; }
-.booking-payment-due { margin:0; font-size:13px; line-height:1.5; color:#f3d9c9; }
 /* QR jako skutečný obrázek: dlouhým podržením jde na mobilu uložit (nic to nesmí blokovat). */
 .booking-payment-qr { display:block; width:min(184px, 62%); height:auto; margin:0 auto; border-radius:var(--bk-radius-sm, 6px); -webkit-touch-callout:default; -webkit-user-select:auto; user-select:auto; }
 .booking-payment-hint { display:none; margin:8px 0 0; font-size:12px; line-height:1.5; color:#b9c9be; text-align:center; }
 @media (hover:none) and (pointer:coarse) { .booking-payment-hint { display:block; } }
 .booking-payment .estimate { margin-top:14px; }
-.booking-payment-more { border-bottom:1px solid rgba(219,232,189,.2); }
+.booking-payment-more { margin-top:6px; border-bottom:1px solid rgba(219,232,189,.2); }
 .booking-payment-more summary { padding:10px 0; font-size:13px; color:#b9c9be; text-align:center; cursor:pointer; }
 .booking-payment-more summary:hover { color:#dbe8bd; }
 .booking-payment-more summary:focus-visible { outline:3px solid #b5913e; outline-offset:2px; }

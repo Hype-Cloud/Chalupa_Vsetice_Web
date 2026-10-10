@@ -558,12 +558,11 @@ web dál nabízí poptávku přes e-chalupy.
   potvrzení s novým klíčem.
 - **Úspěch:** potvrzení v panelu (bez eyebrow) – titulek „Rezervace přijata“, pod ním sekundární
   věta „Potvrzení a platební údaje najdete také ve svém e-mailu.“, termín, délka pobytu,
-  hosté a celková cena. Kód rezervace se v panelu nezobrazuje (je v odpovědi API a bude
-  v potvrzovacím e-mailu). Blok Platba: hlavička „Platba“ se splatností vpravo („nejpozději 11. 10. 2026“, jen
-  datum v `Europe/Prague` přes `formatDeadlineDate`; na úzkém displeji se zalomí pod nadpis), QR Platba jako
+  hosté, splatnost (jen datum v `Europe/Prague`, `formatDeadlineDate`) a celková cena. Kód rezervace se v panelu nezobrazuje (je v odpovědi API a bude
+  v potvrzovacím e-mailu). Platební část (bez nadpisu) navazuje přímo na souhrn: QR Platba jako
   skutečný `<img>` (lokálně vytvořený PNG, `components/booking/paymentQr.ts`; na mobilu jde uložit
   dlouhým podržením, dotyková zařízení – `@media (hover:none) and (pointer:coarse)` – ukážou
-  nápovědu) a sbalené `<details>` „Platební údaje“: částka, číslo účtu, IBAN, variabilní symbol
+  nápovědu „Podržte QR kód pro uložení.“) a sbalené `<details>` „Platební údaje“: částka, číslo účtu, IBAN, variabilní symbol
   a splatnost; u prvních čtyř tlačítko kopírování (Clipboard API, záložně `execCommand`,
   zpětná vazba „Zkopírováno“ bez posunu layoutu). Fallback QR: selže-li převod na PNG, vykreslí
   se SVG ze stejné matice; selže-li kódování, QR se nezobrazí a platební údaje jsou rozbalené.
