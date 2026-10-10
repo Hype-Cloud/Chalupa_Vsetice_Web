@@ -21,7 +21,6 @@ async function reserve(arrival: string, departure: string, overrides: Partial<Ne
   const id = `00000000-0000-4000-8000-${String(counter).padStart(12, '0')}`;
   const r: NewReservation = {
     id,
-    publicCode: `CV-${String(counter).padStart(6, '0')}`,
     icalUid: icalUidFor(id),
     arrival,
     departure,
@@ -33,12 +32,10 @@ async function reserve(arrival: string, departure: string, overrides: Partial<Ne
     priceCzk: 3000 * Math.round((Date.parse(departure) - Date.parse(arrival)) / 86_400_000),
     idempotencyKey: null,
     requestHash: null,
-    vsPrefix: '30',
     createdAt: '2030-01-10T10:00:00.000Z',
     ...overrides,
   };
-  await insertReservation(t.db, r);
-  return r;
+  return { ...r, publicCode: (await insertReservation(t.db, r)).code };
 }
 
 function setup(overrides: Partial<ExportEnv> = {}) {
@@ -105,7 +102,7 @@ test('DESCRIPTION předá správci kód, hosta, kontakty, hosty, cenu, VS a stav
     'E-mail: test@example.invalid',
     'Počet hostů: 4',
     'Cena: 6 000 Kč',
-    'Variabilní symbol: 30000001',
+    `Variabilní symbol: ${r.publicCode}`,
     'Stav platby: čeká na platbu (ověřit ručně)',
   ]);
   assert.equal(events[0].summary, `[TEST] Web ${r.publicCode} – Jan Testovací`);
@@ -113,9 +110,9 @@ test('DESCRIPTION předá správci kód, hosta, kontakty, hosty, cenu, VS a stav
 
 test('escaping: čárky, středníky, zpětná lomítka a dlouhá čeština projdou beze ztráty', async () => {
   const name = 'Žofie-Příliš, žluťoučká; kůň \\ úpěl ďábelské ódy'.repeat(2).slice(0, 80);
-  await reserve('2030-07-01', '2030-07-02', { firstName: name, lastName: 'Novák;Nováková,st.' });
+  const r = await reserve('2030-07-01', '2030-07-02', { firstName: name, lastName: 'Novák;Nováková,st.' });
   const { raw, events } = await parse(await setup().get());
-  assert.equal(events[0].summary, `[TEST] Web CV-${String(counter).padStart(6, '0')} – ${name} Novák;Nováková,st.`);
+  assert.equal(events[0].summary, `[TEST] Web ${r.publicCode} – ${name} Novák;Nováková,st.`);
   assert.ok(events[0].description.includes(`Host: ${name} Novák;Nováková,st.`));
   assert.ok(raw.includes('\\;') && raw.includes('\\,') && raw.includes('\\\\'));
   assert.equal(escapeText('a\\b;c,d\ne'), 'a\\\\b\\;c\\,d\\ne');
@@ -264,14 +261,14 @@ test('produkční export nemá označení TEST (mimo produkci ano)', async () =>
   const prod = await createTestDatabase('production');
   try {
     await insertReservation(prod.db, {
-      id: 'prod-1', publicCode: 'CV-PPPPPP', icalUid: icalUidFor('prod-1'), arrival: '2030-03-01', departure: '2030-03-02', guests: 1,
+      id: 'prod-1', icalUid: icalUidFor('prod-1'), arrival: '2030-03-01', departure: '2030-03-02', guests: 1,
       firstName: 'Jan', lastName: 'Testovací', phone: '+420 000 000 000', email: 'test@example.invalid', priceCzk: 3000,
-      idempotencyKey: null, requestHash: null, vsPrefix: '30', createdAt: '2030-01-10T10:00:00.000Z',
+      idempotencyKey: null, requestHash: null, createdAt: '2030-01-10T10:00:00.000Z',
     });
     const response = await handleIcalExport(new Request(`https://x.invalid/api/reservations.ics?token=${TOKEN}`), { DB: prod.db, BOOKING_ENV: 'production', BOOKING_ICAL_EXPORT_ENABLED: 'true', BOOKING_ICAL_EXPORT_TOKEN: TOKEN }, { log: () => undefined });
     const raw = await response.text();
     assert.ok(!raw.includes('[TEST]'));
-    assert.match(raw, /SUMMARY:Web CV-PPPPPP – Jan Testovací/);
+    assert.match(raw, /SUMMARY:Web 10013001 – Jan Testovací/);
   } finally {
     await prod.dispose();
   }

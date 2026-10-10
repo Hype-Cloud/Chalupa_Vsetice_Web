@@ -4,7 +4,7 @@ import worker from '../worker/index.ts';
 import { resetAvailabilityMemory } from '../worker/availability.ts';
 import { formatSmoke, parseBaseUrl, runSmoke, type SmokeCheck } from '../scripts/lib/smoke.ts';
 import { createTestDatabase, failingDatabase } from './d1.ts';
-import { fixture } from './helpers.ts';
+import { fixture, FAKE_PAYMENT_IBAN } from './helpers.ts';
 
 // Smoke test veřejných endpointů proti skutečnému Workeru (worker/index.ts) s produkční
 // a preview konfigurací. Export e-chalup je falešný; jen smyšlené údaje.
@@ -40,6 +40,7 @@ const PREVIEW: Partial<WorkerEnv> = {
   BOOKING_API_ENABLED: 'true',
   TURNSTILE_SECRET_KEY: 'turnstile-secret',
   TURNSTILE_SITE_KEY: '1x00000000000000000000BB',
+  PAYMENT_IBAN: FAKE_PAYMENT_IBAN,
   BOOKING_RATE_LIMITER: { limit: async () => ({ success: true }) },
 };
 

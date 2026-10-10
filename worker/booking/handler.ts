@@ -11,11 +11,12 @@
 // Stabilní chybové kódy (`{ "error": "<kód>" }`) – viz README, sekce Chybové kódy.
 
 import { diffDays, todayInPrague } from '../../lib/availability/dates.ts';
-import { icalUidFor, newReservationCode } from '../../lib/booking/codes.ts';
+import { icalUidFor } from '../../lib/booking/codes.ts';
+import { paymentAccountFromIban, paymentInstructions, type PaymentAccount } from '../../lib/booking/payment.ts';
 import type { AvailabilityDeps } from '../availability.ts';
 import { json } from '../http.ts';
 import { secretEquals, sha256 } from '../secrets.ts';
-import { databaseEnvironment, DuplicateError, findByIdempotencyKey, insertReservation, NightsTakenError, type ReservationSummary } from './db.ts';
+import { databaseEnvironment, DuplicateError, findByIdempotencyKey, insertReservation, NightsTakenError, ReservationCodesExhaustedError, type ReservationSummary } from './db.ts';
 import { checkExternalAvailability } from './external.ts';
 import { PricingDataError, quoteStay, type Quote } from './pricing.ts';
 import { isTestTurnstileSecret, MAX_TOKEN_LENGTH, verifyTurnstile } from './turnstile.ts';
@@ -34,6 +35,12 @@ export interface BookingEnv {
   TURNSTILE_SECRET_KEY?: string;
   /** Workers Rate Limiting binding (wrangler.jsonc → ratelimits). */
   BOOKING_RATE_LIMITER?: RateLimiter;
+  /**
+   * Secret: český IBAN pro platbu rezervace (QR Platba i ruční údaje; tuzemské číslo účtu se
+   * z něj odvozuje). Chybějící nebo nevalidní hodnota = rezervace se nezaloží (fail closed).
+   * Hodnota se nikdy neloguje.
+   */
+  PAYMENT_IBAN?: string;
 }
 
 /** Podmnožina Workers Rate Limiting API. */
@@ -43,7 +50,6 @@ export interface RateLimiter {
 
 export interface BookingDeps extends Pick<AvailabilityDeps, 'fetch' | 'now' | 'log'> {
   randomUUID: () => string;
-  randomBytes?: (bytes: Uint8Array) => Uint8Array;
 }
 
 // 16 KB: poznámka (až 2000 znaků) může mít v UTF-8 až 8 000 bajtů.
@@ -51,7 +57,8 @@ const MAX_BODY_BYTES = 16 * 1024;
 /** Perioda rate limitu ve wrangler.jsonc (s) – pro hlavičku Retry-After. */
 const RATE_LIMIT_PERIOD_S = 60;
 const IDEMPOTENCY_KEY = /^[A-Za-z0-9_-]{16,100}$/;
-const CODE_ATTEMPTS = 3;
+/** Pokusy při kolizi náhodného interního ID (UUID). */
+const ID_ATTEMPTS = 3;
 
 const noStore = (status: number, body: unknown, headers?: HeadersInit) => json(body, { status, cacheControl: 'no-store', headers });
 const failure = (status: number, error: string, extra: Record<string, unknown> = {}) => noStore(status, { error, ...extra });
@@ -69,8 +76,25 @@ const tokenMatches = (header: string | null, token: string) => secretEquals(head
 const requestHash = async (b: ValidBooking) =>
   hex(await sha256(JSON.stringify([b.arrival, b.departure, b.guests, b.firstName, b.lastName, b.phone, b.email, ...(b.note === null ? [] : [b.note])])));
 
-const created = (reservation: ReservationSummary, status = 201, replayed = false) =>
-  noStore(status, { reservation: { ...reservation, nights: diffDays(reservation.arrival, reservation.departure) }, ...(replayed ? { replayed: true } : {}) });
+/**
+ * Úspěšná odpověď: veřejný souhrn rezervace a platební údaje (bez interního ID, kontaktů,
+ * poznámky a secrets). Frontend nic nepřepočítává – cena, splatnost i SPAYD jsou ze serveru.
+ */
+const created = (reservation: ReservationSummary, account: PaymentAccount, status = 201, replayed = false) =>
+  noStore(status, {
+    reservation: {
+      reservationCode: reservation.code,
+      arrival: reservation.arrival,
+      departure: reservation.departure,
+      nights: diffDays(reservation.arrival, reservation.departure),
+      guests: reservation.guests,
+      totalCzk: reservation.priceCzk,
+      status: reservation.status,
+      paymentDueAt: reservation.paymentDueAt,
+    },
+    payment: paymentInstructions(reservation, account),
+    ...(replayed ? { replayed: true } : {}),
+  });
 
 export async function handleCreateReservation(request: Request, env: BookingEnv, deps: BookingDeps): Promise<Response> {
   try {
@@ -92,6 +116,12 @@ async function createReservation(request: Request, env: BookingEnv, deps: Bookin
   const turnstileSecret = env.TURNSTILE_SECRET_KEY?.trim();
   if (!url || !env.DB || !env.BOOKING_ENV || !turnstileSecret || !env.BOOKING_RATE_LIMITER) {
     deps.log('reservations: not configured');
+    return failure(503, 'not-configured');
+  }
+  // Bez platných platebních údajů se rezervace nezakládá: host by nevěděl, kam a jak zaplatit.
+  const account = paymentAccountFromIban(env.PAYMENT_IBAN);
+  if (!account) {
+    deps.log('reservations: payment not configured');
     return failure(503, 'not-configured');
   }
   // Testovací Turnstile klíč by v produkci propustil každého – produkce se s ním nespustí.
@@ -151,7 +181,7 @@ async function createReservation(request: Request, env: BookingEnv, deps: Bookin
     // ještě před Turnstile, protože token je jednorázový.
     if (idempotencyKey) {
       const existing = await findByIdempotencyKey(db, idempotencyKey);
-      if (existing) return replay(existing, hash);
+      if (existing) return replay(existing, hash, account);
     }
 
     const human = await verifyTurnstile(turnstileSecret, turnstileToken, { remoteIp, idempotencyKey }, deps.fetch);
@@ -190,7 +220,6 @@ async function createReservation(request: Request, env: BookingEnv, deps: Bookin
       try {
         const reservation = await insertReservation(db, {
           id,
-          publicCode: newReservationCode(deps.randomBytes),
           icalUid: icalUidFor(id),
           arrival: booking.arrival,
           departure: booking.departure,
@@ -203,22 +232,26 @@ async function createReservation(request: Request, env: BookingEnv, deps: Bookin
           priceCzk: quote.totalCzk,
           idempotencyKey,
           requestHash: hash,
-          vsPrefix: today.slice(2, 4),
           createdAt: now.toISOString(),
         });
         deps.log('reservations: created');
-        return created(reservation);
+        return created(reservation, account);
       } catch (error) {
         if (error instanceof NightsTakenError) {
           deps.log('reservations: rejected (nights-taken)');
           return failure(409, 'dates-unavailable');
         }
+        if (error instanceof ReservationCodesExhaustedError) {
+          // 99 rezervací za pražský den: raději odmítnout než přetéct nebo zdvojit kód.
+          deps.log('reservations: rejected (reservation-codes-exhausted)');
+          return failure(503, 'reservation-codes-exhausted');
+        }
         if (error instanceof DuplicateError && error.column === 'idempotency_key' && idempotencyKey) {
           // Souběžný požadavek se stejným klíčem byl rychlejší.
           const existing = await findByIdempotencyKey(db, idempotencyKey);
-          if (existing) return replay(existing, hash);
+          if (existing) return replay(existing, hash, account);
         }
-        if (error instanceof DuplicateError && error.column !== 'idempotency_key' && attempt < CODE_ATTEMPTS) continue;
+        if (error instanceof DuplicateError && (error.column === 'id' || error.column === 'ical_uid') && attempt < ID_ATTEMPTS) continue;
         throw error;
       }
     }
@@ -229,8 +262,8 @@ async function createReservation(request: Request, env: BookingEnv, deps: Bookin
   }
 }
 
-function replay(existing: ReservationSummary & { requestHash: string | null }, hash: string): Response {
+function replay(existing: ReservationSummary & { requestHash: string | null }, hash: string, account: PaymentAccount): Response {
   if (existing.requestHash !== hash) return failure(422, 'idempotency-key-reused');
   const { requestHash: _, ...reservation } = existing;
-  return created(reservation, 200, true);
+  return created(reservation, account, 200, true);
 }

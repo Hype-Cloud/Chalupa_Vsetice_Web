@@ -25,6 +25,7 @@ const LOCAL = [
   '0005_ceny.sql',
   '0006_ceny_pobytu.sql',
   '0007_poznamka_hosta.sql',
+  '0008_kod_rezervace_platba.sql',
 ];
 const WRANGLER = readFileSync(join(ROOT, 'wrangler.jsonc'), 'utf8');
 const PREVIEW_MIGRATIONS = readFileSync(join(ROOT, 'wrangler.preview-migrations.jsonc'), 'utf8');
@@ -103,7 +104,7 @@ test('stav vzdálené D1: parsování výstupu wrangler d1 execute --json, jinak
 test('rozdíl migrací: čekající a neznámé', () => {
   assert.deepEqual(diffMigrations(LOCAL, LOCAL), { pending: [], unknown: [] });
   assert.deepEqual(diffMigrations(LOCAL, LOCAL.slice(0, 5)), { pending: LOCAL.slice(5), unknown: [] });
-  assert.deepEqual(diffMigrations(LOCAL.slice(0, 6), LOCAL), { pending: [], unknown: [LOCAL[6]] });
+  assert.deepEqual(diffMigrations(LOCAL.slice(0, -1), LOCAL), { pending: [], unknown: [LOCAL.at(-1)!] });
   // Mezera uprostřed (aplikovaná pozdější migrace bez dřívější) je také čekající.
   assert.deepEqual(diffMigrations(LOCAL.slice(0, 3), [LOCAL[0], LOCAL[2]]), { pending: [LOCAL[1]], unknown: [] });
 });
@@ -120,6 +121,8 @@ test('destruktivní migrace: skutečné migrace a syntetické případy', () => 
     '0005_ceny.sql': [],
     '0006_ceny_pobytu.sql': [],
     '0007_poznamka_hosta.sql': [],
+    // Nová tabulka a nullable sloupec – nedestruktivní.
+    '0008_kod_rezervace_platba.sql': [],
   });
   const cases: [string, string[]][] = [
     ['DROP TABLE daily_prices;', ['DROP']],
@@ -220,16 +223,16 @@ test('check: vše aplikováno → ok; jen jeden read-only dotaz na správnou DB 
     assert.deepEqual(args.slice(0, 7), ['d1', 'execute', TARGETS[name].database, '--remote', '--config', TARGETS[name].config, '--json']);
     const sql = args[args.indexOf('--command') + 1];
     assert.ok(sql.split(';').every((s) => /^\s*SELECT\b/i.test(s)), sql);
-    assert.ok(f.out.some((l) => l.includes('všech 7 migrací aplikováno')));
+    assert.ok(f.out.some((l) => l.includes(`všech ${LOCAL.length} migrací aplikováno`)));
   }
 });
 
 test('check: čekající migrace → selže, vypíše je a označí destruktivní', async () => {
-  const f = fake({ applied: LOCAL.slice(0, 6) });
+  const f = fake({ applied: LOCAL.slice(0, -1) });
   const result = await checkTarget(TARGETS.production, f.deps);
   assert.equal(result.ok, false);
-  assert.deepEqual(result.pending, ['0007_poznamka_hosta.sql']);
-  assert.ok(f.out.some((l) => l.trim() === '0007_poznamka_hosta.sql'), f.out.join('\n'));
+  assert.deepEqual(result.pending, [LOCAL.at(-1)]);
+  assert.ok(f.out.some((l) => l.trim() === LOCAL.at(-1)), f.out.join('\n'));
   assert.ok(f.out.some((l) => l.includes('pnpm run db:migrate:production')));
 
   const g = fake({ applied: [LOCAL[0]] });
@@ -266,7 +269,7 @@ test('check: migrace v D1, které kód nezná (rollback) → jen varování', as
 
 test('apply: mimo interaktivní terminál (CI, build) se nic nespustí', async () => {
   for (const target of ['production', 'preview'] as const) {
-    const f = fake({ target, applied: LOCAL.slice(0, 6), interactive: false });
+    const f = fake({ target, applied: LOCAL.slice(0, -1), interactive: false });
     assert.equal(await applyTarget(TARGETS[target], f.deps), 1);
     assert.deepEqual(f.calls, [], 'žádné volání wrangleru');
     assert.ok(f.out.some((l) => l.includes('nikdy v CI')));
@@ -284,7 +287,7 @@ test('apply: nic čekajícího → nic se neaplikuje; chybný stav D1 → nic se
 });
 
 test('apply preview: bez opisování názvu, aplikace na testovací DB a nová kontrola', async () => {
-  const f = fake({ target: 'preview', applied: LOCAL.slice(0, 6) });
+  const f = fake({ target: 'preview', applied: LOCAL.slice(0, -1) });
   assert.equal(await applyTarget(TARGETS.preview, f.deps), 0);
   assert.deepEqual(f.calls.map(commandOf), ['d1 execute', 'd1 migrations apply', 'd1 execute']);
   assert.deepEqual(f.calls[1], ['d1', 'migrations', 'apply', 'chalupa-vsetice-rezervace-test', '--remote', '--config', 'wrangler.preview-migrations.jsonc']);
@@ -293,14 +296,14 @@ test('apply preview: bez opisování názvu, aplikace na testovací DB a nová k
 
 test('apply produkce: bez opsaného názvu databáze se nic neprovede', async () => {
   for (const answer of ['', 'ano', 'y', 'chalupa-vsetice-rezervace-test', 'CHALUPA-VSETICE-REZERVACE']) {
-    const f = fake({ applied: LOCAL.slice(0, 6), answers: [answer] });
+    const f = fake({ applied: LOCAL.slice(0, -1), answers: [answer] });
     assert.equal(await applyTarget(TARGETS.production, f.deps), 1, answer);
     assert.deepEqual(f.calls.map(commandOf), ['d1 execute'], answer);
   }
 });
 
 test('apply produkce: nedestruktivní migrace po opsání názvu, bez zálohy', async () => {
-  const f = fake({ applied: LOCAL.slice(0, 6), answers: ['chalupa-vsetice-rezervace'] });
+  const f = fake({ applied: LOCAL.slice(0, -1), answers: ['chalupa-vsetice-rezervace'] });
   assert.equal(await applyTarget(TARGETS.production, f.deps), 0, f.out.join('\n'));
   assert.deepEqual(f.calls.map(commandOf), ['d1 execute', 'd1 migrations apply', 'd1 execute']);
   assert.deepEqual(f.calls[1], ['d1', 'migrations', 'apply', 'chalupa-vsetice-rezervace', '--remote', '--config', 'wrangler.jsonc']);
@@ -334,7 +337,7 @@ test('apply produkce: destruktivní migrace bez platné zálohy nebo potvrzení 
 });
 
 test('apply: selhání wrangler d1 migrations apply → exit 1', async () => {
-  const f = fake({ target: 'preview', applied: LOCAL.slice(0, 6), applyCode: 1 });
+  const f = fake({ target: 'preview', applied: LOCAL.slice(0, -1), applyCode: 1 });
   assert.equal(await applyTarget(TARGETS.preview, f.deps), 1);
   assert.ok(f.out.some((l) => l.includes('skončil kódem 1')));
 });

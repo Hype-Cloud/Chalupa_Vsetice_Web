@@ -171,7 +171,8 @@ Backend pro budoucí přímé rezervace prostřednictvím webu Chalupa Všetice.
 
 ### Implementované funkce
 
-- Databázové tabulky pro rezervace, obsazené noci, variabilní symboly a konfiguraci prostředí.
+- Databázové tabulky pro rezervace, obsazené noci, denní čítač veřejného kódu rezervace (= variabilní symbol) a konfiguraci prostředí.
+- Platební údaje rezervace: stav `pending_payment`, splatnost 24 h, QR Platba (SPAYD) a ruční údaje v potvrzení.
 - Atomické vytvoření rezervace prostřednictvím D1 batch transakce.
 - Databázová ochrana proti dvojité rezervaci pomocí unikátního záznamu každé obsazené noci.
 - Serverová validace termínů, kapacity a kontaktních údajů.
@@ -199,8 +200,8 @@ Projekt využívá Node.js Test Runner. Databázové testy probíhají nad loká
 | availability.test.ts | 21 | Načítání obsazenosti, cache, výpadky externí služby a neúplná data. |
 | occupancy.test.ts | 18 | Slučování obsazených intervalů, kontrola termínů a chování kalendáře (včetně zrušení výběru opakovaným klikem na příjezd), minimální délka pobytu (kalendář i datumová pole). |
 | booking.test.ts | 9 | Validace rezervací, ceny, kontakty, vlastní iCal UID a propojení D1 s kalendářem. |
-| reservations-api.test.ts | 18 | Rezervační API, autorizace, idempotence, souběh požadavků a chybové stavy, minimální délka pobytu. |
-| reservations-db.test.ts | 19 | Databázová omezení, atomické transakce, rollback a ochrana proti kolizím. |
+| reservations-api.test.ts | 20 | Rezervační API, autorizace, idempotence, souběh požadavků a chybové stavy, minimální délka pobytu; kontrakt odpovědi s kódem `DDMMYYNN`, splatností a platebními údaji, fail closed bez platné platební konfigurace, vyčerpání kódů dne. |
+| reservations-db.test.ts | 21 | Databázová omezení, atomické transakce, rollback a ochrana proti kolizím; denní čítač kódu `DDMMYYNN` (souběh, pražská půlnoc, nový den, limit 99), splatnost +24 h. |
 | ical-export.test.ts | 19 | Výstupní iCal: formát RFC 5545, escaping, stabilita UID, zrušení (STATUS:CANCELLED), autorizace, chyby D1 a prostředí, únik osobních údajů. |
 | conflicts.test.ts | 18 | Detekce kolizí během zpoždění synchronizace: překryvy a hranice, ozvěny, idempotence, souběh, úplný/neúplný snapshot, výpadek e-chalup, upozornění. |
 | conflict-cron.test.ts | 12 | Cron detekce a e-mailové upozornění: odeslání a notified_at, žádný druhý e-mail, retry po chybě providera, nesoulad prostředí, výpadek a neúplný export, souběh s /api/availability, bez osobních údajů. |
@@ -212,18 +213,23 @@ Projekt využívá Node.js Test Runner. Databázové testy probíhají nad loká
 | frontend-quote.test.ts | 14 | Frontend rezervační sekce: cena jen z `/api/quote` (kontrakt proti skutečnému handleru), nightly se slevou, exact-stay, 422 a chyby serveru/sítě jako české hlášky, načítání bez staré ceny, souběh (starší odpověď nepřepíše novější), nový požadavek při změně termínu a hostů, žádný klientský výpočet ceny. |
 | i18n.test.ts | 17 | Jazykové verze: úplnost katalogů cs/en/de/ua (klíče, parametry, plurály, žádný český text ani HTML), fallback, volba jazyka (?lang, localStorage, čeština) a persistence, množná čísla, data a CZK v každém jazyce, kalendář, rezervační panel po přepnutí, přepínač, žádné pevné texty v komponentách ani pevná cena noci (3 000 / 2 990 Kč); orientační cena jen z `PRICE_PER_NIGHT`. |
 | date-input.test.ts | 8 | Vstup data DD.MM.RRRR ↔ ISO: přestupný rok, neexistující den a měsíc, rozepsané datum bez chyby, odmítnutí amerického a ISO tvaru, všechna zobrazená data den → měsíc → rok (angličtina bez měsíc/den). |
-| reservation-form.test.ts | 19 | Rezervační formulář: request podle kontraktu, blokace odeslání (termín, cena, kontakty; Turnstile tlačítko neblokuje), kliknutí → Invisible Turnstile → POST, selhání Turnstile bez POST, Idempotency-Key a token svázané s operací (retry = stejný klíč i token bez nové challenge, nová operace = nový token i klíč, i po price-mismatch), chybové kódy → hlášky ve všech jazycích, POST proti skutečnému handleru, `GET /api/booking-config`, Preview Invisible site key jen ve `previews`. |
+| reservation-form.test.ts | 20 | Rezervační formulář: request podle kontraktu, blokace odeslání (termín, cena, kontakty; Turnstile tlačítko neblokuje), kliknutí → Invisible Turnstile → POST, selhání Turnstile bez POST, Idempotency-Key a token svázané s operací (retry = stejný klíč i token bez nové challenge, nová operace = nový token i klíč, i po price-mismatch), chybové kódy → hlášky ve všech jazycích, POST proti skutečnému handleru, `GET /api/booking-config`, Preview Invisible site key jen ve `previews`; potvrzení jen z dat serverové odpovědi (neúplná nebo nekonzistentní odpověď se nepřijme). |
 | invisible-turnstile.test.ts | 8 | Invisible Turnstile na klientu: widget připravený předem bez spuštění challenge, po kliknutí jen `execute`, nejvýš jeden token na widget a čerstvý widget na pozadí, bez automatického obnovování, ignorování pozdních callbacků, chyba / timeout / prázdný token → `turnstile-failed`, nenačtený skript → `turnstile-unavailable` s opakováním přípravy, odpojení formuláře. |
 | stay-feedback.test.ts | 5 | Vizuální odezva na pobyt kratší než `MIN_NIGHTS`: validace a stav pobytu beze změny, nový trigger s kliknutým dnem při každém pokusu, validní klik ani jiné chyby flash nespustí, flash dne bez trvalého stavu a bez pohybu, pulse hlášky jen přes `transform`, `prefers-reduced-motion` bez animace. |
-| **Celkem** | **320** | |
+| payment.test.ts | 8 | Platby: pražské datum → `DDMMYY`, `NN` 01–99, splatnost +24 h v UTC, IBAN (kontrolní součet, odvození čísla účtu), SPAYD (serverová cena, VS = kód, zpráva `Rezervace {kód}`), lokální QR, kontrola, že repozitář neobsahuje skutečný IBAN. |
+| **Celkem** | **333** | |
 
 ### Testované scénáře
 
-- Úspěšné vytvoření rezervace a přidělení variabilního symbolu.
+- Úspěšné vytvoření rezervace a přidělení kódu `DDMMYYNN` (= variabilní symbol) z denního čítače.
+- Pražský den kolem půlnoci (UTC vs. `Europe/Prague`, zimní i letní čas), nový den od `01`.
+- Limit 99 rezervací za den: 100. se nezaloží (fail closed), čítač nepřeteče.
+- Splatnost `created_at + 24 h`, SPAYD se serverovou cenou, VS = kód, zpráva `Rezervace {kód}`.
+- Chybějící nebo neplatný `PAYMENT_IBAN` → 503, nic se nezapíše ani nezaloguje.
 - Souběžné vytváření 20 rezervací stejného termínu – uspěje pouze jedna.
 - Odmítnutí úplných i částečných překryvů rezervací.
 - Povolení navazujících pobytů se společným dnem příjezdu a odjezdu.
-- Atomické vrácení neúspěšné transakce včetně čítače variabilních symbolů.
+- Atomické vrácení neúspěšné transakce včetně denního čítače kódu rezervace.
 - Kontrola unikátnosti veřejných kódů, UID a idempotency klíčů.
 - Opakované a souběžné odeslání identického požadavku.
 - Odmítnutí neplatných osobních údajů, termínů a kapacity.
@@ -256,7 +262,8 @@ Vedle automatických testů proběhly integrační testy na skutečné infrastru
 - Export e-chalup je načten bez chybných nebo vynechaných událostí.
 - POST /api/reservations bez přístupového tokenu je odmítnut (HTTP 401).
 - Autorizovaný POST se syntetickými údaji úspěšně vytvořil rezervaci (HTTP 201).
-- Rezervace dostala veřejný kód, variabilní symbol, správnou cenu a stav pending_payment.
+- Rezervace dostala veřejný kód `DDMMYYNN` (= variabilní symbol), správnou cenu, splatnost
+  +24 h a stav pending_payment; success panel ukazuje QR Platbu a ruční platební údaje.
 
 ### 3. Okamžitá synchronizace kalendáře
 
@@ -270,13 +277,13 @@ Vedle automatických testů proběhly integrační testy na skutečné infrastru
 - Druhý požadavek na již rezervovaný termín byl odmítnut (HTTP 409).
 - Následná kontrola D1 potvrdila jedinou vytvořenou rezervaci.
 - Počet obsazených nocí odpovídal původní rezervaci.
-- Neúspěšný požadavek nespotřeboval další variabilní symbol.
+- Neúspěšný požadavek nespotřeboval další pořadí kódu rezervace.
 
 ### 5. Idempotence
 
 - Opakované odeslání původního požadavku se stejným Idempotency-Key vrátilo původní rezervaci.
 - API správně nastavilo replayed: true.
-- Veřejný kód a variabilní symbol zůstaly nezměněné.
+- Veřejný kód (= variabilní symbol) zůstal nezměněný.
 - Nevznikla žádná duplicitní rezervace.
 
 ## Integrační testy e-chalup
@@ -309,8 +316,10 @@ Aktualizace poznámky již importované rezervace nebyla spolehlivě potvrzena. 
 Dosud nejsou implementovány:
 
 - Zapnutí rezervačního formuláře v produkci (produkční Turnstile widget a secret, `BOOKING_API_ENABLED`).
-- Generování platebních QR kódů.
-- Automatické odesílání e-mailových oznámení.
+- Potvrzovací e-mail hostovi (ve 4 jazycích; v Preview jen na testovací schránku) – použije
+  stejná platební data (`paymentInstructions`).
+- Expirace nezaplacených rezervací po splatnosti a uvolnění termínu, párování plateb, označení `paid`.
+- Administrace rezervací a branding e-mailu.
 
 Před veřejným spuštěním rezervačního systému proběhne také závěrečná kontrola oprávnění, přístupových údajů, starých testovacích deploymentů a nastavení diagnostických záznamů.
 
@@ -322,16 +331,17 @@ a aktivní v produkci. D1 je jen
 technické úložiště, provozní administrací zůstávají e-chalupy.
 
 ```
-POST /api/reservations → validace → čerstvý export e-chalup → D1 batch (rezervace + VS + noci)
+POST /api/reservations → validace → čerstvý export e-chalup → D1 batch (kód/VS + rezervace + noci)
 ```
 
 ### Datový model (`migrations/0001_rezervace.sql`)
 
 - **`reservations`:**
-  - interní UUID, veřejný kód (`CV-7K3M9Q`),
+  - interní UUID (host ho nikdy nevidí), veřejný kód `DDMMYYNN` (UNIQUE; starší rezervace `CV-7K3M9Q`),
   - příjezd, odjezd, počet hostů (CHECK 1–7),
   - jméno, příjmení, telefon, e-mail,
-  - cena v Kč, variabilní symbol (UNIQUE),
+  - cena v Kč, variabilní symbol (UNIQUE; u nových rezervací shodný s veřejným kódem),
+  - splatnost platby `payment_due_at` (`migrations/0008_kod_rezervace_platba.sql`, UTC, NULL u starších),
   - stav a stabilní iCal UID (`rezervace-<uuid>@chalupavsetice.cz`, UNIQUE, spolu s `ical_sequence`),
   - volitelný `idempotency_key` pro opakované odeslání,
   - volitelná poznámka hosta `note` (`migrations/0007_poznamka_hosta.sql`, NULL nebo 1–2000 znaků).
@@ -339,8 +349,40 @@ POST /api/reservations → validace → čerstvý export e-chalup → D1 batch (
   Nezaplacené rezervace se automaticky neruší.
 - **`reserved_nights`:** jedna řádka na noc, `night` je PRIMARY KEY. Databáze tak sama
   zabrání tomu, aby dvě rezervace obsadily stejnou noc, i při souběžných požadavcích.
-- **`sequences`:** čítač variabilního symbolu. VS = dvojčíslí roku + 6 číslic, např. `26000001`.
+- **`reservation_code_counters`:** denní čítač pořadí `NN` veřejného kódu (klíč = pražský den,
+  CHECK 1–99), viz Kód rezervace a platba.
+- **`sequences`:** čítač variabilního symbolu starších rezervací (dvojčíslí roku + 6 číslic,
+  např. `26000001`). Nový kód ho nepoužívá; zůstává kvůli zpětné kompatibilitě.
 - **`meta`:** označení databáze (`environment` = `production` / `preview`), viz Bezpečnost.
+
+### Kód rezervace a platba (`lib/booking/payment.ts`)
+
+- **Veřejný kód `DDMMYYNN`** (např. `10102602`) je jediný veřejný identifikátor rezervace
+  a zároveň variabilní symbol. `DDMMYY` = den vytvoření v `Europe/Prague` (z `created_at`
+  v UTC; `2026-10-09T22:30:00Z` → `101026…`), `NN` = pořadí rezervace v tomto pražském dni
+  `01–99`. Kód se nikdy nemění. Uložený je v `public_code` a stejná hodnota v `variable_symbol`
+  (sloupec zůstává NOT NULL kvůli zpětné kompatibilitě, druhý identifikátor nevzniká).
+- **Atomické přidělení:** jeden D1 batch – UPSERT `reservation_code_counters`
+  (`ON CONFLICT (day) DO UPDATE SET last = last + 1`), INSERT rezervace s kódem z čítače
+  a obsazení nocí. Nikdy `COUNT(*) + 1`. D1 provádí batche postupně, takže souběžné rezervace
+  nedostanou stejné `NN`; pojistkou je UNIQUE na `public_code` i `variable_symbol`. Neúspěšný
+  batch se vrátí celý včetně čítače (mezery v řadě by ale nevadily).
+- **Limit 99 za den – fail closed:** 100. rezervace pražského dne poruší CHECK
+  `reservation_code_limit`, batch se vrátí a API odpoví 503 `reservation-codes-exhausted`.
+  Žádné přetečení na `00`, žádná duplicita. Další pražský den začíná od `01`.
+- **Stav a splatnost:** nová rezervace má `status = 'pending_payment'` a
+  `payment_due_at = created_at + 24 h` (UTC). Podle splatnosti se zatím nic neruší ani neuvolňuje.
+- **Částka:** 100 % serverem spočítané ceny rezervace (`price_czk` = `totalCzk` z `quoteStay`).
+- **Bankovní účet:** jen ze secretu `PAYMENT_IBAN` (český IBAN, ověřený kontrolní součet).
+  Tuzemské číslo účtu pro ruční platbu (`[předčíslí-]číslo/kód banky`) se z IBAN odvozuje, takže
+  QR a ruční údaje se nemohou rozejít. Žádné bankovní údaje v repozitáři, testech (jen fiktivní
+  účet banky `9999`) ani v logách. Chybí-li secret nebo je neplatný, `POST /api/reservations`
+  odpoví 503 `not-configured` ještě před ověřením Turnstile a nic nezapíše.
+- **SPAYD (QR Platba):** `buildSpayd` – deterministický řetězec
+  `SPD*1.0*ACC:<IBAN>*AM:<částka>.00*CC:CZK*MSG:Rezervace <kód>*X-VS:<kód>`. QR se vykresluje
+  lokálně v prohlížeči (knihovna `uqr`, bez externí služby; bankovní údaje stránku neopouštějí).
+- **Sdílená data:** `paymentInstructions()` je jediný zdroj platebních údajů (částka, účet, IBAN,
+  VS, zpráva, splatnost, SPAYD) – používá ho odpověď API a má ho použít i budoucí potvrzovací e-mail.
 
 ### Transakce v D1
 
@@ -394,8 +436,21 @@ VS se nespotřebuje. Kolize se neověřuje dotazem před zápisem, ten by nebyl 
    - vynechané události 503 `availability-incomplete`,
    - kolize 409 `dates-unavailable`.
 6. Atomický zápis do D1. Kolize nocí vrátí 409, jiná chyba databáze 503 `database-error`.
-7. Odpověď 201 obsahuje kód, termín, počet hostů, cenu, VS a stav, ale žádné kontaktní
-   údaje ani poznámku. Stejný `Idempotency-Key` se stejným obsahem vrátí původní rezervaci (200,
+7. Odpověď 201 obsahuje veřejný souhrn rezervace a platební údaje, ale žádné interní ID,
+   kontaktní údaje, poznámku ani secrets:
+
+   ```json
+   {
+     "reservation": { "reservationCode": "10013001", "arrival": "2030-02-01", "departure": "2030-02-04",
+       "nights": 3, "guests": 2, "totalCzk": 8970, "status": "pending_payment",
+       "paymentDueAt": "2030-01-11T10:00:00.000Z" },
+     "payment": { "amountCzk": 8970, "currency": "CZK", "accountNumber": "1234567890/9999",
+       "iban": "CZ1999990000001234567890", "variableSymbol": "10013001", "message": "Rezervace 10013001",
+       "dueAt": "2030-01-11T10:00:00.000Z", "spayd": "SPD*1.0*ACC:CZ1999990000001234567890*AM:8970.00*CC:CZK*MSG:Rezervace 10013001*X-VS:10013001" }
+   }
+   ```
+
+   (Účet v příkladu je fiktivní.) Stejný `Idempotency-Key` se stejným obsahem vrátí původní rezervaci (200,
    `replayed: true`) – ještě před ověřením Turnstile, protože token je jednorázový. Siteverify
    dostává `idempotency_key` odvozený z `Idempotency-Key`, takže souběžný dvojklik se stejným
    klíčem a tokenem skončí jednou rezervací. Bez klíče druhý požadavek odmítne Turnstile
@@ -442,7 +497,8 @@ Volitelné pole `note?: string | null` v těle `POST /api/reservations`. Prostý
 | 503 | `availability-check-failed`, `availability-incomplete` | dostupnost teď nejde bezpečně ověřit – zkusit později |
 | 503 | `pricing-unavailable` | ceník v D1 je neplatný – cenu teď nejde spočítat |
 | 503 | `turnstile-unavailable` | ověření Turnstile je dočasně nedostupné – zkusit později |
-| 503 | `not-configured`, `service-unavailable`, `database-environment-mismatch`, `database-error` | interní chyba / výpadek |
+| 503 | `not-configured`, `service-unavailable`, `database-environment-mismatch`, `database-error` | interní chyba / výpadek (`not-configured` i při chybějícím/neplatném `PAYMENT_IBAN`) |
+| 503 | `reservation-codes-exhausted` | vyčerpáno 99 kódů rezervace pro dnešní pražský den – nic se nezapsalo |
 | 500 | `internal-error` | neočekávaná interní chyba |
 | 404 / 405 | `not-found` / `method-not-allowed` | endpoint vypnutý / jiná metoda |
 
@@ -496,9 +552,14 @@ web dál nabízí poptávku přes e-chalupy.
   znovu načte z `/api/quote` (summary ukáže novou cenu i rozpis) a panel zobrazí „Cena se mezitím
   změnila z X na Y. Zkontrolujte ji a rezervaci znovu potvrďte.“ Další odeslání = vědomé
   potvrzení s novým klíčem.
-- **Úspěch:** potvrzení v panelu (bez eyebrow) – centrovaný titulek, termín, hosté, noci a cena,
-  patička „Potvrzení rezervace vám dorazí e-mailem.“ a „Těšíme se na váš pobyt.“ Kód rezervace
-  zůstává v odpovědi API, v UI se nezobrazuje; variabilní symbol ani platební údaje také ne.
+- **Úspěch:** potvrzení v panelu (bez eyebrow) – titulek „Rezervace přijata“, informace, že
+  rezervace čeká na platbu a do kdy ji uhradit, termín, noci, hosté, celková cena a kód rezervace
+  (s poznámkou, že jde zároveň o variabilní symbol). Pod tím blok Platba: QR Platba a vždy i ruční
+  údaje (částka, číslo účtu, IBAN, VS, splatnost). Vše je ze serverové odpovědi
+  (`parseConfirmation` odmítne neúplnou nebo nekonzistentní odpověď); nic se nedopočítává.
+  Splatnost: den → měsíc → rok a čas v `Europe/Prague` (`formatDeadline`). Nepodaří-li se QR
+  vykreslit, zobrazí se jen hláška a ruční údaje – rezervace platí dál. O e-mailu se zatím nic
+  netvrdí (odesílání potvrzení není implementované).
   Kontaktní část pod blokem zmizí a stránka se po vykreslení posune zpět k bloku (celý grid,
   pokud se vejde do okna, jinak potvrzení); reveal animace respektuje `prefers-reduced-motion`.
 
@@ -656,7 +717,9 @@ Cenu konkrétního termínu ověří `POST /api/quote`. Výchozí cena za noc je
 Až e-chalupy naimportují rezervaci z webu, objeví se v jejich exportu. Při kontrole
 existující rezervace (`findExternalConflict(…, exclude)`) se taková událost nepovažuje
 za kolizi se sebou samotnou, pokud nese stejné iCal UID nebo veřejný kód rezervace v
-`SUMMARY`/`DESCRIPTION`.
+`SUMMARY`/`DESCRIPTION` (`RESERVATION_CODE`: starší `CV-XXXXXX` kdekoli, kód `DDMMYYNN` jen
+v kontextu našeho exportu – `Web 10102602`, `Kód rezervace: 10102602`, `z webu 10102602`, aby
+se za kód nepovažovalo libovolné osmimístné číslo).
 
 Pro novou rezervaci je každá událost exportu obsazený termín, tedy i ozvěna jiné vlastní
 rezervace. Shoda samotného termínu nestačí, jinak by se skryla cizí rezervace se stejnými
@@ -689,7 +752,7 @@ situaci nejde zabránit, jen ji rychle odhalit (`worker/booking/conflicts.ts`):
   jen přidává. Zrušená vlastní rezervace kolizi uzavře. Vyřešené kolize zůstávají v historii.
 - **Nic se automaticky neruší** – kolizi řeší majitel ručně v e-chalupách.
 - **Upozornění e-mailem** (`worker/booking/alerts.ts`, jen Cron): na každou trvající kolizi s
-  `notified_at IS NULL` přijde správci interní e-mail `POZOR: kolize rezervace CV-XXXXXX` s kódem
+  `notified_at IS NULL` přijde správci interní e-mail `POZOR: kolize rezervace DDMMYYNN` s kódem
   rezervace, kolidujícím termínem a časem zjištění – bez jména, kontaktů hosta, cizího UID
   a adresy exportu. Mimo produkci s prefixem `[TEST]`.
   - `notified_at` se nastaví až po úspěšné odpovědi providera. Při chybě zůstane NULL a další Cron
@@ -742,7 +805,7 @@ D1 (reservations) → GET /api/reservations.ics?token=… → import v e-chalup�
   - `DTSTART;VALUE=DATE` = příjezd, exkluzivní `DTEND;VALUE=DATE` = den odjezdu, bez časového pásma,
   - `DTSTAMP` a `LAST-MODIFIED` = poslední změna rezervace, takže nezměněná rezervace dává
     stále stejný text; dále `SEQUENCE`,
-  - `SUMMARY` `Web CV-XXXXXX – Jméno Příjmení`,
+  - `SUMMARY` `Web DDMMYYNN – Jméno Příjmení` (starší rezervace `Web CV-XXXXXX – …`),
   - `DESCRIPTION` s kódem rezervace, hostem, telefonem, e-mailem, počtem hostů, cenou, VS
     a stavem platby; vyplněná poznámka hosta je na konci jako blok `Poznámka hosta:` a text. Tyto údaje se do e-chalup přenesou v poznámce rezervace (ověřeno
     testem importu).
@@ -1097,6 +1160,7 @@ v Preview base config (hodnotu zadává wrangler interaktivně, nikdy ji nevypis
 npx wrangler preview base-config secret put ECHALUPY_ICAL_URL
 npx wrangler preview base-config secret put BOOKING_ICAL_EXPORT_TOKEN   # jiný token než v produkci
 npx wrangler preview base-config secret put TURNSTILE_SECRET_KEY        # testovací klíč Cloudflare
+npx wrangler preview base-config secret put PAYMENT_IBAN                # český IBAN pro platby rezervací
 npx wrangler preview base-config secret list                            # jen názvy
 ```
 
@@ -1105,6 +1169,10 @@ npx wrangler preview base-config secret list                            # jen n�
   bez tokenu je „nenakonfigurovaný“ a `/api/reservations.ics` vrací 503. Smoke test očekává
   nakonfigurovaný export, který bez předloženého tokenu vrací 404.
 - `TURNSTILE_SECRET_KEY` – bez něj zapnutý rezervační POST v Preview vrací 503 `not-configured`.
+- `PAYMENT_IBAN` – bez něj (nebo s neplatnou hodnotou) zapnutý rezervační POST v Preview vrací
+  503 `not-configured` a rezervaci nezaloží (smoke test selže). Hodnota se nikdy nevypisuje
+  ani necommituje; ověřuje se jen názvem (`secret list`) a chováním endpointu. Produkční
+  `npx wrangler secret put PAYMENT_IBAN` bude potřeba až při zapnutí produkčního POST.
 - Volitelně `BOOKING_API_TOKEN`, `RESEND_API_KEY`, `CONFLICT_ALERT_EMAIL`.
 
 `npx wrangler preview secret put <KEY>` (bez `base-config`) nastaví secret jen **jednomu**

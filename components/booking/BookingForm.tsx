@@ -4,6 +4,7 @@ import { useI18n } from '../i18n.ts';
 import { FIELD_ERROR_KEYS, reservationErrorKey, type ContactDraft, type ReservationConfirmation, type SubmissionState, type SubmitBlock } from './reservation.ts';
 import type { TokenSource } from './invisibleTurnstile.ts';
 import { NOTE_MAX_LENGTH, NOTE_MAX_ROWS } from './config.ts';
+import { PaymentDetails } from './PaymentDetails.tsx';
 import { Turnstile } from './Turnstile.tsx';
 
 interface Props {
@@ -122,7 +123,7 @@ export function BookingForm({ contact, onContact, submission, block, priceChange
  * (interní identifikátor), host ho ale v UI nepotřebuje.
  */
 export function BookingSuccess({ reservation }: { reservation: ReservationConfirmation }) {
-  const { t, plural, formatDate, formatPrice } = useI18n();
+  const { t, plural, formatDate, formatPrice, formatDeadline } = useI18n();
   const root = useRef<HTMLDivElement>(null);
   const heading = useRef<HTMLParagraphElement>(null);
   useEffect(() => {
@@ -133,23 +134,28 @@ export function BookingSuccess({ reservation }: { reservation: ReservationConfir
     const frame = requestAnimationFrame(() => {
       const panel = root.current?.closest('aside');
       const grid = root.current?.closest('.booking-grid');
-      // Celý blok, pokud se vejde do okna (desktop); jinak samotné potvrzení (mobil).
+      // Celý blok, pokud se vejde do okna (desktop); jinak samotné potvrzení (mobil). Potvrzení
+      // vyšší než okno (s platebními údaji na mobilu) se zarovná nahoru, aby byl vidět titulek.
       const target = grid && grid.getBoundingClientRect().height <= window.innerHeight ? grid : panel;
+      const fits = !target || target.getBoundingClientRect().height <= window.innerHeight;
       const reduce = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
-      target?.scrollIntoView({ behavior: reduce ? 'instant' : 'smooth', block: 'center' });
+      target?.scrollIntoView({ behavior: reduce ? 'instant' : 'smooth', block: fits ? 'center' : 'start' });
     });
     return () => cancelAnimationFrame(frame);
   }, []);
   return (
     <div className="booking-success" role="status" ref={root}>
       <p className="price booking-success-title" tabIndex={-1} ref={heading}>{t('reservation.success.title')}</p>
+      <p className="booking-success-status">{t('reservation.success.pending', { due: formatDeadline(reservation.paymentDueAt) })}</p>
       <dl className="estimate">
         <div><dt>{t('reservation.success.stay')}</dt><dd>{formatDate(reservation.arrival)} – {formatDate(reservation.departure)}</dd></div>
-        <div><dt>{t('reservation.success.guests')}</dt><dd>{plural('booking.guests', reservation.guests)}</dd></div>
         <div><dt>{t('reservation.success.nights')}</dt><dd>{plural('booking.nights', reservation.nights)}</dd></div>
-        <div><dt>{t('reservation.success.price')}</dt><dd>{formatPrice(reservation.priceCzk)}</dd></div>
+        <div><dt>{t('reservation.success.guests')}</dt><dd>{plural('booking.guests', reservation.guests)}</dd></div>
+        <div><dt>{t('reservation.success.price')}</dt><dd>{formatPrice(reservation.totalCzk)}</dd></div>
+        <div><dt>{t('reservation.success.code')}</dt><dd className="booking-success-code">{reservation.reservationCode}</dd></div>
       </dl>
-      <p className="booking-success-note">{t('reservation.success.emailNote')}</p>
+      <p className="booking-success-note">{t('reservation.payment.variableSymbolNote')}</p>
+      <PaymentDetails payment={reservation.payment} />
       <p className="booking-success-thanks">{t('reservation.success.thanks')}</p>
     </div>
   );

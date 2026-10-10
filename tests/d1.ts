@@ -29,15 +29,21 @@ export async function createTestDatabase(environment = 'test') {
   await db.prepare(`INSERT INTO meta (key, value) VALUES ('environment', ?1)`).bind(environment).run();
   return {
     db,
-    /** Smaže všechny rezervace a vynuluje čítač VS. */
+    /** Smaže všechny rezervace a vynuluje čítače (starší VS i denní čítač kódu rezervace). */
     async reset() {
-      await db.batch([db.prepare('DELETE FROM reserved_nights'), db.prepare('DELETE FROM reservations'), db.prepare(`UPDATE sequences SET value = 0 WHERE name = 'variable_symbol'`)]);
+      await db.batch([
+        db.prepare('DELETE FROM reserved_nights'),
+        db.prepare('DELETE FROM reservations'),
+        db.prepare(`UPDATE sequences SET value = 0 WHERE name = 'variable_symbol'`),
+        db.prepare('DELETE FROM reservation_code_counters'),
+      ]);
     },
     async count(table: 'reservations' | 'reserved_nights') {
       return (await db.prepare(`SELECT count(*) AS n FROM ${table}`).first<{ n: number }>())!.n;
     },
-    async sequence() {
-      return (await db.prepare(`SELECT value FROM sequences WHERE name = 'variable_symbol'`).first<{ value: number }>())!.value;
+    /** Poslední přidělené NN kódu rezervace v daném pražském dni (0 = žádné). */
+    async codeCounter(day: string) {
+      return (await db.prepare('SELECT last FROM reservation_code_counters WHERE day = ?1').bind(day).first<{ last: number }>())?.last ?? 0;
     },
     dispose: () => mf.dispose(),
   };

@@ -14,8 +14,8 @@
 // - Nikdy se nic neodesílá automaticky – každé odeslání je kliknutí uživatele.
 
 import type { IsoDate } from '../../lib/availability/dates.ts';
+import type { PaymentInstructions } from '../../lib/booking/payment.ts';
 import type { MessageKey } from '../../lib/i18n/index.ts';
-import type { ReservationSummary } from '../../worker/booking/db.ts';
 import type { BookingRequest } from '../../worker/booking/validation.ts';
 
 export interface ContactDraft {
@@ -56,8 +56,22 @@ export function reservationPayload(input: { arrival: IsoDate; departure: IsoDate
 export const payloadFingerprint = (p: ReservationPayload) =>
   JSON.stringify([p.arrival, p.departure, p.guests, p.firstName, p.lastName, p.email, p.phone, p.note, p.expectedPriceCzk]);
 
-/** Rezervace z odpovědi serveru (veřejný souhrn bez kontaktů). */
-export type ReservationConfirmation = Pick<ReservationSummary, 'code' | 'arrival' | 'departure' | 'guests' | 'priceCzk'> & { nights: number };
+/**
+ * Rezervace z odpovědi serveru (veřejný souhrn bez kontaktů) včetně platebních údajů. Vše se
+ * jen zobrazuje – cenu, splatnost ani SPAYD frontend nepočítá.
+ */
+export interface ReservationConfirmation {
+  /** Veřejný kód DDMMYYNN, zároveň variabilní symbol. */
+  reservationCode: string;
+  arrival: IsoDate;
+  departure: IsoDate;
+  nights: number;
+  guests: number;
+  totalCzk: number;
+  /** Splatnost (ISO 8601, UTC). */
+  paymentDueAt: string;
+  payment: PaymentInstructions;
+}
 
 export type SubmitResult =
   | { kind: 'success'; reservation: ReservationConfirmation; replayed: boolean }
@@ -120,11 +134,39 @@ export const FIELD_ERROR_KEYS: Record<string, MessageKey> = {
 
 const isInt = (v: unknown) => typeof v === 'number' && Number.isInteger(v);
 
-function parseConfirmation(value: unknown): ReservationConfirmation | null {
-  const r = (value as { reservation?: Record<string, unknown> } | null)?.reservation;
-  if (!r || typeof r.code !== 'string' || typeof r.arrival !== 'string' || typeof r.departure !== 'string') return null;
-  if (!isInt(r.guests) || !isInt(r.priceCzk) || !isInt(r.nights)) return null;
-  return { code: r.code, arrival: r.arrival, departure: r.departure, guests: r.guests as number, priceCzk: r.priceCzk as number, nights: r.nights as number };
+const isText = (v: unknown): v is string => typeof v === 'string' && v.length > 0;
+
+/** Úspěšná odpověď POST /api/reservations → potvrzení; neúplná nebo nekonzistentní = null. */
+export function parseConfirmation(value: unknown): ReservationConfirmation | null {
+  const body = value as { reservation?: Record<string, unknown>; payment?: Record<string, unknown> } | null;
+  const r = body?.reservation;
+  const p = body?.payment;
+  if (!r || !p) return null;
+  if (!isText(r.reservationCode) || !isText(r.arrival) || !isText(r.departure) || !isText(r.paymentDueAt)) return null;
+  if (!isInt(r.guests) || !isInt(r.totalCzk) || !isInt(r.nights)) return null;
+  const textFields = ['accountNumber', 'iban', 'variableSymbol', 'message', 'dueAt', 'spayd'] as const;
+  if (!textFields.every((field) => isText(p[field])) || p.currency !== 'CZK' || !isInt(p.amountCzk)) return null;
+  // Platí se 100 % ceny rezervace: platební údaje musí souhlasit se souhrnem.
+  if (p.amountCzk !== r.totalCzk || p.dueAt !== r.paymentDueAt) return null;
+  return {
+    reservationCode: r.reservationCode,
+    arrival: r.arrival,
+    departure: r.departure,
+    nights: r.nights as number,
+    guests: r.guests as number,
+    totalCzk: r.totalCzk as number,
+    paymentDueAt: r.paymentDueAt,
+    payment: {
+      amountCzk: p.amountCzk as number,
+      currency: 'CZK',
+      accountNumber: p.accountNumber as string,
+      iban: p.iban as string,
+      variableSymbol: p.variableSymbol as string,
+      message: p.message as string,
+      dueAt: p.dueAt as string,
+      spayd: p.spayd as string,
+    },
+  };
 }
 
 /** Jeden požadavek. Nikdy nevyhazuje; síťová chyba / timeout = { code: 'network' }. */

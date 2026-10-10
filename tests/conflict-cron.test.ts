@@ -23,16 +23,15 @@ beforeEach(async () => {
 });
 
 let counter = 0;
-async function reserve(arrival: string, departure: string): Promise<NewReservation> {
+async function reserve(arrival: string, departure: string): Promise<NewReservation & { publicCode: string }> {
   counter++;
   const id = `00000000-0000-4000-8000-${String(counter).padStart(12, '0')}`;
   const r: NewReservation = {
-    id, publicCode: `CV-${String(counter).padStart(6, '0')}`, icalUid: icalUidFor(id), arrival, departure, guests: 2,
+    id, icalUid: icalUidFor(id), arrival, departure, guests: 2,
     firstName: 'Jan', lastName: 'Testovací', phone: '+420 000 000 000', email: 'host@example.invalid', priceCzk: 3000,
-    idempotencyKey: null, requestHash: null, vsPrefix: '30', createdAt: '2030-01-10T09:00:00.000Z',
+    idempotencyKey: null, requestHash: null, createdAt: '2030-01-10T09:00:00.000Z',
   };
-  await insertReservation(t.db, r);
-  return r;
+  return { ...r, publicCode: (await insertReservation(t.db, r)).code };
 }
 
 const ICS = (events: string) => `BEGIN:VCALENDAR\r\nVERSION:2.0\r\nPRODID:-//T//CS\r\n${events}END:VCALENDAR\r\n`;
@@ -236,13 +235,13 @@ test('produkční e-mail nemá označení TEST', async () => {
   const prod = await createTestDatabase('production');
   try {
     await insertReservation(prod.db, {
-      id: 'p1', publicCode: 'CV-PPPPPP', icalUid: icalUidFor('p1'), arrival: '2030-03-01', departure: '2030-03-02', guests: 1,
+      id: 'p1', icalUid: icalUidFor('p1'), arrival: '2030-03-01', departure: '2030-03-02', guests: 1,
       firstName: 'Jan', lastName: 'Testovací', phone: '+420 000 000 000', email: 'host@example.invalid', priceCzk: 3000,
-      idempotencyKey: null, requestHash: null, vsPrefix: '30', createdAt: '2030-01-10T09:00:00.000Z',
+      idempotencyKey: null, requestHash: null, createdAt: '2030-01-10T09:00:00.000Z',
     });
     const s = setup({ exportBody: () => ICS(VEVENT('a@test.invalid', '20300301', '20300302')), env: { DB: prod.db, BOOKING_ENV: 'production' } });
     await s.run();
-    assert.equal(s.mails[0].body.subject, 'POZOR: kolize rezervace CV-PPPPPP');
+    assert.equal(s.mails[0].body.subject, 'POZOR: kolize rezervace 10013001');
     assert.equal(s.mails[0].headers.get('idempotency-key')?.startsWith('conflict-alert-production-'), true);
   } finally {
     await prod.dispose();

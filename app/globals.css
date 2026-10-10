@@ -234,6 +234,14 @@ header nav a, .nav-cta { white-space:nowrap; }
 .booking-success-title { margin:0 0 22px; font-size:30px; line-height:1.25; text-align:center; text-wrap:balance; outline:none; }
 .booking-success .estimate { margin-top:0; padding:18px 0; gap:10px; border-bottom:1px solid rgba(219,232,189,.2); }
 .booking-success-note { margin:20px 0 0; font-size:13px; line-height:1.6; color:#b9c9be; text-align:center; }
+.booking-success-status { margin:-8px 0 18px; font-size:14px; line-height:1.6; color:#f3d9c9; text-align:center; text-wrap:balance; }
+.booking-success-code, .booking-payment dd { font-variant-numeric:tabular-nums; }
+.booking-success-code { letter-spacing:.06em; }
+.booking-payment { margin-top:22px; }
+.booking-payment-heading { margin:0 0 14px; font-family:Georgia,'Times New Roman',serif; font-size:20px; line-height:1.3; color:#fff; text-align:center; }
+.booking-payment-qr { display:block; width:min(200px, 70%); height:auto; margin:0 auto 6px; border-radius:var(--bk-radius-sm, 6px); }
+.booking-payment .estimate { margin-top:14px; }
+.booking-payment-iban { overflow-wrap:anywhere; }
 .booking-success-thanks { margin:10px 0 0; font-family:Georgia,'Times New Roman',serif; font-size:18px; line-height:1.4; color:#dbe8bd; text-align:center; }
 @media(max-width:1000px) { .booking-form-row { margin-top:32px; } }
 @media(max-width:640px) {
