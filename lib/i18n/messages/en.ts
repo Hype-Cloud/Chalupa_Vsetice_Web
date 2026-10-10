@@ -85,7 +85,6 @@ export const en = {
   'stayError.noArrival': 'Please select your arrival date first.',
 
   'booking.panel.priceStandard': 'Typically {price} / night',
-  'booking.panel.priceNoteVaries': 'Prices may vary by date.',
   'booking.panel.priceNoteMinStay': 'The minimum stay is {nights}.',
   'booking.panel.priceNoteLonger': 'Longer stays may be discounted.',
   'booking.panel.arrival': 'Arrival',

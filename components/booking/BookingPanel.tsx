@@ -62,7 +62,6 @@ export function BookingPanel(props: Props) {
           <div className="price is-indicative" aria-live="polite">{t('booking.panel.priceStandard', { price: formatPrice(PRICE_PER_NIGHT) })}</div>
           {/* Každá věta na vlastním řádku; minimální délka pobytu z MIN_NIGHTS (vynucuje ji výběr i server). */}
           <p className="price-note">
-            <span>{t('booking.panel.priceNoteVaries')}</span>
             <span>{t('booking.panel.priceNoteMinStay', { nights: plural('booking.nights', MIN_NIGHTS) })}</span>
             <span>{t('booking.panel.priceNoteLonger')}</span>
           </p>

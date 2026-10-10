@@ -85,7 +85,6 @@ export const ua = {
   'stayError.noArrival': 'Спочатку оберіть дату заїзду.',
 
   'booking.panel.priceStandard': 'Зазвичай {price} / ніч',
-  'booking.panel.priceNoteVaries': 'Ціна може залежати від дат.',
   'booking.panel.priceNoteMinStay': 'Мінімальне перебування — {nights}.',
   'booking.panel.priceNoteLonger': 'Довші перебування можуть бути вигіднішими.',
   'booking.panel.arrival': 'Заїзд',

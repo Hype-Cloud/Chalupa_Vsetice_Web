@@ -86,7 +86,6 @@ export const de = {
   'stayError.noArrival': 'Wählen Sie zuerst das Anreisedatum.',
 
   'booking.panel.priceStandard': 'Üblicherweise {price} / Nacht',
-  'booking.panel.priceNoteVaries': 'Der Preis kann je nach Termin variieren.',
   'booking.panel.priceNoteMinStay': 'Der Mindestaufenthalt beträgt {nights}.',
   'booking.panel.priceNoteLonger': 'Längere Aufenthalte können günstiger sein.',
   'booking.panel.arrival': 'Anreise',
