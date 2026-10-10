@@ -247,7 +247,7 @@ header nav a, .nav-cta { white-space:nowrap; }
 .booking-payment-more summary { padding:10px 0; font-size:13px; color:#b9c9be; text-align:center; cursor:pointer; }
 .booking-payment-more summary:hover { color:#dbe8bd; }
 .booking-payment-more summary:focus-visible { outline:3px solid #b5913e; outline-offset:2px; }
-.booking-payment .booking-payment-more .estimate { margin-top:0; padding-top:2px; border-top:0; border-bottom:0; }
+.booking .booking-payment .booking-payment-more .estimate { margin-top:0; padding-top:2px; border-top:0; border-bottom:0; }
 .booking-payment-more dd { display:flex; align-items:center; justify-content:flex-end; gap:4px; min-width:0; }
 .booking-payment-more .booking-payment-iban { min-width:0; }
 .copy-control { position:relative; display:inline-flex; flex:none; }
