@@ -35,14 +35,14 @@ function reservation(arrival: string, departure: string, overrides: Partial<NewR
 // createdAt rezervací v testech: 2030-01-10T10:00Z = 10. 1. 2030 v Praze → kódy 100130NN.
 const DAY = '2030-01-10';
 
-test('založení rezervace: kód DDMMYYNN z denního čítače = VS, stav čeká na platbu, splatnost +24 h', async () => {
+test('založení rezervace: kód DDMMYYNN z denního čítače = VS, stav čeká na platbu, splatnost do konce dalšího pražského dne', async () => {
   const created = await insertReservation(t.db, reservation('2030-03-01', '2030-03-04'));
   assert.equal(created.code, '10013001');
   assert.equal(created.variableSymbol, created.code);
   assert.equal(created.status, 'pending_payment');
-  assert.equal(created.paymentDueAt, '2030-01-11T10:00:00.000Z');
+  assert.equal(created.paymentDueAt, '2030-01-11T22:59:59.000Z');
   const row = await t.db.prepare('SELECT public_code, variable_symbol, payment_due_at, created_at FROM reservations').first();
-  assert.deepEqual(row, { public_code: '10013001', variable_symbol: '10013001', payment_due_at: '2030-01-11T10:00:00.000Z', created_at: '2030-01-10T10:00:00.000Z' });
+  assert.deepEqual(row, { public_code: '10013001', variable_symbol: '10013001', payment_due_at: '2030-01-11T22:59:59.000Z', created_at: '2030-01-10T10:00:00.000Z' });
   const nights = await t.db.prepare('SELECT night FROM reserved_nights ORDER BY night').all<{ night: string }>();
   assert.deepEqual(nights.results.map((r) => r.night), ['2030-03-01', '2030-03-02', '2030-03-03']);
   assert.equal((await insertReservation(t.db, reservation('2030-04-01', '2030-04-02'))).code, '10013002');
@@ -56,9 +56,9 @@ test('kód podle pražského dne: 22:30 UTC je už další den v Praze; nový de
   assert.equal((await insertReservation(t.db, reservation('2030-11-01', '2030-11-03', { createdAt: '2030-10-09T21:59:00.000Z' }))).code, '09103001');
   assert.equal((await insertReservation(t.db, reservation('2030-11-05', '2030-11-07', { createdAt: '2030-10-09T22:30:00.000Z' }))).code, '10103001');
   assert.equal((await insertReservation(t.db, reservation('2030-11-10', '2030-11-12', { createdAt: '2030-10-09T23:10:00.000Z' }))).code, '10103002');
-  // Splatnost je absolutních 24 h v UTC (i přes změnu času 27. 10. 2030).
+  // Splatnost: konec pražského dne po uplynutí 24 h (i přes změnu času 27. 10. 2030).
   const dst = await insertReservation(t.db, reservation('2030-12-01', '2030-12-03', { createdAt: '2030-10-26T12:00:00.000Z' }));
-  assert.equal(dst.paymentDueAt, '2030-10-27T12:00:00.000Z');
+  assert.equal(dst.paymentDueAt, '2030-10-27T22:59:59.000Z');
 });
 
 test('limit 99 rezervací za pražský den: 100. se nezaloží (fail closed), čítač nepřeteče', async () => {

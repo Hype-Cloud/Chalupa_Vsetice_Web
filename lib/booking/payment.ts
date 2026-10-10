@@ -8,7 +8,7 @@ import { todayInPrague, type IsoDate } from '../availability/dates.ts';
 
 /** Nejvyšší pořadí rezervace v jednom pražském dni (NN v kódu DDMMYYNN). */
 export const MAX_DAILY_RESERVATIONS = 99;
-/** Splatnost od vytvoření rezervace (hodiny, absolutní čas v UTC). */
+/** Minimální lhůta k zaplacení od vytvoření rezervace (hodiny). */
 export const PAYMENT_DUE_HOURS = 24;
 export const PAYMENT_CURRENCY = 'CZK';
 
@@ -24,8 +24,31 @@ export function formatReservationCode(day: IsoDate, sequence: number): string {
   return `${reservationCodePrefix(day)}${String(sequence).padStart(2, '0')}`;
 }
 
-/** Splatnost = vytvoření + 24 h (ISO 8601, UTC). */
-export const paymentDueAt = (createdAt: Date | string) => new Date(new Date(createdAt).getTime() + PAYMENT_DUE_HOURS * 3_600_000).toISOString();
+/** Posun pásma Europe/Prague proti UTC (ms) v daném okamžiku. */
+function pragueOffsetMs(instant: number): number {
+  const parts = Object.fromEntries(
+    new Intl.DateTimeFormat('en-US', { timeZone: 'Europe/Prague', hourCycle: 'h23', year: 'numeric', month: 'numeric', day: 'numeric', hour: 'numeric', minute: 'numeric', second: 'numeric' })
+      .formatToParts(new Date(instant))
+      .map((p) => [p.type, Number(p.value)]),
+  );
+  return Date.UTC(parts.year, parts.month - 1, parts.day, parts.hour, parts.minute, parts.second) - Math.floor(instant / 1000) * 1000;
+}
+
+/** Okamžik 23:59:59 daného dne v Europe/Prague (v letním i zimním čase). */
+export function endOfPragueDay(day: IsoDate): Date {
+  const wall = Date.UTC(Number(day.slice(0, 4)), Number(day.slice(5, 7)) - 1, Number(day.slice(8, 10)), 23, 59, 59);
+  let instant = wall - pragueOffsetMs(wall);
+  instant = wall - pragueOffsetMs(instant);
+  return new Date(instant);
+}
+
+/**
+ * Splatnost (ISO 8601, UTC): konec pražského dne (23:59:59), ve kterém uplyne 24 h od vytvoření.
+ * Host má vždy aspoň 24 h a lhůta je pro člověka srozumitelná („do 11. 10. 2026 23:59“).
+ * Příklad: vytvořeno 10. 10. 2026 02:42 → splatnost 11. 10. 2026 23:59:59 v Praze.
+ */
+export const paymentDueAt = (createdAt: Date | string) =>
+  endOfPragueDay(todayInPrague(new Date(new Date(createdAt).getTime() + PAYMENT_DUE_HOURS * 3_600_000))).toISOString();
 
 /** Zpráva pro příjemce u platby. */
 export const paymentMessage = (reservationCode: string) => `Rezervace ${reservationCode}`;

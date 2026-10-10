@@ -9,6 +9,7 @@ CREATE TABLE reservation_code_counters (
   last INTEGER NOT NULL CONSTRAINT reservation_code_limit CHECK (last BETWEEN 1 AND 99)
 );
 
--- Splatnost platby (ISO 8601, UTC) = created_at + 24 h. U starších rezervací NULL.
+-- Splatnost platby (ISO 8601, UTC) = konec pražského dne, ve kterém uplyne 24 h od created_at
+-- (lib/booking/payment.ts → paymentDueAt). U starších rezervací NULL.
 -- Zatím se podle ní nic automaticky neruší ani neuvolňuje.
 ALTER TABLE reservations ADD COLUMN payment_due_at TEXT CHECK (payment_due_at IS NULL OR (typeof(payment_due_at) = 'text' AND payment_due_at > created_at));

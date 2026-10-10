@@ -122,10 +122,10 @@ function controller(results: SubmitResult[], tokens: TokenOutcome[] = []) {
 const SUCCESS: SubmitResult = {
   kind: 'success',
   reservation: {
-    reservationCode: '10013001', arrival: '2030-02-01', departure: '2030-02-04', guests: 2, totalCzk: 8970, nights: 3, paymentDueAt: '2030-01-11T10:00:00.000Z',
+    reservationCode: '10013001', arrival: '2030-02-01', departure: '2030-02-04', guests: 2, totalCzk: 8970, nights: 3, paymentDueAt: '2030-01-11T22:59:59.000Z',
     payment: {
       amountCzk: 8970, currency: 'CZK', accountNumber: FAKE_ACCOUNT_NUMBER, iban: FAKE_PAYMENT_IBAN, variableSymbol: '10013001', message: 'Rezervace 10013001',
-      dueAt: '2030-01-11T10:00:00.000Z', spayd: `SPD*1.0*ACC:${FAKE_PAYMENT_IBAN}*AM:8970.00*CC:CZK*MSG:Rezervace 10013001*X-VS:10013001`,
+      dueAt: '2030-01-11T22:59:59.000Z', spayd: `SPD*1.0*ACC:${FAKE_PAYMENT_IBAN}*AM:8970.00*CC:CZK*MSG:Rezervace 10013001*X-VS:10013001`,
     },
   },
   replayed: false,

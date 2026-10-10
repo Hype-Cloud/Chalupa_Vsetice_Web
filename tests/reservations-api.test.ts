@@ -70,11 +70,11 @@ test('úspěšná rezervace: 201, kód DDMMYYNN = VS, cena ze serveru, splatnost
   assert.deepEqual(body, {
     reservation: {
       reservationCode: '10013001', arrival: '2030-02-01', departure: '2030-02-04', nights: 3, guests: 2, totalCzk: 8970,
-      status: 'pending_payment', paymentDueAt: '2030-01-11T10:00:00.000Z',
+      status: 'pending_payment', paymentDueAt: '2030-01-11T22:59:59.000Z',
     },
     payment: {
       amountCzk: 8970, currency: 'CZK', accountNumber: FAKE_ACCOUNT_NUMBER, iban: FAKE_PAYMENT_IBAN, variableSymbol: '10013001',
-      message: 'Rezervace 10013001', dueAt: '2030-01-11T10:00:00.000Z',
+      message: 'Rezervace 10013001', dueAt: '2030-01-11T22:59:59.000Z',
       spayd: `SPD*1.0*ACC:${FAKE_PAYMENT_IBAN}*AM:8970.00*CC:CZK*MSG:Rezervace 10013001*X-VS:10013001`,
     },
   });
@@ -91,7 +91,7 @@ test('úspěšná rezervace: 201, kód DDMMYYNN = VS, cena ze serveru, splatnost
     public_code: '10013001',
     variable_symbol: '10013001',
     status: 'pending_payment',
-    payment_due_at: '2030-01-11T10:00:00.000Z',
+    payment_due_at: '2030-01-11T22:59:59.000Z',
   });
   assert.equal(s.requests.length, 1, 'export se před zápisem stáhne čerstvě');
   // Další rezervace téhož pražského dne → další pořadí.

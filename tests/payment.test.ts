@@ -38,10 +38,23 @@ test('kód DDMMYYNN: NN 01–99, mimo rozsah výjimka (žádné 00 ani přeteče
   for (const n of [0, 100, -1, 1.5, Number.NaN]) assert.throws(() => formatReservationCode('2026-10-10', n), RangeError, String(n));
 });
 
-test('splatnost = vytvoření + 24 h v UTC (i přes změnu času)', () => {
-  assert.equal(paymentDueAt('2030-01-10T10:00:00.000Z'), '2030-01-11T10:00:00.000Z');
-  assert.equal(paymentDueAt(new Date('2030-10-26T12:00:00Z')), '2030-10-27T12:00:00.000Z'); // 27. 10. 2030 konec SELČ
-  assert.equal(paymentDueAt('2030-03-30T23:30:00.000Z'), '2030-03-31T23:30:00.000Z'); // 31. 3. 2030 začátek SELČ
+test('splatnost: konec pražského dne (23:59:59), ve kterém uplyne 24 h od vytvoření; uloženo v UTC', () => {
+  // Příklad ze zadání: 10. 10. 2026 02:42 v Praze → do 11. 10. 2026 23:59:59 (SELČ = UTC+2).
+  assert.equal(paymentDueAt('2026-10-10T00:42:00.000Z'), '2026-10-11T21:59:59.000Z');
+  // Zima (UTC+1).
+  assert.equal(paymentDueAt('2030-01-10T10:00:00.000Z'), '2030-01-11T22:59:59.000Z');
+  // Pražská půlnoc: 23:59:59 vs. 00:00 dalšího dne posune splatnost o den.
+  assert.equal(paymentDueAt('2030-01-10T22:59:59.000Z'), '2030-01-11T22:59:59.000Z');
+  assert.equal(paymentDueAt('2030-01-10T23:00:00.000Z'), '2030-01-12T22:59:59.000Z');
+  // Konec SELČ 27. 10. 2030 a začátek SELČ 31. 3. 2030.
+  assert.equal(paymentDueAt(new Date('2030-10-26T12:00:00Z')), '2030-10-27T22:59:59.000Z');
+  assert.equal(paymentDueAt('2030-03-30T23:30:00.000Z'), '2030-04-01T21:59:59.000Z');
+  // Host má vždy aspoň 24 h a nejvýš necelých 48 h.
+  for (let minutes = 0; minutes < 2 * 24 * 60; minutes += 37) {
+    const created = Date.UTC(2030, 9, 26, 0, 0) + minutes * 60_000;
+    const hours = (Date.parse(paymentDueAt(new Date(created))) - created) / 3_600_000;
+    assert.ok(hours >= 24 && hours < 48, `${new Date(created).toISOString()}: ${hours} h`);
+  }
 });
 
 test('IBAN z konfigurace: jen platný český IBAN; tuzemské číslo účtu se z něj odvodí', () => {

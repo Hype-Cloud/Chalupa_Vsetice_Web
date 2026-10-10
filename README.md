@@ -172,7 +172,7 @@ Backend pro budoucí přímé rezervace prostřednictvím webu Chalupa Všetice.
 ### Implementované funkce
 
 - Databázové tabulky pro rezervace, obsazené noci, denní čítač veřejného kódu rezervace (= variabilní symbol) a konfiguraci prostředí.
-- Platební údaje rezervace: stav `pending_payment`, splatnost 24 h, QR Platba (SPAYD) a ruční údaje v potvrzení.
+- Platební údaje rezervace: stav `pending_payment`, splatnost do konce pražského dne po uplynutí 24 h, QR Platba (SPAYD) a ruční údaje v potvrzení.
 - Atomické vytvoření rezervace prostřednictvím D1 batch transakce.
 - Databázová ochrana proti dvojité rezervaci pomocí unikátního záznamu každé obsazené noci.
 - Serverová validace termínů, kapacity a kontaktních údajů.
@@ -201,7 +201,7 @@ Projekt využívá Node.js Test Runner. Databázové testy probíhají nad loká
 | occupancy.test.ts | 18 | Slučování obsazených intervalů, kontrola termínů a chování kalendáře (včetně zrušení výběru opakovaným klikem na příjezd), minimální délka pobytu (kalendář i datumová pole). |
 | booking.test.ts | 9 | Validace rezervací, ceny, kontakty, vlastní iCal UID a propojení D1 s kalendářem. |
 | reservations-api.test.ts | 20 | Rezervační API, autorizace, idempotence, souběh požadavků a chybové stavy, minimální délka pobytu; kontrakt odpovědi s kódem `DDMMYYNN`, splatností a platebními údaji, fail closed bez platné platební konfigurace, vyčerpání kódů dne. |
-| reservations-db.test.ts | 21 | Databázová omezení, atomické transakce, rollback a ochrana proti kolizím; denní čítač kódu `DDMMYYNN` (souběh, pražská půlnoc, nový den, limit 99), splatnost +24 h. |
+| reservations-db.test.ts | 21 | Databázová omezení, atomické transakce, rollback a ochrana proti kolizím; denní čítač kódu `DDMMYYNN` (souběh, pražská půlnoc, nový den, limit 99), splatnost do konce pražského dne. |
 | ical-export.test.ts | 19 | Výstupní iCal: formát RFC 5545, escaping, stabilita UID, zrušení (STATUS:CANCELLED), autorizace, chyby D1 a prostředí, únik osobních údajů. |
 | conflicts.test.ts | 18 | Detekce kolizí během zpoždění synchronizace: překryvy a hranice, ozvěny, idempotence, souběh, úplný/neúplný snapshot, výpadek e-chalup, upozornění. |
 | conflict-cron.test.ts | 12 | Cron detekce a e-mailové upozornění: odeslání a notified_at, žádný druhý e-mail, retry po chybě providera, nesoulad prostředí, výpadek a neúplný export, souběh s /api/availability, bez osobních údajů. |
@@ -216,15 +216,15 @@ Projekt využívá Node.js Test Runner. Databázové testy probíhají nad loká
 | reservation-form.test.ts | 20 | Rezervační formulář: request podle kontraktu, blokace odeslání (termín, cena, kontakty; Turnstile tlačítko neblokuje), kliknutí → Invisible Turnstile → POST, selhání Turnstile bez POST, Idempotency-Key a token svázané s operací (retry = stejný klíč i token bez nové challenge, nová operace = nový token i klíč, i po price-mismatch), chybové kódy → hlášky ve všech jazycích, POST proti skutečnému handleru, `GET /api/booking-config`, Preview Invisible site key jen ve `previews`; potvrzení jen z dat serverové odpovědi (neúplná nebo nekonzistentní odpověď se nepřijme). |
 | invisible-turnstile.test.ts | 8 | Invisible Turnstile na klientu: widget připravený předem bez spuštění challenge, po kliknutí jen `execute`, nejvýš jeden token na widget a čerstvý widget na pozadí, bez automatického obnovování, ignorování pozdních callbacků, chyba / timeout / prázdný token → `turnstile-failed`, nenačtený skript → `turnstile-unavailable` s opakováním přípravy, odpojení formuláře. |
 | stay-feedback.test.ts | 5 | Vizuální odezva na pobyt kratší než `MIN_NIGHTS`: validace a stav pobytu beze změny, nový trigger s kliknutým dnem při každém pokusu, validní klik ani jiné chyby flash nespustí, flash dne bez trvalého stavu a bez pohybu, pulse hlášky jen přes `transform`, `prefers-reduced-motion` bez animace. |
-| payment.test.ts | 8 | Platby: pražské datum → `DDMMYY`, `NN` 01–99, splatnost +24 h v UTC, IBAN (kontrolní součet, odvození čísla účtu), SPAYD (serverová cena, VS = kód, zpráva `Rezervace {kód}`), lokální QR, kontrola, že repozitář neobsahuje skutečný IBAN. |
-| **Celkem** | **333** | |
+| payment.test.ts | 9 | Platby: pražské datum → `DDMMYY`, `NN` 01–99, splatnost (konec pražského dne po 24 h, změny času, vždy 24–48 h), IBAN (kontrolní součet, odvození čísla účtu), SPAYD (serverová cena, VS = kód, zpráva `Rezervace {kód}`), QR jako PNG (pixely = matice) se SVG fallbackem, kopírování do schránky, kontrola, že repozitář neobsahuje skutečný IBAN. |
+| **Celkem** | **334** | |
 
 ### Testované scénáře
 
 - Úspěšné vytvoření rezervace a přidělení kódu `DDMMYYNN` (= variabilní symbol) z denního čítače.
 - Pražský den kolem půlnoci (UTC vs. `Europe/Prague`, zimní i letní čas), nový den od `01`.
 - Limit 99 rezervací za den: 100. se nezaloží (fail closed), čítač nepřeteče.
-- Splatnost `created_at + 24 h`, SPAYD se serverovou cenou, VS = kód, zpráva `Rezervace {kód}`.
+- Splatnost do konce pražského dne, ve kterém uplyne 24 h od `created_at`; SPAYD se serverovou cenou, VS = kód, zpráva `Rezervace {kód}`.
 - Chybějící nebo neplatný `PAYMENT_IBAN` → 503, nic se nezapíše ani nezaloguje.
 - Souběžné vytváření 20 rezervací stejného termínu – uspěje pouze jedna.
 - Odmítnutí úplných i částečných překryvů rezervací.
@@ -263,7 +263,7 @@ Vedle automatických testů proběhly integrační testy na skutečné infrastru
 - POST /api/reservations bez přístupového tokenu je odmítnut (HTTP 401).
 - Autorizovaný POST se syntetickými údaji úspěšně vytvořil rezervaci (HTTP 201).
 - Rezervace dostala veřejný kód `DDMMYYNN` (= variabilní symbol), správnou cenu, splatnost
-  +24 h a stav pending_payment; success panel ukazuje QR Platbu a ruční platební údaje.
+  (konec pražského dne po 24 h) a stav pending_payment; success panel ukazuje QR Platbu a ruční platební údaje.
 
 ### 3. Okamžitá synchronizace kalendáře
 
@@ -371,7 +371,11 @@ POST /api/reservations → validace → čerstvý export e-chalup → D1 batch (
   `reservation_code_limit`, batch se vrátí a API odpoví 503 `reservation-codes-exhausted`.
   Žádné přetečení na `00`, žádná duplicita. Další pražský den začíná od `01`.
 - **Stav a splatnost:** nová rezervace má `status = 'pending_payment'` a
-  `payment_due_at = created_at + 24 h` (UTC). Podle splatnosti se zatím nic neruší ani neuvolňuje.
+  `payment_due_at` = konec pražského dne (23:59:59 `Europe/Prague`), ve kterém uplyne 24 h od
+  `created_at`, uložený v UTC (`paymentDueAt`). Host má vždy aspoň 24 h a srozumitelnou lhůtu
+  („do 11. 10. 2026 23:59“) místo náhodného času vytvoření; např. vytvoření 10. 10. 2026 02:42 →
+  `2026-10-11T21:59:59.000Z`. API, success panel i budoucí e-mail používají uloženou hodnotu.
+  Podle splatnosti se zatím nic neruší ani neuvolňuje.
 - **Částka:** 100 % serverem spočítané ceny rezervace (`price_czk` = `totalCzk` z `quoteStay`).
 - **Bankovní účet:** jen ze secretu `PAYMENT_IBAN` (český IBAN, ověřený kontrolní součet).
   Tuzemské číslo účtu pro ruční platbu (`[předčíslí-]číslo/kód banky`) se z IBAN odvozuje, takže
@@ -443,10 +447,10 @@ VS se nespotřebuje. Kolize se neověřuje dotazem před zápisem, ten by nebyl 
    {
      "reservation": { "reservationCode": "10013001", "arrival": "2030-02-01", "departure": "2030-02-04",
        "nights": 3, "guests": 2, "totalCzk": 8970, "status": "pending_payment",
-       "paymentDueAt": "2030-01-11T10:00:00.000Z" },
+       "paymentDueAt": "2030-01-11T22:59:59.000Z" },
      "payment": { "amountCzk": 8970, "currency": "CZK", "accountNumber": "1234567890/9999",
        "iban": "CZ1999990000001234567890", "variableSymbol": "10013001", "message": "Rezervace 10013001",
-       "dueAt": "2030-01-11T10:00:00.000Z", "spayd": "SPD*1.0*ACC:CZ1999990000001234567890*AM:8970.00*CC:CZK*MSG:Rezervace 10013001*X-VS:10013001" }
+       "dueAt": "2030-01-11T22:59:59.000Z", "spayd": "SPD*1.0*ACC:CZ1999990000001234567890*AM:8970.00*CC:CZK*MSG:Rezervace 10013001*X-VS:10013001" }
    }
    ```
 
@@ -552,15 +556,18 @@ web dál nabízí poptávku přes e-chalupy.
   znovu načte z `/api/quote` (summary ukáže novou cenu i rozpis) a panel zobrazí „Cena se mezitím
   změnila z X na Y. Zkontrolujte ji a rezervaci znovu potvrďte.“ Další odeslání = vědomé
   potvrzení s novým klíčem.
-- **Úspěch:** potvrzení v panelu (bez eyebrow) – titulek „Rezervace přijata“, informace, že
-  rezervace čeká na platbu a do kdy ji uhradit, termín, délka pobytu, hosté, celková cena a
-  „Kód rezervace (= VS)“. Pod tím blok Platba: QR Platba, číslo účtu a splatnost; IBAN je ve
-  sbaleném nativním `<details>` „Další platební údaje“. Částka a variabilní symbol se pod QR
-  neopakují (jsou v souhrnu jako celková cena a kód rezervace). Vše je ze serverové odpovědi
-  (`parseConfirmation` odmítne neúplnou nebo nekonzistentní odpověď); nic se nedopočítává.
-  Splatnost: den → měsíc → rok a čas v `Europe/Prague` (`formatDeadline`). Nepodaří-li se QR
-  vykreslit, zobrazí se jen hláška a ruční údaje – rezervace platí dál. O e-mailu se zatím nic
-  netvrdí (odesílání potvrzení není implementované).
+- **Úspěch:** potvrzení v panelu (bez eyebrow) – titulek „Rezervace přijata“, termín, délka pobytu,
+  hosté a celková cena. Kód rezervace se v panelu nezobrazuje (je v odpovědi API a bude
+  v potvrzovacím e-mailu). Blok Platba: jedna věta „Uhraďte prosím do {splatnost}.“, QR Platba jako
+  skutečný `<img>` (lokálně vytvořený PNG, `components/booking/paymentQr.ts`; na mobilu jde uložit
+  dlouhým podržením, dotyková zařízení – `@media (hover:none) and (pointer:coarse)` – ukážou
+  nápovědu) a sbalené `<details>` „Platební údaje“: částka, číslo účtu, IBAN, variabilní symbol
+  a splatnost; u prvních čtyř tlačítko kopírování (Clipboard API, záložně `execCommand`,
+  zpětná vazba „Zkopírováno“ bez posunu layoutu). Fallback QR: selže-li převod na PNG, vykreslí
+  se SVG ze stejné matice; selže-li kódování, QR se nezobrazí a platební údaje jsou rozbalené.
+  Vše je ze serverové odpovědi (`parseConfirmation` odmítne neúplnou nebo nekonzistentní
+  odpověď); nic se nedopočítává. Splatnost: den → měsíc → rok a čas v `Europe/Prague`
+  (`formatDeadline`). O e-mailu se zatím nic netvrdí (odesílání potvrzení není implementované).
   Kontaktní část pod blokem zmizí a stránka se po vykreslení posune zpět k bloku (celý grid,
   pokud se vejde do okna, jinak potvrzení); reveal animace respektuje `prefers-reduced-motion`.
 
