@@ -5,7 +5,7 @@ import { getAvailability, MAX_EXPORT_BYTES, resetAvailabilityMemory } from '../w
 import { listReservedNights } from '../worker/booking/db.ts';
 import { SITEVERIFY_URL } from '../worker/booking/turnstile.ts';
 import { createTestDatabase, failingDatabase } from './d1.ts';
-import { fixture } from './helpers.ts';
+import { fixture, FAKE_ACCOUNT_NUMBER, FAKE_PAYMENT_IBAN } from './helpers.ts';
 
 // Jen smyšlené údaje. Export e-chalup nahrazují syntetické fixtures:
 // 01-single-and-multi.ics obsazuje noci 15. 1. a 20.–24. 1. 2030.
@@ -28,7 +28,7 @@ function setup(upstream: () => Promise<Response> = async () => new Response(fixt
   let uuid = 0;
   const env: BookingEnv = {
     ECHALUPY_ICAL_URL: SECRET_URL, DB: t.db, BOOKING_ENV: 'preview', BOOKING_API_ENABLED: 'true', BOOKING_API_TOKEN: TOKEN,
-    TURNSTILE_SECRET_KEY: TURNSTILE_TEST_SECRET, BOOKING_RATE_LIMITER: { limit: async () => ({ success: true }) },
+    PAYMENT_IBAN: FAKE_PAYMENT_IBAN, TURNSTILE_SECRET_KEY: TURNSTILE_TEST_SECRET, BOOKING_RATE_LIMITER: { limit: async () => ({ success: true }) },
     ...envOverrides,
   };
   const deps: BookingDeps = {
@@ -60,21 +60,66 @@ const read = (response: Response): Promise<any> => response.json();
 
 const stay = (arrival: string, departure: string, extra: Record<string, unknown> = {}) => ({ arrival, departure, guests: 2, ...GUEST, turnstileToken: DUMMY_TOKEN, ...extra });
 
-test('úspěšná rezervace: 201, cena ze serveru, VS, bez kontaktních údajů v odpovědi', async () => {
+test('úspěšná rezervace: 201, kód DDMMYYNN = VS, cena ze serveru, splatnost a SPAYD; bez interního ID, kontaktů a secrets', async () => {
   const s = setup();
   const response = await s.post(stay('2030-02-01', '2030-02-04', { priceCzk: 1, price: 1, expectedPriceCzk: 8970 }));
   assert.equal(response.status, 201);
   assert.equal(response.headers.get('cache-control'), 'no-store');
   const body = await read(response);
-  assert.deepEqual({ ...body.reservation, code: 'x' }, { code: 'x', arrival: '2030-02-01', departure: '2030-02-04', nights: 3, guests: 2, priceCzk: 8970, variableSymbol: '30000001', status: 'pending_payment' });
-  assert.match(body.reservation.code, /^CV-[0-9A-HJKMNP-TV-Z]{6}$/);
+  // NOW = 2030-01-10T10:00Z → 10. 1. 2030 v Praze, první rezervace dne.
+  assert.deepEqual(body, {
+    reservation: {
+      reservationCode: '10013001', arrival: '2030-02-01', departure: '2030-02-04', nights: 3, guests: 2, totalCzk: 8970,
+      status: 'pending_payment', paymentDueAt: '2030-01-11T22:59:59.000Z',
+    },
+    payment: {
+      amountCzk: 8970, currency: 'CZK', accountNumber: FAKE_ACCOUNT_NUMBER, iban: FAKE_PAYMENT_IBAN, variableSymbol: '10013001',
+      message: 'Rezervace 10013001', dueAt: '2030-01-11T22:59:59.000Z',
+      spayd: `SPD*1.0*ACC:${FAKE_PAYMENT_IBAN}*AM:8970.00*CC:CZK*MSG:Rezervace 10013001*X-VS:10013001`,
+    },
+  });
   const text = JSON.stringify(body) + s.logs.join('\n');
-  for (const secret of ['Testovací', 'test@example.invalid', '000 000', 'SECRET-TOKEN-123']) assert.ok(!text.includes(secret), secret);
-  const row = await t.db.prepare('SELECT price_czk, ical_uid, first_name FROM reservations').first<{ price_czk: number; ical_uid: string; first_name: string }>();
-  assert.equal(row!.price_czk, 8970); // 3 × 2 990
-  assert.equal(row!.first_name, 'Jan');
-  assert.equal(row!.ical_uid, 'rezervace-00000000-0000-4000-8000-000000000001@chalupavsetice.cz');
+  for (const secret of ['Testovací', 'test@example.invalid', '000 000', 'SECRET-TOKEN-123', TURNSTILE_TEST_SECRET, '00000000-0000-4000-8000', 'rezervace-', 'ical']) {
+    assert.ok(!text.includes(secret), secret);
+  }
+  assert.ok(!s.logs.join('\n').includes(FAKE_PAYMENT_IBAN) && !s.logs.join('\n').includes('1234567890'), 'bankovní údaje se nelogují');
+  const row = await t.db.prepare('SELECT price_czk, ical_uid, first_name, public_code, variable_symbol, status, payment_due_at FROM reservations').first();
+  assert.deepEqual(row, {
+    price_czk: 8970, // 3 × 2 990
+    ical_uid: 'rezervace-00000000-0000-4000-8000-000000000001@chalupavsetice.cz',
+    first_name: 'Jan',
+    public_code: '10013001',
+    variable_symbol: '10013001',
+    status: 'pending_payment',
+    payment_due_at: '2030-01-11T22:59:59.000Z',
+  });
   assert.equal(s.requests.length, 1, 'export se před zápisem stáhne čerstvě');
+  // Další rezervace téhož pražského dne → další pořadí.
+  assert.equal((await read(await s.post(stay('2030-02-10', '2030-02-12')))).reservation.reservationCode, '10013002');
+});
+
+test('platební konfigurace chybí nebo je nevalidní: 503 not-configured, nic se nezapíše a hodnota se neloguje (fail closed)', async () => {
+  const bad = ['CZ1999990000001234567891', 'CZ19 9999 0000 0012 3456', 'DE89370400440532013000', 'nesmysl-PRIVATE-IBAN'];
+  for (const PAYMENT_IBAN of [undefined, '', ...bad]) {
+    const s = setup(undefined, { PAYMENT_IBAN });
+    const response = await s.post(stay('2030-02-01', '2030-02-04'));
+    assert.equal(response.status, 503, String(PAYMENT_IBAN));
+    assert.deepEqual(await response.json(), { error: 'not-configured' });
+    assert.deepEqual(s.logs, ['reservations: payment not configured']);
+    assert.equal(s.requests.length, 0, 'bez platebních údajů se nic neověřuje ani nestahuje');
+  }
+  assert.equal(await t.count('reservations'), 0);
+  assert.equal(await t.codeCounter('2030-01-10'), 0);
+});
+
+test('100. rezervace pražského dne: 503 reservation-codes-exhausted, nic se nezapíše', async () => {
+  await t.db.prepare(`INSERT INTO reservation_code_counters (day, last) VALUES ('2030-01-10', 99)`).run();
+  const s = setup();
+  const response = await s.post(stay('2030-02-01', '2030-02-04'));
+  assert.equal(response.status, 503);
+  assert.deepEqual(await response.json(), { error: 'reservation-codes-exhausted' });
+  assert.equal(await t.count('reservations'), 0);
+  assert.equal(await t.count('reserved_nights'), 0);
 });
 
 test('cena z prohlížeče se nepoužije: nesouhlasí-li očekávaná cena, rezervace nevznikne', async () => {

@@ -19,7 +19,7 @@ const plain = (text: string) => text.replace(/[  ]/g, ' ');
 const csKeys = Object.keys(cs).sort();
 const placeholders = (text: string) => [...text.matchAll(/\{(\w+)\}/g)].map((m) => m[1]).sort();
 /** Klíče, které jsou záměrně stejné ve všech jazycích (název chalupy). */
-const SAME_IN_ALL = new Set(['brand.name', 'brand.place']);
+const SAME_IN_ALL = new Set(['brand.name', 'brand.place', 'reservation.payment.iban']);
 /** Slova, která jsou v daném jazyce stejná jako česky (ne nepřeložený text). */
 const SAME_AS_CZECH = new Set(['de:reservation.form.phone']);
 

@@ -22,16 +22,15 @@ beforeEach(async () => {
 });
 
 let counter = 0;
-async function reserve(arrival: string, departure: string): Promise<NewReservation> {
+async function reserve(arrival: string, departure: string): Promise<NewReservation & { publicCode: string }> {
   counter++;
   const id = `00000000-0000-4000-8000-${String(counter).padStart(12, '0')}`;
   const r: NewReservation = {
-    id, publicCode: `CV-${String(counter).padStart(6, '0')}`, icalUid: icalUidFor(id), arrival, departure, guests: 2,
+    id, icalUid: icalUidFor(id), arrival, departure, guests: 2,
     firstName: 'Jan', lastName: 'Testovací', phone: '+420 000 000 000', email: 'test@example.invalid', priceCzk: 3000,
-    idempotencyKey: null, requestHash: null, vsPrefix: '30', createdAt: '2030-01-10T09:00:00.000Z',
+    idempotencyKey: null, requestHash: null, createdAt: '2030-01-10T09:00:00.000Z',
   };
-  await insertReservation(t.db, r);
-  return r;
+  return { ...r, publicCode: (await insertReservation(t.db, r)).code };
 }
 
 const ev = (start: string, end: string, uid: string | null = 'airbnb-1@test.invalid', codes: string[] = []): CalendarEvent => ({ start, end, uid, codes });

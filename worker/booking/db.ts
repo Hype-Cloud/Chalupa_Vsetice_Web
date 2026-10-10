@@ -5,17 +5,17 @@
 // `db.batch([...])`: příkazy běží postupně v jedné transakci a při chybě kteréhokoli z nich se
 // vrátí celý batch. Proto se kolize termínů neověřuje dotazem před zápisem, ale databázovým
 // omezením (PRIMARY KEY na reserved_nights.night) uvnitř batche, který zároveň založí
-// rezervaci a přidělí variabilní symbol.
+// rezervaci a přidělí veřejný kód DDMMYYNN (zároveň variabilní symbol).
 
 import { addDays, type IsoDate } from '../../lib/availability/dates.ts';
 import { mergeIntervals } from '../../lib/availability/occupancy.ts';
 import type { BusyInterval } from '../../lib/availability/types.ts';
+import { paymentDueAt, reservationCodeDay, reservationCodePrefix } from '../../lib/booking/payment.ts';
 
 export type ReservationStatus = 'pending_payment' | 'paid' | 'cancelled';
 
 export interface NewReservation {
   id: string;
-  publicCode: string;
   icalUid: string;
   arrival: IsoDate;
   departure: IsoDate;
@@ -29,20 +29,23 @@ export interface NewReservation {
   priceCzk: number;
   idempotencyKey: string | null;
   requestHash: string | null;
-  /** Prefix variabilního symbolu (dvojčíslí roku založení). */
-  vsPrefix: string;
+  /** Čas vytvoření (ISO 8601, UTC). Určuje pražský den v kódu rezervace i splatnost. */
   createdAt: string;
 }
 
-/** Veřejně bezpečný souhrn rezervace (bez jména, kontaktů a poznámky). */
+/** Veřejně bezpečný souhrn rezervace (bez interního ID, jména, kontaktů a poznámky). */
 export interface ReservationSummary {
+  /** Veřejný kód DDMMYYNN (u rezervací před migrací 0008 starší formát CV-…). */
   code: string;
   arrival: IsoDate;
   departure: IsoDate;
   guests: number;
   priceCzk: number;
+  /** U nových rezervací shodný s `code`. */
   variableSymbol: string;
   status: ReservationStatus;
+  /** Splatnost platby (ISO 8601, UTC). */
+  paymentDueAt: string;
 }
 
 /** Některá z nocí už patří jiné rezervaci. */
@@ -53,7 +56,15 @@ export class NightsTakenError extends Error {
   }
 }
 
-/** Porušení UNIQUE u jiného sloupce (kolize náhodného kódu, souběžný požadavek se stejným klíčem). */
+/** V daném pražském dni už bylo přiděleno všech 99 kódů rezervace – nová se nezaloží. */
+export class ReservationCodesExhaustedError extends Error {
+  constructor() {
+    super('reservation-codes-exhausted');
+    this.name = 'ReservationCodesExhaustedError';
+  }
+}
+
+/** Porušení UNIQUE u jiného sloupce (kolize ID, souběžný požadavek se stejným klíčem). */
 export class DuplicateError extends Error {
   readonly column: 'public_code' | 'idempotency_key' | 'ical_uid' | 'id' | 'variable_symbol';
   constructor(column: DuplicateError['column']) {
@@ -72,6 +83,7 @@ export function nightsOf(arrival: IsoDate, departure: IsoDate): IsoDate[] {
 
 function translateError(error: unknown): unknown {
   const message = error instanceof Error ? error.message : String(error);
+  if (message.includes('CHECK constraint failed') && message.includes('reservation_code_limit')) return new ReservationCodesExhaustedError();
   if (!message.includes('UNIQUE constraint failed')) return error;
   if (message.includes('reserved_nights.night')) return new NightsTakenError();
   for (const column of ['public_code', 'idempotency_key', 'ical_uid', 'variable_symbol', 'id'] as const) {
@@ -81,27 +93,33 @@ function translateError(error: unknown): unknown {
 }
 
 /**
- * Atomicky založí rezervaci: zvýší čítač VS, vloží rezervaci s VS odvozeným z čítače a obsadí
- * všechny její noci. Pokud je kterákoli noc obsazená, D1 vrátí celý batch (žádná rezervace,
- * žádné noci, čítač beze změny).
- * @throws NightsTakenError, DuplicateError, jinak původní chyba databáze
+ * Atomicky založí rezervaci v jednom D1 batchi:
+ * 1. UPSERT denního čítače (pražský den z createdAt) – další NN, nikdy COUNT(*) + 1,
+ * 2. INSERT rezervace s kódem DDMMYYNN z čítače (public_code i variable_symbol) a splatností,
+ * 3. obsazení všech nocí.
+ * Selže-li cokoli (obsazená noc, 100. rezervace dne → CHECK reservation_code_limit), D1 vrátí
+ * celý batch: žádná rezervace, žádné noci, čítač beze změny. Souběžné batche D1 provádí
+ * postupně, takže dvě rezervace nikdy nedostanou stejné NN (pojistkou je i UNIQUE public_code).
+ * @throws NightsTakenError, ReservationCodesExhaustedError, DuplicateError, jinak chyba databáze
  */
 export async function insertReservation(db: D1Database, r: NewReservation): Promise<ReservationSummary> {
   const nights = nightsOf(r.arrival, r.departure);
+  const day = reservationCodeDay(new Date(r.createdAt));
+  const dueAt = paymentDueAt(r.createdAt);
+  const code = `(SELECT ?16 || printf('%02d', last) FROM reservation_code_counters WHERE day = ?17)`;
   const statements = [
-    db.prepare(`UPDATE sequences SET value = value + 1 WHERE name = 'variable_symbol'`),
+    db.prepare(`INSERT INTO reservation_code_counters (day, last) VALUES (?1, 1) ON CONFLICT (day) DO UPDATE SET last = last + 1`).bind(day),
     db
       .prepare(
         `INSERT INTO reservations (id, public_code, arrival, departure, guests, first_name, last_name, phone, email, price_czk,
-           variable_symbol, status, ical_uid, idempotency_key, request_hash, created_at, updated_at, note)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10,
-           (SELECT printf('%s%06d', ?11, value) FROM sequences WHERE name = 'variable_symbol'),
-           'pending_payment', ?12, ?13, ?14, ?15, ?15, ?16)`,
+           variable_symbol, status, ical_uid, idempotency_key, request_hash, created_at, updated_at, note, payment_due_at)
+         VALUES (?1, ${code}, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9,
+           ${code}, 'pending_payment', ?10, ?11, ?12, ?13, ?13, ?14, ?15)`,
       )
-      .bind(r.id, r.publicCode, r.arrival, r.departure, r.guests, r.firstName, r.lastName, r.phone, r.email, r.priceCzk, r.vsPrefix, r.icalUid, r.idempotencyKey, r.requestHash, r.createdAt, r.note ?? null),
+      .bind(r.id, r.arrival, r.departure, r.guests, r.firstName, r.lastName, r.phone, r.email, r.priceCzk, r.icalUid, r.idempotencyKey, r.requestHash, r.createdAt, r.note ?? null, dueAt, reservationCodePrefix(day), day),
     // Jeden řádek na noc; PRIMARY KEY (night) odmítne noc, kterou už má jiná rezervace.
     ...nights.map((night) => db.prepare('INSERT INTO reserved_nights (night, reservation_id) VALUES (?1, ?2)').bind(night, r.id)),
-    db.prepare(`SELECT variable_symbol FROM reservations WHERE id = ?1`).bind(r.id),
+    db.prepare(`SELECT public_code, variable_symbol FROM reservations WHERE id = ?1`).bind(r.id),
   ];
   let results: D1Result[];
   try {
@@ -109,19 +127,19 @@ export async function insertReservation(db: D1Database, r: NewReservation): Prom
   } catch (error) {
     throw translateError(error);
   }
-  const row = results[results.length - 1].results[0] as { variable_symbol: string } | undefined;
+  const row = results[results.length - 1].results[0] as { public_code: string; variable_symbol: string } | undefined;
   if (!row) throw new Error('reservation-not-readable');
-  return { code: r.publicCode, arrival: r.arrival, departure: r.departure, guests: r.guests, priceCzk: r.priceCzk, variableSymbol: row.variable_symbol, status: 'pending_payment' };
+  return { code: row.public_code, arrival: r.arrival, departure: r.departure, guests: r.guests, priceCzk: r.priceCzk, variableSymbol: row.variable_symbol, status: 'pending_payment', paymentDueAt: dueAt };
 }
 
 export async function findByIdempotencyKey(db: D1Database, key: string): Promise<(ReservationSummary & { requestHash: string | null }) | null> {
   const row = await db
     .prepare(
-      `SELECT public_code, arrival, departure, guests, price_czk, variable_symbol, status, request_hash
+      `SELECT public_code, arrival, departure, guests, price_czk, variable_symbol, status, request_hash, created_at, payment_due_at
        FROM reservations WHERE idempotency_key = ?1`,
     )
     .bind(key)
-    .first<{ public_code: string; arrival: string; departure: string; guests: number; price_czk: number; variable_symbol: string; status: ReservationStatus; request_hash: string | null }>();
+    .first<{ public_code: string; arrival: string; departure: string; guests: number; price_czk: number; variable_symbol: string; status: ReservationStatus; request_hash: string | null; created_at: string; payment_due_at: string | null }>();
   if (!row) return null;
   return {
     code: row.public_code,
@@ -131,6 +149,8 @@ export async function findByIdempotencyKey(db: D1Database, key: string): Promise
     priceCzk: row.price_czk,
     variableSymbol: row.variable_symbol,
     status: row.status,
+    // Rezervace z doby před migrací 0008 splatnost uloženou nemají – stejné pravidlo z created_at.
+    paymentDueAt: row.payment_due_at ?? paymentDueAt(row.created_at),
     requestHash: row.request_hash,
   };
 }

@@ -51,6 +51,10 @@ export interface I18n {
   formatFullDate: (date: string) => string;
   /** Čas (ISO 8601) → den, měsíc a čas v Europe/Prague. */
   formatDateTime: (iso: string) => string;
+  /** Čas (ISO 8601) → den, měsíc, rok a čas v Europe/Prague (např. splatnost platby). */
+  formatDeadline: (iso: string) => string;
+  /** Čas (ISO 8601) → jen datum (den, měsíc, rok) v Europe/Prague, bez času. */
+  formatDeadlineDate: (iso: string) => string;
   /** První den měsíce → „Prosinec 2030“. */
   formatMonth: (monthStart: string) => string;
   /** Rozsah zobrazených měsíců → „říjen – prosinec 2026“ podle jazyka. */
@@ -79,6 +83,8 @@ export function createI18n(locale: Locale = DEFAULT_LOCALE, options: { currency?
   const fullDate = new Intl.DateTimeFormat(intl, { ...utc, weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
   // Angličtina se zkratkou měsíce: číselné „08/10“ by se dalo číst jako americké měsíc/den.
   const dateTime = new Intl.DateTimeFormat(intl, { timeZone: 'Europe/Prague', day: 'numeric', month: locale === 'en' ? 'short' : 'numeric', hour: '2-digit', minute: '2-digit' });
+  const deadlineDate = new Intl.DateTimeFormat(intl, { timeZone: 'Europe/Prague', day: 'numeric', month: locale === 'en' ? 'short' : 'numeric', year: 'numeric' });
+  const deadline = new Intl.DateTimeFormat(intl, { timeZone: 'Europe/Prague', day: 'numeric', month: locale === 'en' ? 'short' : 'numeric', year: 'numeric', hour: '2-digit', minute: '2-digit' });
   const month = new Intl.DateTimeFormat(intl, { ...utc, month: 'long', year: 'numeric' });
   const monthOnly = new Intl.DateTimeFormat(intl, { ...utc, month: 'long' });
   const weekday = new Intl.DateTimeFormat(intl, { ...utc, weekday: 'short' });
@@ -97,6 +103,8 @@ export function createI18n(locale: Locale = DEFAULT_LOCALE, options: { currency?
     formatDate: (date) => shortDate.format(asDate(date)),
     formatFullDate: (date) => fullDate.format(asDate(date)),
     formatDateTime: (iso) => dateTime.format(new Date(iso)),
+    formatDeadline: (iso) => deadline.format(new Date(iso)),
+    formatDeadlineDate: (iso) => deadlineDate.format(new Date(iso)),
     formatMonth: (monthStart) => capitalize(month.format(asDate(monthStart))),
     formatMonthRange: (first, last) => {
       if (first === last) return month.format(asDate(first));

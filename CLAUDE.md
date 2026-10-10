@@ -56,9 +56,10 @@ Skutečný stav (nastaveno ručně v dashboardu, v diffu není vidět):
     Details Read, Memberships Read).
 - Secrets se nastavují jen přes `wrangler secret put` (produkce) a
   `wrangler preview base-config secret put` (sdílené všem Worker Previews). Preview potřebuje
-  minimálně `ECHALUPY_ICAL_URL`, `BOOKING_ICAL_EXPORT_TOKEN` a `TURNSTILE_SECRET_KEY`
-  (testovací klíč Cloudflare); bez `BOOKING_ICAL_EXPORT_TOKEN` vrací `/api/reservations.ics`
-  v Preview 503 a smoke test selže.
+  minimálně `ECHALUPY_ICAL_URL`, `BOOKING_ICAL_EXPORT_TOKEN`, `TURNSTILE_SECRET_KEY`
+  (testovací klíč Cloudflare) a `PAYMENT_IBAN`; bez `BOOKING_ICAL_EXPORT_TOKEN` vrací
+  `/api/reservations.ics` v Preview 503 a smoke test selže, bez platného `PAYMENT_IBAN` vrací
+  rezervační POST 503 `not-configured` (fail closed).
 - Hodnoty tokenů a secrets **nikdy** nevypisovat, necommitovat, nedávat do PR, logů ani výstupů
   testů. Ověřovat jen podle názvu (`wrangler secret list`) nebo chování endpointu.
 
@@ -84,6 +85,9 @@ Skutečný stav (nastaveno ručně v dashboardu, v diffu není vidět):
 
 - `ECHALUPY_ICAL_URL` ani jiné soukromé URL nikdy do repozitáře, README, PR, commitů, testů
   ani klientského JS; žádné `NEXT_PUBLIC_*` pro tajné hodnoty.
+- Repozitář je veřejný: žádný skutečný bankovní účet, IBAN ani jméno majitele účtu v kódu,
+  README, testech, komentářích, PR ani logách. Účet je jen v secretu `PAYMENT_IBAN`; testy
+  používají fiktivní účet banky `9999` (`tests/helpers.ts`), `tests/payment.test.ts` to hlídá.
 - Testy a ruční ověřování jen se syntetickými daty (rok 2030, domény `.invalid`).
 - Osobní údaje hostů a obsah poznámek se nelogují a nejsou ve veřejných odpovědích.
 - `.d1-backups/` obsahuje osobní údaje: je v `.gitignore`, nikam se nenahrává a po ověření

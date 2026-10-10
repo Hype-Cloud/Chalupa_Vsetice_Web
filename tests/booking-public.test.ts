@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { handleCreateReservation, type BookingEnv } from '../worker/booking/handler.ts';
 import { SITEVERIFY_URL } from '../worker/booking/turnstile.ts';
 import { createTestDatabase } from './d1.ts';
-import { fixture } from './helpers.ts';
+import { fixture, FAKE_PAYMENT_IBAN } from './helpers.ts';
 
 // Veřejný POST /api/reservations: Turnstile, rate limit, idempotence a chybové kódy.
 // Jen smyšlené údaje; Siteverify i export e-chalup jsou falešné.
@@ -28,7 +28,7 @@ function setup(options: { siteverify?: Siteverify; limiter?: (key: string) => Pr
   let uuid = 0;
   const siteverify = options.siteverify ?? (() => Response.json({ success: true }));
   const env: BookingEnv = {
-    ECHALUPY_ICAL_URL: EXPORT_URL, DB: t.db, BOOKING_ENV: 'preview', BOOKING_API_ENABLED: 'true', TURNSTILE_SECRET_KEY: TURNSTILE_SECRET,
+    ECHALUPY_ICAL_URL: EXPORT_URL, DB: t.db, BOOKING_ENV: 'preview', BOOKING_API_ENABLED: 'true', TURNSTILE_SECRET_KEY: TURNSTILE_SECRET, PAYMENT_IBAN: FAKE_PAYMENT_IBAN,
     BOOKING_RATE_LIMITER: { limit: ({ key }) => (limiterKeys.push(key), options.limiter ? options.limiter(key) : Promise.resolve({ success: true })) },
     ...options.env,
   };

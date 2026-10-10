@@ -6,7 +6,7 @@ import { handleIcalExport } from '../worker/booking/export.ts';
 import { cancelReservation } from '../worker/booking/db.ts';
 import { SITEVERIFY_URL } from '../worker/booking/turnstile.ts';
 import { createTestDatabase } from './d1.ts';
-import { fixture } from './helpers.ts';
+import { fixture, FAKE_PAYMENT_IBAN } from './helpers.ts';
 
 // Volitelná poznámka hosta (note) v POST /api/reservations. Očekávané hodnoty jsou zapsané
 // ručně. Jen smyšlené údaje; Siteverify i export e-chalup jsou falešné.
@@ -29,7 +29,7 @@ function setup() {
   let uuid = 0;
   const env: BookingEnv = {
     ECHALUPY_ICAL_URL: 'https://ical.test.invalid/x.ics', DB: t.db, BOOKING_ENV: 'preview', BOOKING_API_ENABLED: 'true',
-    TURNSTILE_SECRET_KEY: 'turnstile-secret', BOOKING_RATE_LIMITER: { limit: async () => ({ success: true }) },
+    PAYMENT_IBAN: FAKE_PAYMENT_IBAN, TURNSTILE_SECRET_KEY: 'turnstile-secret', BOOKING_RATE_LIMITER: { limit: async () => ({ success: true }) },
   };
   const fetchFn = (async (input: RequestInfo | URL, init?: RequestInit) => {
     if (String(input) === SITEVERIFY_URL) {
@@ -157,7 +157,8 @@ test('13: poznámka není ve veřejné odpovědi rezervace ani v replay odpověd
   assert.equal(created.status, 201);
   const createdText = await created.text();
   assert.ok(!createdText.includes(MARKER) && !createdText.includes('"note"'), createdText);
-  assert.deepEqual(Object.keys(JSON.parse(createdText).reservation).sort(), ['arrival', 'code', 'departure', 'guests', 'nights', 'priceCzk', 'status', 'variableSymbol']);
+  assert.deepEqual(Object.keys(JSON.parse(createdText).reservation).sort(), ['arrival', 'departure', 'guests', 'nights', 'paymentDueAt', 'reservationCode', 'status', 'totalCzk']);
+  assert.deepEqual(Object.keys(JSON.parse(createdText).payment).sort(), ['accountNumber', 'amountCzk', 'currency', 'dueAt', 'iban', 'message', 'spayd', 'variableSymbol']);
   const replayed = await s.post(stay({ note }), headers);
   assert.equal(replayed.status, 200);
   const replayText = await replayed.text();

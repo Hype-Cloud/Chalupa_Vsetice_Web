@@ -1,6 +1,6 @@
 import test, { after, before, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
-import { cancelReservation, DuplicateError, insertReservation, listReservedNights, NightsTakenError, nightsOf, type NewReservation } from '../worker/booking/db.ts';
+import { cancelReservation, DuplicateError, insertReservation, listReservedNights, NightsTakenError, nightsOf, ReservationCodesExhaustedError, type NewReservation } from '../worker/booking/db.ts';
 import { icalUidFor } from '../lib/booking/codes.ts';
 import { createTestDatabase, failingDatabase } from './d1.ts';
 
@@ -16,7 +16,6 @@ function reservation(arrival: string, departure: string, overrides: Partial<NewR
   const id = `00000000-0000-4000-8000-${String(counter).padStart(12, '0')}`;
   return {
     id,
-    publicCode: `CV-${String(counter).padStart(6, '0')}`,
     icalUid: icalUidFor(id),
     arrival,
     departure,
@@ -28,19 +27,49 @@ function reservation(arrival: string, departure: string, overrides: Partial<NewR
     priceCzk: 3000,
     idempotencyKey: null,
     requestHash: null,
-    vsPrefix: '30',
     createdAt: '2030-01-10T10:00:00.000Z',
     ...overrides,
   };
 }
 
-test('založení rezervace: VS z čítače, stav čeká na platbu, všechny noci obsazené', async () => {
+// createdAt rezervací v testech: 2030-01-10T10:00Z = 10. 1. 2030 v Praze → kódy 100130NN.
+const DAY = '2030-01-10';
+
+test('založení rezervace: kód DDMMYYNN z denního čítače = VS, stav čeká na platbu, splatnost do konce dalšího pražského dne', async () => {
   const created = await insertReservation(t.db, reservation('2030-03-01', '2030-03-04'));
-  assert.equal(created.variableSymbol, '30000001');
+  assert.equal(created.code, '10013001');
+  assert.equal(created.variableSymbol, created.code);
   assert.equal(created.status, 'pending_payment');
+  assert.equal(created.paymentDueAt, '2030-01-11T22:59:59.000Z');
+  const row = await t.db.prepare('SELECT public_code, variable_symbol, payment_due_at, created_at FROM reservations').first();
+  assert.deepEqual(row, { public_code: '10013001', variable_symbol: '10013001', payment_due_at: '2030-01-11T22:59:59.000Z', created_at: '2030-01-10T10:00:00.000Z' });
   const nights = await t.db.prepare('SELECT night FROM reserved_nights ORDER BY night').all<{ night: string }>();
   assert.deepEqual(nights.results.map((r) => r.night), ['2030-03-01', '2030-03-02', '2030-03-03']);
-  assert.equal((await insertReservation(t.db, reservation('2030-04-01', '2030-04-02'))).variableSymbol, '30000002');
+  assert.equal((await insertReservation(t.db, reservation('2030-04-01', '2030-04-02'))).code, '10013002');
+});
+
+test('kód podle pražského dne: 22:30 UTC je už další den v Praze; nový den začíná od 01', async () => {
+  // Zima (UTC+1): pražská půlnoc je 23:00 UTC.
+  assert.equal((await insertReservation(t.db, reservation('2030-03-01', '2030-03-03', { createdAt: '2030-01-10T22:59:59.000Z' }))).code, '10013001');
+  assert.equal((await insertReservation(t.db, reservation('2030-03-05', '2030-03-07', { createdAt: '2030-01-10T23:00:00.000Z' }))).code, '11013001');
+  // Léto (UTC+2): 2030-10-09T22:30Z = 10. 10. 2030 00:30 v Praze.
+  assert.equal((await insertReservation(t.db, reservation('2030-11-01', '2030-11-03', { createdAt: '2030-10-09T21:59:00.000Z' }))).code, '09103001');
+  assert.equal((await insertReservation(t.db, reservation('2030-11-05', '2030-11-07', { createdAt: '2030-10-09T22:30:00.000Z' }))).code, '10103001');
+  assert.equal((await insertReservation(t.db, reservation('2030-11-10', '2030-11-12', { createdAt: '2030-10-09T23:10:00.000Z' }))).code, '10103002');
+  // Splatnost: konec pražského dne po uplynutí 24 h (i přes změnu času 27. 10. 2030).
+  const dst = await insertReservation(t.db, reservation('2030-12-01', '2030-12-03', { createdAt: '2030-10-26T12:00:00.000Z' }));
+  assert.equal(dst.paymentDueAt, '2030-10-27T22:59:59.000Z');
+});
+
+test('limit 99 rezervací za pražský den: 100. se nezaloží (fail closed), čítač nepřeteče', async () => {
+  await t.db.prepare('INSERT INTO reservation_code_counters (day, last) VALUES (?1, 98)').bind(DAY).run();
+  assert.equal((await insertReservation(t.db, reservation('2030-03-01', '2030-03-03'))).code, '10013099');
+  await assert.rejects(insertReservation(t.db, reservation('2030-03-05', '2030-03-07')), ReservationCodesExhaustedError);
+  assert.equal(await t.count('reservations'), 1);
+  assert.equal(await t.count('reserved_nights'), 2);
+  assert.equal(await t.codeCounter(DAY), 99);
+  // Další den se čísluje znovu od 01.
+  assert.equal((await insertReservation(t.db, reservation('2030-03-05', '2030-03-07', { createdAt: '2030-01-11T10:00:00.000Z' }))).code, '11013001');
 });
 
 test('překryvy: stejný termín, částečný překryv i pobyt uvnitř jiného se odmítnou', async () => {
@@ -65,15 +94,15 @@ test('navazující pobyty: den odjezdu jedněch je dnem příjezdu dalších', a
   assert.equal(await t.count('reservations'), 3);
 });
 
-test('neúspěšný batch se vrátí celý: žádná rezervace, žádné noci, čítač VS beze změny', async () => {
+test('neúspěšný batch se vrátí celý: žádná rezervace, žádné noci, čítač kódu beze změny', async () => {
   await insertReservation(t.db, reservation('2030-03-12', '2030-03-13'));
-  assert.equal(await t.sequence(), 1);
+  assert.equal(await t.codeCounter(DAY), 1);
   // Kolize až na poslední noci: předchozí noci a rezervace se v batchi už vložily a musí se vrátit.
   await assert.rejects(insertReservation(t.db, reservation('2030-03-09', '2030-03-13')), NightsTakenError);
   assert.equal(await t.count('reservations'), 1);
   assert.equal(await t.count('reserved_nights'), 1);
-  assert.equal(await t.sequence(), 1, 'VS se při neúspěchu nespotřebuje');
-  assert.equal((await insertReservation(t.db, reservation('2030-03-20', '2030-03-21'))).variableSymbol, '30000002');
+  assert.equal(await t.codeCounter(DAY), 1, 'čítač se vrátil spolu s batchem');
+  assert.equal((await insertReservation(t.db, reservation('2030-03-20', '2030-03-21'))).code, '10013002');
 });
 
 test('souběh: 20 současných rezervací na stejný termín → právě jedna uspěje', async () => {
@@ -83,7 +112,7 @@ test('souběh: 20 současných rezervací na stejný termín → právě jedna u
   for (const r of results) if (r.status === 'rejected') assert.ok(r.reason instanceof NightsTakenError);
   assert.equal(await t.count('reservations'), 1);
   assert.equal(await t.count('reserved_nights'), 4);
-  assert.equal(await t.sequence(), 1);
+  assert.equal(await t.codeCounter(DAY), 1);
 });
 
 test('souběh: částečně se překrývající rezervace → žádná noc není obsazená dvakrát', async () => {
@@ -104,16 +133,21 @@ test('souběh: částečně se překrývající rezervace → žádná noc není
   assert.ok(rows.results.length >= 2);
 });
 
-test('souběh: různé termíny dostanou unikátní VS bez mezer', async () => {
+test('souběh: různé termíny ve stejném dni dostanou unikátní kódy 01–12 (atomický čítač v D1)', async () => {
   const days = Array.from({ length: 12 }, (_, i) => `2030-07-${String(i * 2 + 1).padStart(2, '0')}`);
   const created = await Promise.all(days.map((day, i) => insertReservation(t.db, reservation(day, `2030-07-${String(i * 2 + 2).padStart(2, '0')}`))));
-  const symbols = created.map((r) => r.variableSymbol).sort();
-  assert.deepEqual(symbols, Array.from({ length: 12 }, (_, i) => `30${String(i + 1).padStart(6, '0')}`));
+  const codes = created.map((r) => r.code).sort();
+  assert.deepEqual(codes, Array.from({ length: 12 }, (_, i) => `100130${String(i + 1).padStart(2, '0')}`));
+  assert.ok(created.every((r) => r.variableSymbol === r.code));
+  assert.equal(await t.codeCounter(DAY), 12);
 });
 
 test('unikátní veřejný kód, iCal UID a idempotency key hlídá databáze', async () => {
-  await insertReservation(t.db, reservation('2030-08-01', '2030-08-02', { publicCode: 'CV-AAAAAA', idempotencyKey: 'klic-0000000000000001' }));
-  await assert.rejects(insertReservation(t.db, reservation('2030-08-05', '2030-08-06', { publicCode: 'CV-AAAAAA' })), (e) => e instanceof DuplicateError && e.column === 'public_code');
+  await insertReservation(t.db, reservation('2030-08-01', '2030-08-02', { idempotencyKey: 'klic-0000000000000001' }));
+  // Poškozený čítač (ručně vynulovaný) by vydal už použitý kód – odmítne ho UNIQUE na public_code
+  // i variable_symbol (obsahují stejnou hodnotu; SQLite nahlásí první porušený index).
+  await t.db.prepare('DELETE FROM reservation_code_counters').run();
+  await assert.rejects(insertReservation(t.db, reservation('2030-08-05', '2030-08-06')), (e) => e instanceof DuplicateError && (e.column === 'public_code' || e.column === 'variable_symbol'));
   await assert.rejects(insertReservation(t.db, reservation('2030-08-05', '2030-08-06', { idempotencyKey: 'klic-0000000000000001' })), (e) => e instanceof DuplicateError && e.column === 'idempotency_key');
   const uid = (await t.db.prepare('SELECT ical_uid FROM reservations').first<{ ical_uid: string }>())!.ical_uid;
   await assert.rejects(insertReservation(t.db, reservation('2030-08-05', '2030-08-06', { icalUid: uid })), (e) => e instanceof DuplicateError && e.column === 'ical_uid');

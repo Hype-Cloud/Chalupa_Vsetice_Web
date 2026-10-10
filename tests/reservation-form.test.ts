@@ -7,6 +7,7 @@ import {
   EMPTY_CONTACT,
   FIELD_ERROR_KEYS,
   isRetryable,
+  parseConfirmation,
   payloadFingerprint,
   postReservation,
   reservationErrorKey,
@@ -25,7 +26,7 @@ import { TurnstileError } from '../components/booking/invisibleTurnstile.ts';
 import { CATALOGS, createI18n, LOCALES } from '../lib/i18n/index.ts';
 import { parseJsonc } from '../scripts/lib/d1-migrations.ts';
 import { createTestDatabase } from './d1.ts';
-import { fixture } from './helpers.ts';
+import { fixture, FAKE_ACCOUNT_NUMBER, FAKE_PAYMENT_IBAN } from './helpers.ts';
 
 // Veřejný rezervační formulář: request podle kontraktu POST /api/reservations, životní cyklus
 // Idempotency-Key, Turnstile, změna ceny a chybové stavy. Jen smyšlené údaje (2030, .invalid).
@@ -118,7 +119,17 @@ function controller(results: SubmitResult[], tokens: TokenOutcome[] = []) {
   });
   return { c, calls, states, events, last: () => states[states.length - 1], executions: () => events.filter((e) => e.startsWith('turnstile:')).length, priceRefreshes: () => priceRefreshes };
 }
-const SUCCESS: SubmitResult = { kind: 'success', reservation: { code: 'CV-ABC234', arrival: '2030-02-01', departure: '2030-02-04', guests: 2, priceCzk: 8970, nights: 3 }, replayed: false };
+const SUCCESS: SubmitResult = {
+  kind: 'success',
+  reservation: {
+    reservationCode: '10013001', arrival: '2030-02-01', departure: '2030-02-04', guests: 2, totalCzk: 8970, nights: 3, paymentDueAt: '2030-01-11T22:59:59.000Z',
+    payment: {
+      amountCzk: 8970, currency: 'CZK', accountNumber: FAKE_ACCOUNT_NUMBER, iban: FAKE_PAYMENT_IBAN, variableSymbol: '10013001', message: 'Rezervace 10013001',
+      dueAt: '2030-01-11T22:59:59.000Z', spayd: `SPD*1.0*ACC:${FAKE_PAYMENT_IBAN}*AM:8970.00*CC:CZK*MSG:Rezervace 10013001*X-VS:10013001`,
+    },
+  },
+  replayed: false,
+};
 
 test('kliknutí nejdřív spustí Invisible Turnstile, POST až s získaným tokenem; stav success', async () => {
   const t = controller([SUCCESS]);
@@ -302,7 +313,7 @@ function backend(options: { siteverify?: boolean; env?: Partial<BookingEnv> } = 
   const requests: Request[] = [];
   const env: BookingEnv = {
     ECHALUPY_ICAL_URL: 'https://ical.test.invalid/x.ics', DB: t.db, BOOKING_ENV: 'preview', BOOKING_API_ENABLED: 'true',
-    TURNSTILE_SECRET_KEY: 'turnstile-secret', BOOKING_RATE_LIMITER: { limit: async () => ({ success: true }) }, ...options.env,
+    PAYMENT_IBAN: FAKE_PAYMENT_IBAN, TURNSTILE_SECRET_KEY: 'turnstile-secret', BOOKING_RATE_LIMITER: { limit: async () => ({ success: true }) }, ...options.env,
   };
   let uuid = 0;
   const upstream = (async (input: RequestInfo | URL) =>
@@ -324,7 +335,8 @@ test('POST: správný request (JSON, Idempotency-Key, turnstileToken, expectedPr
   const b = backend();
   const key = crypto.randomUUID();
   const result = await postReservation(payload({ contact: { ...CONTACT, note: 'Přijedeme večer.' } }), TOKEN, key, b.fetchFn);
-  assert.deepEqual(result, { kind: 'success', reservation: { code: (result as { reservation: { code: string } }).reservation.code, arrival: '2030-02-01', departure: '2030-02-04', guests: 2, priceCzk: 8970, nights: 3 }, replayed: false });
+  // Potvrzení nese jen data ze serverové odpovědi: kód z D1, cena z /api/quote výpočtu, splatnost a SPAYD.
+  assert.deepEqual(result, SUCCESS);
   const [request] = b.requests;
   assert.equal(request.method, 'POST');
   assert.equal(new URL(request.url).pathname, '/api/reservations');
@@ -420,4 +432,19 @@ test('wrangler.jsonc: veřejný testovací Invisible site key jen v Preview, pro
   assert.ok(!('TURNSTILE_SITE_KEY' in config.vars));
   assert.ok(!('BOOKING_API_ENABLED' in config.vars), 'produkční POST zůstává vypnutý');
   assert.ok(!Object.keys(config.previews.vars).some((k) => /SECRET/.test(k)), 'secret nepatří do vars');
+});
+
+test('potvrzení rezervace: neúplná nebo nekonzistentní odpověď serveru se nepřijme (nic se nedopočítává)', () => {
+  const body = (reservation: Record<string, unknown>, payment: Record<string, unknown> = {}) => {
+    const ok = SUCCESS as Extract<SubmitResult, { kind: 'success' }>;
+    return { reservation: { ...ok.reservation, payment: undefined, ...reservation }, payment: { ...ok.reservation.payment, ...payment } };
+  };
+  const ok = SUCCESS as Extract<SubmitResult, { kind: 'success' }>;
+  assert.deepEqual(parseConfirmation(body({})), ok.reservation);
+  assert.equal(parseConfirmation({ reservation: body({}).reservation }), null, 'bez platebních údajů');
+  assert.equal(parseConfirmation(body({ totalCzk: 8000 })), null, 'částka platby musí být 100 % ceny');
+  assert.equal(parseConfirmation(body({}, { dueAt: '2030-01-12T10:00:00.000Z' })), null, 'splatnost musí souhlasit');
+  assert.equal(parseConfirmation(body({}, { spayd: '' })), null);
+  assert.equal(parseConfirmation(body({}, { currency: 'EUR' })), null);
+  assert.equal(parseConfirmation(body({ reservationCode: undefined })), null);
 });

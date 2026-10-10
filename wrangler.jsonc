@@ -46,6 +46,7 @@
   // Worker Previews nedědí proměnné ani bindingy z produkce: mají vlastní testovací D1
   // a jen zde je zapnutý rezervační POST (Turnstile + rate limit, volitelně BOOKING_API_TOKEN) a výstupní iCal
   // (token BOOKING_ICAL_EXPORT_TOKEN v query stringu, skrytý přes redact_query_string).
+  // Rezervační POST vyžaduje secret PAYMENT_IBAN (wrangler preview base-config secret put), nikdy zde.
   "previews": {
     "observability": {
       "redact_query_string": true,

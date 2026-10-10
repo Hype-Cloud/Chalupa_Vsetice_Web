@@ -5,7 +5,7 @@ import { validateBooking } from '../worker/booking/validation.ts';
 import { findExternalConflict, isOwnEcho } from '../worker/booking/external.ts';
 import { parseBusyIntervals, parseCalendarEvents } from '../worker/ical.ts';
 import { getAvailability, resetAvailabilityMemory, type AvailabilityDeps } from '../worker/availability.ts';
-import { newReservationCode, RESERVATION_CODE } from '../lib/booking/codes.ts';
+import { RESERVATION_CODE } from '../lib/booking/codes.ts';
 import { fixture, RANGE_2030 } from './helpers.ts';
 
 const TODAY = '2030-01-10';
@@ -56,12 +56,16 @@ test('validace kontaktů: jméno, telefon, e-mail, řídicí znaky', () => {
   assert.deepEqual(fields([VALID]), ['body']);
 });
 
-test('veřejný kód rezervace: formát CV-XXXXXX bez zaměnitelných znaků', () => {
-  for (let i = 0; i < 200; i++) {
-    const code = newReservationCode();
-    assert.match(code, /^CV-[0-9A-HJKMNP-TV-Z]{6}$/);
-    assert.deepEqual(code.match(RESERVATION_CODE), [code]);
-  }
+test('kód rezervace v textu exportu e-chalup: DDMMYYNN jen v našem kontextu, starší CV-… vždy', () => {
+  const codes = (text: string) => text.match(RESERVATION_CODE) ?? [];
+  assert.deepEqual(codes('Web 10102602 – Jan Testovací'), ['10102602']);
+  assert.deepEqual(codes('[TEST] ZRUŠENO – Web 10102602'), ['10102602']);
+  assert.deepEqual(codes('REZERVACE Z WEBU\nKód rezervace: 10102602\nVariabilní symbol: 10102602'), ['10102602']);
+  assert.deepEqual(codes('Rezervace z webu 10102602 byla zrušena.'), ['10102602']);
+  assert.deepEqual(codes('Web CV-7K3M9Q – Jan'), ['CV-7K3M9Q']);
+  // Samotné osmimístné číslo (telefon, cizí rezervace) se za náš kód nepovažuje.
+  assert.deepEqual(codes('Booking 10102602, tel. 77712345678, Web 101026021'), []);
+  assert.deepEqual(codes('Airbnb HM10102602'), []);
 });
 
 test('export: událost nese UID a kódy rezervace, API obsazenosti je dál nevrací', () => {
