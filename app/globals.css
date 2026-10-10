@@ -231,18 +231,24 @@ header nav a, .nav-cta { white-space:nowrap; }
 .booking-success { animation:booking-success-in .35s cubic-bezier(.22,.61,.36,1) both; }
 @keyframes booking-success-in { from { opacity:0; transform:translateY(10px); } to { opacity:1; transform:none; } }
 @media (prefers-reduced-motion: reduce) { .booking-success { animation:none; } }
-.booking-success-title { margin:0 0 22px; font-size:30px; line-height:1.25; text-align:center; text-wrap:balance; outline:none; }
-.booking-success .estimate { margin-top:0; padding:18px 0; gap:10px; border-bottom:1px solid rgba(219,232,189,.2); }
+.booking-success-title { margin:0 0 14px; font-size:30px; line-height:1.25; text-align:center; text-wrap:balance; outline:none; }
+.booking-success .estimate { margin-top:0; padding:14px 0; gap:8px; border-bottom:1px solid rgba(219,232,189,.2); }
 .booking-success-note { margin:20px 0 0; font-size:13px; line-height:1.6; color:#b9c9be; text-align:center; }
-.booking-success-status { margin:-8px 0 18px; font-size:14px; line-height:1.6; color:#f3d9c9; text-align:center; text-wrap:balance; }
+.booking-success-status { margin:-4px 0 14px; font-size:14px; line-height:1.6; color:#f3d9c9; text-align:center; text-wrap:balance; }
 .booking-success-code, .booking-payment dd { font-variant-numeric:tabular-nums; }
 .booking-success-code { letter-spacing:.06em; }
-.booking-payment { margin-top:22px; }
-.booking-payment-heading { margin:0 0 14px; font-family:Georgia,'Times New Roman',serif; font-size:20px; line-height:1.3; color:#fff; text-align:center; }
-.booking-payment-qr { display:block; width:min(200px, 70%); height:auto; margin:0 auto 6px; border-radius:var(--bk-radius-sm, 6px); }
+.booking-payment { margin-top:16px; }
+.booking-payment-heading { margin:0 0 10px; font-family:Georgia,'Times New Roman',serif; font-size:20px; line-height:1.3; color:#fff; text-align:center; }
+.booking-payment-qr { display:block; width:min(184px, 62%); height:auto; margin:0 auto; border-radius:var(--bk-radius-sm, 6px); }
 .booking-payment .estimate { margin-top:14px; }
+.booking-payment-more { border-bottom:1px solid rgba(219,232,189,.2); }
+.booking-payment-more summary { padding:10px 0; font-size:13px; color:#b9c9be; text-align:center; cursor:pointer; }
+.booking-payment-more summary:hover { color:#dbe8bd; }
+.booking-payment-more summary:focus-visible { outline:3px solid #b5913e; outline-offset:2px; }
+.booking-payment .booking-payment-more .estimate { margin-top:0; padding-top:4px; border-top:0; border-bottom:0; }
+.booking-success .booking-payment > .estimate { border-bottom:0; }
 .booking-payment-iban { overflow-wrap:anywhere; }
-.booking-success-thanks { margin:10px 0 0; font-family:Georgia,'Times New Roman',serif; font-size:18px; line-height:1.4; color:#dbe8bd; text-align:center; }
+.booking-success-thanks { margin:14px 0 0; font-family:Georgia,'Times New Roman',serif; font-size:18px; line-height:1.4; color:#dbe8bd; text-align:center; }
 @media(max-width:1000px) { .booking-form-row { margin-top:32px; } }
 @media(max-width:640px) {
   .booking { padding:24px 20px; }

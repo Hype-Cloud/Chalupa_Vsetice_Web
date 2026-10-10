@@ -553,9 +553,10 @@ web dál nabízí poptávku přes e-chalupy.
   změnila z X na Y. Zkontrolujte ji a rezervaci znovu potvrďte.“ Další odeslání = vědomé
   potvrzení s novým klíčem.
 - **Úspěch:** potvrzení v panelu (bez eyebrow) – titulek „Rezervace přijata“, informace, že
-  rezervace čeká na platbu a do kdy ji uhradit, termín, noci, hosté, celková cena a kód rezervace
-  (s poznámkou, že jde zároveň o variabilní symbol). Pod tím blok Platba: QR Platba a vždy i ruční
-  údaje (částka, číslo účtu, IBAN, VS, splatnost). Vše je ze serverové odpovědi
+  rezervace čeká na platbu a do kdy ji uhradit, termín, délka pobytu, hosté, celková cena a
+  „Kód rezervace (= VS)“. Pod tím blok Platba: QR Platba, číslo účtu a splatnost; IBAN je ve
+  sbaleném nativním `<details>` „Další platební údaje“. Částka a variabilní symbol se pod QR
+  neopakují (jsou v souhrnu jako celková cena a kód rezervace). Vše je ze serverové odpovědi
   (`parseConfirmation` odmítne neúplnou nebo nekonzistentní odpověď); nic se nedopočítává.
   Splatnost: den → měsíc → rok a čas v `Europe/Prague` (`formatDeadline`). Nepodaří-li se QR
   vykreslit, zobrazí se jen hláška a ruční údaje – rezervace platí dál. O e-mailu se zatím nic

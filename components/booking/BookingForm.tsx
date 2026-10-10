@@ -154,7 +154,6 @@ export function BookingSuccess({ reservation }: { reservation: ReservationConfir
         <div><dt>{t('reservation.success.price')}</dt><dd>{formatPrice(reservation.totalCzk)}</dd></div>
         <div><dt>{t('reservation.success.code')}</dt><dd className="booking-success-code">{reservation.reservationCode}</dd></div>
       </dl>
-      <p className="booking-success-note">{t('reservation.payment.variableSymbolNote')}</p>
       <PaymentDetails payment={reservation.payment} />
       <p className="booking-success-thanks">{t('reservation.success.thanks')}</p>
     </div>
