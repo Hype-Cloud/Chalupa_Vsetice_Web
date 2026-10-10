@@ -234,19 +234,31 @@ header nav a, .nav-cta { white-space:nowrap; }
 .booking-success-title { margin:0 0 14px; font-size:30px; line-height:1.25; text-align:center; text-wrap:balance; outline:none; }
 .booking-success .estimate { margin-top:0; padding:14px 0; gap:8px; border-bottom:1px solid rgba(219,232,189,.2); }
 .booking-success-note { margin:20px 0 0; font-size:13px; line-height:1.6; color:#b9c9be; text-align:center; }
-.booking-success-status { margin:-4px 0 14px; font-size:14px; line-height:1.6; color:#f3d9c9; text-align:center; text-wrap:balance; }
-.booking-success-code, .booking-payment dd { font-variant-numeric:tabular-nums; }
-.booking-success-code { letter-spacing:.06em; }
 .booking-payment { margin-top:16px; }
 .booking-payment-heading { margin:0 0 10px; font-family:Georgia,'Times New Roman',serif; font-size:20px; line-height:1.3; color:#fff; text-align:center; }
-.booking-payment-qr { display:block; width:min(184px, 62%); height:auto; margin:0 auto; border-radius:var(--bk-radius-sm, 6px); }
+.booking-payment dd { font-variant-numeric:tabular-nums; }
+.booking-payment-due { margin:-2px 0 12px; font-size:14px; line-height:1.5; color:#f3d9c9; text-align:center; text-wrap:balance; }
+/* QR jako skutečný obrázek: dlouhým podržením jde na mobilu uložit (nic to nesmí blokovat). */
+.booking-payment-qr { display:block; width:min(184px, 62%); height:auto; margin:0 auto; border-radius:var(--bk-radius-sm, 6px); -webkit-touch-callout:default; -webkit-user-select:auto; user-select:auto; }
+.booking-payment-hint { display:none; margin:8px 0 0; font-size:12px; line-height:1.5; color:#b9c9be; text-align:center; }
+@media (hover:none) and (pointer:coarse) { .booking-payment-hint { display:block; } }
 .booking-payment .estimate { margin-top:14px; }
 .booking-payment-more { border-bottom:1px solid rgba(219,232,189,.2); }
 .booking-payment-more summary { padding:10px 0; font-size:13px; color:#b9c9be; text-align:center; cursor:pointer; }
 .booking-payment-more summary:hover { color:#dbe8bd; }
 .booking-payment-more summary:focus-visible { outline:3px solid #b5913e; outline-offset:2px; }
-.booking-payment .booking-payment-more .estimate { margin-top:0; padding-top:4px; border-top:0; border-bottom:0; }
-.booking-success .booking-payment > .estimate { border-bottom:0; }
+.booking-payment .booking-payment-more .estimate { margin-top:0; padding-top:2px; border-top:0; border-bottom:0; }
+.booking-payment-more dd { display:flex; align-items:center; justify-content:flex-end; gap:4px; min-width:0; }
+.booking-payment-more .booking-payment-iban { min-width:0; }
+.copy-control { position:relative; display:inline-flex; flex:none; }
+.copy-spacer { display:inline-block; }
+.copy-button, .copy-spacer { width:28px; height:28px; margin:-6px -6px -6px 0; flex:none; }
+.copy-button { display:inline-flex; align-items:center; justify-content:center; padding:0; border:0; border-radius:6px; background:transparent; color:#9fb3a8; cursor:pointer; transition:color .15s, background-color .15s; }
+.copy-button:hover { color:#fff; background:rgba(255,255,255,.08); }
+.copy-button:focus-visible { outline:2px solid #b5913e; outline-offset:1px; }
+.copy-feedback { position:absolute; right:-6px; bottom:calc(100% + 6px); padding:2px 7px; border-radius:4px; background:#0b1f19; color:#dbe8bd; font-size:11px; font-weight:400; line-height:1.5; white-space:nowrap; opacity:0; pointer-events:none; transition:opacity .15s; }
+.copy-feedback.is-shown { opacity:1; }
+@media (prefers-reduced-motion: reduce) { .copy-button, .copy-feedback { transition:none; } }
 .booking-payment-iban { overflow-wrap:anywhere; }
 .booking-success-thanks { margin:14px 0 0; font-family:Georgia,'Times New Roman',serif; font-size:18px; line-height:1.4; color:#dbe8bd; text-align:center; }
 @media(max-width:1000px) { .booking-form-row { margin-top:32px; } }

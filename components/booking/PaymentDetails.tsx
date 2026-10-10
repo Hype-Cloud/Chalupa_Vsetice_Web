@@ -1,35 +1,54 @@
 import { useMemo } from 'react';
 import type { PaymentInstructions } from '../../lib/booking/payment.ts';
 import { useI18n } from '../i18n.ts';
-import { qrPath } from './paymentQr.ts';
+import { CopyButton } from './CopyButton.tsx';
+import { qrRendering } from './paymentQr.ts';
 
 /**
- * Platební údaje v potvrzení rezervace: QR Platba, číslo účtu a splatnost; IBAN ve sbaleném
- * „Další platební údaje“. Částka a VS se neopakují – jsou v souhrnu nad tím (celková cena,
- * kód rezervace = VS).
+ * Platba v potvrzení rezervace: splatnost, QR Platba jako skutečný obrázek (dlouhým podržením
+ * jde na mobilu uložit) a sbalené ruční platební údaje s kopírováním. Nepodaří-li se QR vytvořit,
+ * ruční údaje jsou rovnou rozbalené.
  */
 export function PaymentDetails({ payment }: { payment: PaymentInstructions }) {
-  const { t, formatDeadline } = useI18n();
-  const qr = useMemo(() => qrPath(payment.spayd), [payment.spayd]);
+  const { t, formatPrice, formatDeadline } = useI18n();
+  const qr = useMemo(() => qrRendering(payment.spayd), [payment.spayd]);
+  const qrLabel = t('reservation.payment.qrLabel');
+  const rows: { label: string; display: string; copy?: string; className?: string }[] = [
+    { label: t('reservation.payment.amount'), display: formatPrice(payment.amountCzk), copy: String(payment.amountCzk) },
+    { label: t('reservation.payment.account'), display: payment.accountNumber, copy: payment.accountNumber },
+    { label: t('reservation.payment.iban'), display: payment.iban, copy: payment.iban, className: 'booking-payment-iban' },
+    { label: t('reservation.payment.variableSymbol'), display: payment.variableSymbol, copy: payment.variableSymbol },
+    { label: t('reservation.payment.due'), display: formatDeadline(payment.dueAt) },
+  ];
   return (
     <section className="booking-payment" aria-labelledby="booking-payment-heading">
       <p className="booking-payment-heading" id="booking-payment-heading">{t('reservation.payment.heading')}</p>
-      {qr ? (
-        <svg className="booking-payment-qr" viewBox={`-2 -2 ${qr.size + 4} ${qr.size + 4}`} role="img" aria-label={t('reservation.payment.qrLabel')} shapeRendering="crispEdges">
+      <p className="booking-payment-due">{t('reservation.payment.payBy', { due: formatDeadline(payment.dueAt) })}</p>
+      {qr.kind === 'img' && (
+        <>
+          <img className="booking-payment-qr" src={qr.src} alt={qrLabel} width={184} height={184} />
+          <p className="booking-payment-hint">{t('reservation.payment.qrSaveHint')}</p>
+        </>
+      )}
+      {qr.kind === 'svg' && (
+        <svg className="booking-payment-qr" viewBox={`-2 -2 ${qr.size + 4} ${qr.size + 4}`} role="img" aria-label={qrLabel} shapeRendering="crispEdges">
           <rect x={-2} y={-2} width={qr.size + 4} height={qr.size + 4} fill="#fff" />
           <path d={qr.d} fill="#0b1f19" />
         </svg>
-      ) : (
-        <p className="booking-success-note" role="note">{t('reservation.payment.qrUnavailable')}</p>
       )}
-      <dl className="estimate">
-        <div><dt>{t('reservation.payment.account')}</dt><dd>{payment.accountNumber}</dd></div>
-        <div><dt>{t('reservation.payment.due')}</dt><dd>{formatDeadline(payment.dueAt)}</dd></div>
-      </dl>
-      <details className="booking-payment-more">
-        <summary>{t('reservation.payment.more')}</summary>
+      {qr.kind === 'none' && <p className="booking-success-note" role="note">{t('reservation.payment.qrUnavailable')}</p>}
+      <details className="booking-payment-more" open={qr.kind === 'none'}>
+        <summary>{t('reservation.payment.details')}</summary>
         <dl className="estimate">
-          <div><dt>{t('reservation.payment.iban')}</dt><dd className="booking-payment-iban">{payment.iban}</dd></div>
+          {rows.map((row) => (
+            <div key={row.label}>
+              <dt>{row.label}</dt>
+              <dd>
+                <span className={row.className}>{row.display}</span>
+                {row.copy ? <CopyButton value={row.copy} label={row.label} /> : <span className="copy-spacer" aria-hidden />}
+              </dd>
+            </div>
+          ))}
         </dl>
       </details>
     </section>

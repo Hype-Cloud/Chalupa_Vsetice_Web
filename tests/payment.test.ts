@@ -12,7 +12,9 @@ import {
   reservationCodeDay,
   reservationCodePrefix,
 } from '../lib/booking/payment.ts';
-import { qrPath } from '../components/booking/paymentQr.ts';
+import { inflateSync } from 'node:zlib';
+import { qrMatrix, qrPngBytes, qrRendering, qrSvgPath, QR_QUIET_MODULES } from '../components/booking/paymentQr.ts';
+import { copyText } from '../components/booking/clipboard.ts';
 import { FAKE_ACCOUNT_NUMBER, FAKE_PAYMENT_IBAN } from './helpers.ts';
 
 // Čisté platební funkce (kód rezervace, splatnost, účet, SPAYD). Jen fiktivní účet (banka 9999).
@@ -83,15 +85,56 @@ test('SPAYD odmítne neplatné hodnoty (nic se nevytvoří s chybnou částkou, 
   }
 });
 
-test('QR Platba se vykreslí lokálně z SPAYD (uqr), bez externí služby', () => {
+test('QR Platba: skutečný PNG obrázek ze stejné matice; při selhání převodu SVG, při selhání kódování nic', () => {
   const spayd = buildSpayd({ iban: FAKE_PAYMENT_IBAN, amountCzk: 8970, variableSymbol: '10102602', message: 'Rezervace 10102602' });
-  const qr = qrPath(spayd);
-  assert.ok(qr && qr.size >= 21 && qr.d.startsWith('M'));
-  assert.deepEqual(qrPath(spayd), qr, 'deterministické');
-  // Nevykreslitelný vstup → null (UI pak ukáže jen ruční údaje).
-  assert.equal(qrPath('x'.repeat(10_000)), null);
-  const source = readFileSync(join(ROOT, 'components/booking/paymentQr.ts'), 'utf8') + readFileSync(join(ROOT, 'components/booking/PaymentDetails.tsx'), 'utf8');
-  assert.doesNotMatch(source, /https?:\/\/|fetch\(|dangerouslySetInnerHTML/);
+  const matrix = qrMatrix(spayd)!;
+  assert.ok(matrix.size >= 21);
+  // Primárně <img> s PNG (data URL), deterministicky.
+  const primary = qrRendering(spayd);
+  assert.equal(primary.kind, 'img');
+  assert.match((primary as { src: string }).src, /^data:image\/png;base64,/);
+  assert.deepEqual(qrRendering(spayd), primary);
+  // PNG: paleta 2 barvy, 1 bit, každý pixel odpovídá modulu matice (+ bílý okraj).
+  const png = Buffer.from(qrPngBytes(matrix, 2));
+  assert.equal(png.subarray(1, 4).toString(), 'PNG');
+  const width = png.readUInt32BE(16);
+  assert.equal(width, (matrix.size + 2 * QR_QUIET_MODULES) * 2);
+  assert.deepEqual([...png.subarray(24, 26)], [1, 3]);
+  const idat = png.indexOf('IDAT');
+  const pixels = inflateSync(png.subarray(idat + 4, idat + 4 + png.readUInt32BE(idat - 4)));
+  const rowBytes = Math.ceil(width / 8) + 1;
+  for (let y = 0; y < width; y++) {
+    for (let x = 0; x < width; x++) {
+      const dark = (pixels[y * rowBytes + 1 + (x >> 3)] & (0x80 >> (x & 7))) !== 0;
+      const module = matrix.data[Math.floor(y / 2) - QR_QUIET_MODULES]?.[Math.floor(x / 2) - QR_QUIET_MODULES] ?? false;
+      assert.equal(dark, module, `pixel ${x},${y}`);
+    }
+  }
+  // Selže jen převod na obrázek → SVG ze stejné matice.
+  assert.deepEqual(qrRendering(spayd, () => { throw new Error('png'); }), { kind: 'svg', size: matrix.size, d: qrSvgPath(matrix) });
+  // Selže samotné kódování → žádné QR (UI rozbalí ruční platební údaje).
+  assert.deepEqual(qrRendering('x'.repeat(10_000)), { kind: 'none' });
+  const source = ['paymentQr.ts', 'PaymentDetails.tsx', 'CopyButton.tsx', 'clipboard.ts'].map((f) => readFileSync(join(ROOT, 'components/booking', f), 'utf8')).join('\n');
+  assert.doesNotMatch(source, /https?:\/\/|fetch\(|dangerouslySetInnerHTML|getContext\(|toDataURL\(/);
+});
+
+test('kopírování platebních údajů: Clipboard API, záložně execCommand, jinak neúspěch bez výjimky', async () => {
+  const written: string[] = [];
+  assert.equal(await copyText('1234567890/9999', { clipboard: { writeText: async (text) => void written.push(text) } }), true);
+  assert.deepEqual(written, ['1234567890/9999']);
+  const fakeDocument = (result: boolean) => {
+    const appended: { value: string }[] = [];
+    const area = { value: '', style: {}, setAttribute() {}, select() {}, remove() { appended.pop(); } };
+    return {
+      appended,
+      doc: { body: { appendChild: (el: { value: string }) => appended.push(el) }, createElement: () => area, execCommand: () => (appended[0]?.value === '10102602' ? result : false) } as unknown as Document,
+    };
+  };
+  const ok = fakeDocument(true);
+  assert.equal(await copyText('10102602', { clipboard: { writeText: () => Promise.reject(new Error('denied')) }, document: ok.doc }), true);
+  assert.equal(ok.appended.length, 0, 'pomocný textarea se odstraní');
+  assert.equal(await copyText('10102602', { document: fakeDocument(false).doc }), false);
+  assert.equal(await copyText('10102602', {}), false);
 });
 
 test('repozitář neobsahuje skutečný český IBAN – jen fiktivní účty banky 9999', () => {
