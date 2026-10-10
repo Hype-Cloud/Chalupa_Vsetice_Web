@@ -562,8 +562,7 @@ web dál nabízí poptávku přes e-chalupy.
   v potvrzovacím e-mailu). Platební část (bez nadpisu) navazuje přímo na souhrn: QR Platba jako
   skutečný `<img>` (lokálně vytvořený PNG, `components/booking/paymentQr.ts`; na mobilu jde uložit
   dlouhým podržením, dotyková zařízení – `@media (hover:none) and (pointer:coarse)` – ukážou
-  nápovědu „Podržte QR kód pro uložení.“) a sbalené `<details>` „Platební údaje“: částka, číslo účtu, IBAN, variabilní symbol
-  a splatnost; u prvních čtyř tlačítko kopírování (Clipboard API, záložně `execCommand`,
+  nápovědu „Podržte QR kód pro uložení.“) a sbalené `<details>` „Platební údaje“: částka, číslo účtu, IBAN a variabilní symbol, každý s tlačítkem kopírování (Clipboard API, záložně `execCommand`,
   zpětná vazba „Zkopírováno“ bez posunu layoutu). Fallback QR: selže-li převod na PNG, vykreslí
   se SVG ze stejné matice; selže-li kódování, QR se nezobrazí a platební údaje jsou rozbalené.
   Vše je ze serverové odpovědi (`parseConfirmation` odmítne neúplnou nebo nekonzistentní

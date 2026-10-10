@@ -10,15 +10,15 @@ import { qrRendering } from './paymentQr.ts';
  * ruční údaje jsou rovnou rozbalené.
  */
 export function PaymentDetails({ payment }: { payment: PaymentInstructions }) {
-  const { t, formatPrice, formatDeadline } = useI18n();
+  const { t, formatPrice } = useI18n();
   const qr = useMemo(() => qrRendering(payment.spayd), [payment.spayd]);
   const qrLabel = t('reservation.payment.qrLabel');
-  const rows: { label: string; display: string; copy?: string; className?: string }[] = [
+  // Splatnost je v souhrnu nad QR, tady se neopakuje.
+  const rows: { label: string; display: string; copy: string; className?: string }[] = [
     { label: t('reservation.payment.amount'), display: formatPrice(payment.amountCzk), copy: String(payment.amountCzk) },
     { label: t('reservation.payment.account'), display: payment.accountNumber, copy: payment.accountNumber },
     { label: t('reservation.payment.iban'), display: payment.iban, copy: payment.iban, className: 'booking-payment-iban' },
     { label: t('reservation.payment.variableSymbol'), display: payment.variableSymbol, copy: payment.variableSymbol },
-    { label: t('reservation.payment.due'), display: formatDeadline(payment.dueAt) },
   ];
   return (
     <div className="booking-payment">
@@ -43,7 +43,7 @@ export function PaymentDetails({ payment }: { payment: PaymentInstructions }) {
               <dt>{row.label}</dt>
               <dd>
                 <span className={row.className}>{row.display}</span>
-                {row.copy ? <CopyButton value={row.copy} label={row.label} /> : <span className="copy-spacer" aria-hidden />}
+                <CopyButton value={row.copy} label={row.label} />
               </dd>
             </div>
           ))}
