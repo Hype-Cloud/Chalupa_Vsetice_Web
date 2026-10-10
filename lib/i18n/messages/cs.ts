@@ -172,7 +172,7 @@ export const cs = {
   'reservation.retry': 'Zkusit znovu',
   'reservation.priceChanged': 'Cena se mezitím změnila z {from} na {to}. Zkontrolujte ji a rezervaci znovu potvrďte.',
   'reservation.success.title': 'Rezervace přijata',
-  'reservation.success.emailInfo': 'Potvrzení a platební údaje najdete také ve svém e-mailu.',
+  'reservation.success.emailInfo': 'Potvrzení a platební údaje vám posíláme také e-mailem.',
   'reservation.success.thanks': 'Těšíme se na váš pobyt.',
   'email.confirmation.subject': 'Rezervace přijata – {code}',
   'email.confirmation.intro': 'Děkujeme za rezervaci. Níže najdete souhrn pobytu a platební údaje.',

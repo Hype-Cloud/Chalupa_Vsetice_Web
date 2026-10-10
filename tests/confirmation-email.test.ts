@@ -3,12 +3,12 @@ import assert from 'node:assert/strict';
 import { inflateSync } from 'node:zlib';
 import { qrMatrix, QR_QUIET_MODULES } from '../lib/booking/qr.ts';
 import { createI18n, LOCALES, type Locale } from '../lib/i18n/index.ts';
-import { confirmationRecipient, QR_CONTENT_ID, renderConfirmationEmail } from '../worker/booking/confirmation.ts';
+import { confirmationRecipient, confirmationSender, QR_CONTENT_ID, renderConfirmationEmail } from '../worker/booking/confirmation.ts';
 import { handleCreateReservation, type BookingDeps, type BookingEnv } from '../worker/booking/handler.ts';
 import type { ReservationResponse } from '../worker/booking/response.ts';
 import { SITEVERIFY_URL } from '../worker/booking/turnstile.ts';
 import { validateBooking } from '../worker/booking/validation.ts';
-import { RESEND_ENDPOINT } from '../worker/email/resend.ts';
+import { RESEND_ENDPOINT, RESEND_TEST_FROM } from '../worker/email/resend.ts';
 import { createTestDatabase } from './d1.ts';
 import { FAKE_ACCOUNT_NUMBER, FAKE_PAYMENT_IBAN, fixture } from './helpers.ts';
 
@@ -18,6 +18,7 @@ const NOW = new Date('2030-01-10T10:00:00Z');
 const GUEST_EMAIL = 'host-potvrzeni@example.invalid';
 const TEST_INBOX = 'preview-schranka@example.invalid';
 const RESEND_KEY = 're_test_FAKE_KEY_123';
+const ADMIN_INBOX = 'spravce@example.invalid';
 const GUEST = { firstName: 'Jan', lastName: 'Testovací', phone: '+420 000 000 000', email: GUEST_EMAIL };
 const stay = (extra: Record<string, unknown> = {}) => ({ arrival: '2030-02-01', departure: '2030-02-04', guests: 2, ...GUEST, locale: 'cs', turnstileToken: 'XXXX.DUMMY.TOKEN.XXXX', ...extra });
 
@@ -41,7 +42,10 @@ beforeEach(async () => {
   await production.reset();
 });
 
-function setup(options: { env?: Partial<BookingEnv>; resend?: () => Response | Promise<Response>; db?: 'preview' | 'production'; defer?: boolean } = {}) {
+type Fake = () => Response | Promise<Response>;
+const timeout = () => Promise.reject(Object.assign(new Error('timed out'), { name: 'TimeoutError' }));
+
+function setup(options: { env?: Partial<BookingEnv>; resend?: Fake; alertResend?: Fake; db?: 'preview' | 'production'; defer?: boolean } = {}) {
   const t = options.db === 'production' ? production : preview;
   const logs: string[] = [];
   const mails: SentMail[] = [];
@@ -51,6 +55,7 @@ function setup(options: { env?: Partial<BookingEnv>; resend?: () => Response | P
     ECHALUPY_ICAL_URL: 'https://ical.test.invalid/x.ics', DB: t.db, BOOKING_ENV: options.db ?? 'preview', BOOKING_API_ENABLED: 'true',
     PAYMENT_IBAN: FAKE_PAYMENT_IBAN, TURNSTILE_SECRET_KEY: 'turnstile-secret', BOOKING_RATE_LIMITER: { limit: async () => ({ success: true }) },
     RESEND_API_KEY: RESEND_KEY, BOOKING_CONFIRMATION_TEST_EMAIL: TEST_INBOX, BOOKING_EMAIL_FROM: 'Chalupa <rezervace@example.invalid>',
+    CONFLICT_ALERT_EMAIL: ADMIN_INBOX,
     ...options.env,
   };
   const deps: BookingDeps = {
@@ -58,8 +63,11 @@ function setup(options: { env?: Partial<BookingEnv>; resend?: () => Response | P
       const url = String(input);
       if (url === SITEVERIFY_URL) return Response.json({ success: true });
       if (url === RESEND_ENDPOINT) {
-        mails.push({ headers: new Headers(init?.headers), body: JSON.parse(String(init?.body)) });
-        return options.resend ? options.resend() : Response.json({ id: 'fake-email-id' });
+        const mail = { headers: new Headers(init?.headers), body: JSON.parse(String(init?.body)) };
+        mails.push(mail);
+        const alert = mail.headers.get('idempotency-key')?.startsWith('confirmation-failure-alert-');
+        const fake = alert ? options.alertResend : options.resend;
+        return fake ? fake() : Response.json({ id: 'fake-email-id' });
       }
       return new Response(fixture('01-single-and-multi.ics'));
     }) as typeof fetch,
@@ -74,7 +82,8 @@ function setup(options: { env?: Partial<BookingEnv>; resend?: () => Response | P
       env,
       deps,
     );
-  return { t, env, logs, mails, deferred, post };
+  const kindOf = (m: SentMail) => (m.headers.get('idempotency-key')?.startsWith('confirmation-failure-alert-') ? 'alert' : 'confirmation');
+  return { t, env, logs, mails, deferred, post, confirmations: () => mails.filter((m) => kindOf(m) === 'confirmation'), alerts: () => mails.filter((m) => kindOf(m) === 'alert') };
 }
 
 /** PNG z přílohy → matice modulů (scale 6, okraj QR_QUIET_MODULES), pro porovnání s qrMatrix(SPAYD). */
@@ -94,7 +103,9 @@ function decodeQrPng(base64: string): boolean[][] {
   );
 }
 
-const PII = [GUEST_EMAIL, 'Testovací', 'Jan', '000 000', FAKE_PAYMENT_IBAN, FAKE_ACCOUNT_NUMBER, 'SPD*', TEST_INBOX, RESEND_KEY];
+const PII = [GUEST_EMAIL, 'Testovací', 'Jan', '000 000', FAKE_PAYMENT_IBAN, FAKE_ACCOUNT_NUMBER, 'SPD*', TEST_INBOX, RESEND_KEY, ADMIN_INBOX];
+/** Osobní a bankovní údaje, které nesmí být v interním upozornění. */
+const ALERT_FORBIDDEN = [GUEST_EMAIL, 'Testovací', 'Jan ', '000 000', FAKE_PAYMENT_IBAN, FAKE_ACCOUNT_NUMBER, '1234567890', 'SPD*', 'Rezervace přijata', 'Přijedeme'];
 
 test('locale: cs/en/de/ua projdou, jiná nebo chybějící hodnota je validační chyba (žádný fallback)', () => {
   for (const locale of LOCALES) {
@@ -166,30 +177,87 @@ test('Preview bez testovací schránky nebo bez RESEND_API_KEY: rezervace 201, e
     const s = setup({ env });
     const response = await s.post(stay());
     assert.equal(response.status, 201);
-    assert.equal(s.mails.length, 0);
+    assert.equal(s.mails.length, 0, 'ani potvrzení, ani interní upozornění (konfigurace není selhání doručení)');
     assert.equal(await s.t.count('reservations'), 1);
     assert.ok(s.logs.includes(log), JSON.stringify(s.logs));
+    assert.ok(!s.logs.some((l) => l.includes('alert')));
   }
 });
 
-test('selhání Resend (HTTP 4xx/5xx, síť): rezervace zůstává, API vrátí 201, log bez osobních a bankovních údajů', async () => {
-  const failures: [() => Response | Promise<Response>, string][] = [
+test('selhání providera (timeout, síť, HTTP 4xx/5xx): rezervace 201, jeden pokus o interní upozornění bez osobních a bankovních údajů', async () => {
+  const failures: [Fake, string][] = [
+    [timeout, 'timeout'],
+    [() => Promise.reject(new TypeError('network down')), 'network'],
     [() => Response.json({ message: `invalid to ${TEST_INBOX}` }, { status: 422 }), 'http-422'],
     [() => new Response('upstream error', { status: 500 }), 'http-500'],
-    [() => Promise.reject(new TypeError('network down')), 'network'],
   ];
   for (const [resend, kind] of failures) {
     await preview.reset();
     const s = setup({ resend });
-    const response = await s.post(stay());
+    const response = await s.post(stay({ note: 'Přijedeme pozdě večer.' }));
     assert.equal(response.status, 201, kind);
     const body = (await response.json()) as ReservationResponse;
-    assert.match(body.reservation.reservationCode, /^\d{8}$/);
+    const code = body.reservation.reservationCode;
+    assert.match(code, /^\d{8}$/);
     assert.equal(await s.t.count('reservations'), 1);
-    assert.ok(s.logs.includes(`reservations: confirmation email failed (${kind})`), JSON.stringify(s.logs));
+    assert.equal(s.confirmations().length, 1, `${kind}: potvrzení se automaticky neopakuje`);
+    assert.equal(s.alerts().length, 1, `${kind}: právě jedno interní upozornění`);
+    const [alert] = s.alerts();
+    assert.deepEqual(alert.body.to, [ADMIN_INBOX]);
+    assert.equal(alert.body.subject, `[TEST] POZOR: potvrzovací e-mail rezervace ${code} selhal`);
+    assert.equal(alert.headers.get('idempotency-key'), `confirmation-failure-alert-preview-${code}`);
+    assert.ok(alert.body.text.includes(`Rezervace: ${code}`) && alert.body.text.includes('Prostředí: preview') && alert.body.text.includes(`Chyba: ${kind}`) && alert.body.text.includes(NOW.toISOString()));
+    assert.equal(alert.body.html, undefined);
+    assert.equal(alert.body.attachments, undefined);
+    for (const value of ALERT_FORBIDDEN) assert.ok(!JSON.stringify(alert.body).includes(value), `${kind}: upozornění obsahuje ${value}`);
+    assert.deepEqual(s.logs.filter((l) => l.includes('confirmation')), [`reservations: confirmation email failed (${kind})`, 'reservations: confirmation failure alert sent']);
     const logText = s.logs.join('\n');
     for (const secret of PII) assert.ok(!logText.includes(secret), `${kind}: log obsahuje ${secret}`);
   }
+});
+
+test('selhání interního upozornění: nic dalšího se nespouští, rezervace 201; bez adresy správce se upozornění jen přeskočí', async () => {
+  for (const [alertResend, kind] of [[() => new Response('', { status: 503 }), 'http-503'], [timeout, 'timeout']] as [Fake, string][]) {
+    await preview.reset();
+    const s = setup({ resend: () => new Response('', { status: 500 }), alertResend });
+    assert.equal((await s.post(stay())).status, 201);
+    assert.equal(s.mails.length, 2, 'jedno potvrzení a jeden pokus o upozornění, žádná rekurze');
+    assert.ok(s.logs.includes(`reservations: confirmation failure alert failed (${kind})`));
+    assert.equal(await s.t.count('reservations'), 1);
+  }
+  await preview.reset();
+  const s = setup({ resend: () => new Response('', { status: 500 }), env: { CONFLICT_ALERT_EMAIL: undefined } });
+  assert.equal((await s.post(stay())).status, 201);
+  assert.equal(s.mails.length, 1);
+  assert.ok(s.logs.includes('reservations: confirmation failure alert skipped (not configured)'));
+});
+
+test('odesílatel: Preview bez BOOKING_EMAIL_FROM → testovací Resend; produkce bez něj → skipped (201), s ním explicitní', async () => {
+  const p = setup({ env: { BOOKING_EMAIL_FROM: undefined } });
+  assert.equal((await p.post(stay())).status, 201);
+  assert.equal(p.confirmations()[0].body.from, RESEND_TEST_FROM);
+
+  const prod = setup({ db: 'production', env: { BOOKING_EMAIL_FROM: undefined } });
+  assert.equal((await prod.post(stay())).status, 201);
+  assert.equal(await prod.t.count('reservations'), 1);
+  assert.equal(prod.mails.length, 0, 'žádné potvrzení ani upozornění');
+  assert.ok(prod.logs.includes('reservations: confirmation email skipped (no sender)'));
+
+  await production.reset();
+  const explicit = setup({ db: 'production' });
+  assert.equal((await explicit.post(stay())).status, 201);
+  assert.equal(explicit.confirmations()[0].body.from, 'Chalupa <rezervace@example.invalid>');
+  assert.equal(confirmationSender({ BOOKING_ENV: 'production', BOOKING_EMAIL_FROM: '  ' }), null);
+  assert.equal(confirmationSender({ BOOKING_ENV: 'preview' }), RESEND_TEST_FROM);
+});
+
+test('věta o e-mailu ve success panelu: nové znění ve 4 jazycích', () => {
+  assert.deepEqual(Object.fromEntries(LOCALES.map((l) => [l, createI18n(l).t('reservation.success.emailInfo')])), {
+    cs: 'Potvrzení a platební údaje vám posíláme také e-mailem.',
+    en: 'We are also sending you the confirmation and payment details by email.',
+    de: 'Die Bestätigung und die Zahlungsdaten senden wir Ihnen auch per E-Mail.',
+    ua: 'Підтвердження та платіжні реквізити ми також надсилаємо вам електронною поштою.',
+  });
 });
 
 test('odeslání je odložené (ctx.waitUntil): odpověď 201 nečeká na e-mail ani při jeho selhání', async () => {

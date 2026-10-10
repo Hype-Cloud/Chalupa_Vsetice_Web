@@ -216,9 +216,9 @@ Projekt využívá Node.js Test Runner. Databázové testy probíhají nad loká
 | reservation-form.test.ts | 20 | Rezervační formulář: request podle kontraktu, blokace odeslání (termín, cena, kontakty; Turnstile tlačítko neblokuje), kliknutí → Invisible Turnstile → POST, selhání Turnstile bez POST, Idempotency-Key a token svázané s operací (retry = stejný klíč i token bez nové challenge, nová operace = nový token i klíč, i po price-mismatch), chybové kódy → hlášky ve všech jazycích, POST proti skutečnému handleru, `GET /api/booking-config`, Preview Invisible site key jen ve `previews`; potvrzení jen z dat serverové odpovědi (neúplná nebo nekonzistentní odpověď se nepřijme). |
 | invisible-turnstile.test.ts | 8 | Invisible Turnstile na klientu: widget připravený předem bez spuštění challenge, po kliknutí jen `execute`, nejvýš jeden token na widget a čerstvý widget na pozadí, bez automatického obnovování, ignorování pozdních callbacků, chyba / timeout / prázdný token → `turnstile-failed`, nenačtený skript → `turnstile-unavailable` s opakováním přípravy, odpojení formuláře. |
 | stay-feedback.test.ts | 5 | Vizuální odezva na pobyt kratší než `MIN_NIGHTS`: validace a stav pobytu beze změny, nový trigger s kliknutým dnem při každém pokusu, validní klik ani jiné chyby flash nespustí, flash dne bez trvalého stavu a bez pohybu, pulse hlášky jen přes `transform`, `prefers-reduced-motion` bez animace. |
-| confirmation-email.test.ts | 10 | Potvrzovací e-mail: `locale` cs/en/de/ua (jiné → 422), nová rezervace = jeden e-mail, replay ani souběžný dvojklik další neodešle, Preview → testovací schránka, produkce → host, chybějící schránka/klíč → skip, selhání Resend → 201 a log bez osobních a bankovních údajů, odložené odeslání, obsah HTML i textu ve 4 jazycích ze stejných dat jako API, QR příloha (cid) = SPAYD, escapování HTML. |
+| confirmation-email.test.ts | 13 | Potvrzovací e-mail: `locale` cs/en/de/ua (jiné → 422), nová rezervace = jeden e-mail, replay ani souběžný dvojklik další neodešle, Preview → testovací schránka, produkce → host, odesílatel (Preview fallback na testovací Resend, produkce bez `BOOKING_EMAIL_FROM` → skip), chybějící konfigurace → skip bez upozornění, selhání providera (timeout, síť, HTTP 4xx/5xx) → 201 a jedno interní upozornění bez osobních a bankovních údajů, selhání upozornění nic dalšího nespouští, odložené odeslání, obsah HTML i textu ve 4 jazycích ze stejných dat jako API, QR příloha (cid) = SPAYD, escapování HTML, nové znění věty o e-mailu. |
 | payment.test.ts | 9 | Platby: pražské datum → `DDMMYY`, `NN` 01–99, splatnost (konec pražského dne po 24 h, změny času, vždy 24–48 h), IBAN (kontrolní součet, odvození čísla účtu), SPAYD (serverová cena, VS = kód, zpráva `Rezervace {kód}`), QR jako PNG (pixely = matice) se SVG fallbackem, kopírování do schránky, kontrola, že repozitář neobsahuje skutečný IBAN. |
-| **Celkem** | **344** | |
+| **Celkem** | **347** | |
 
 ### Testované scénáře
 
@@ -406,12 +406,26 @@ POST /api/reservations → validace → čerstvý export e-chalup → D1 batch (
   - produkce (`BOOKING_ENV=production`): e-mail hosta (až bude produkční POST zapnutý),
   - jinde (Preview): jen secret `BOOKING_CONFIRMATION_TEST_EMAIL`; předmět má `[TEST]` a tělo
     uvádí, komu by e-mail šel v produkci. Bez tohoto secretu se e-mail neodešle.
-- **Odesílatel:** `BOOKING_EMAIL_FROM` (volitelné), jinak testovací odesílatel Resend
-  (doručí jen na e-mail účtu Resend). API klíč `RESEND_API_KEY` je společný s upozorněními na kolize.
+- **Odesílatel:** `BOOKING_EMAIL_FROM`. Mimo produkci bez něj testovací odesílatel Resend
+  (doručí jen na e-mail účtu Resend); **v produkci je povinný** – bez něj se potvrzení neodešle
+  (log `skipped (no sender)`), rezervace zůstává. Před zapnutím produkčního POST musí být
+  `BOOKING_EMAIL_FROM` nastavený (`npx wrangler secret put BOOKING_EMAIL_FROM`). API klíč
+  `RESEND_API_KEY` je společný s upozorněními na kolize.
 - **Selhání je nefatální:** odeslání běží přes `ctx.waitUntil` až po odpovědi. Timeout,
   HTTP 4xx/5xx, výpadek nebo chybějící konfigurace rezervaci nevrátí ani nezmění odpověď 201.
   Log obsahuje jen druh výsledku (`reservations: confirmation email sent | skipped (…) |
   failed (http-500)`), nikdy jméno, e-mail, telefon, bankovní údaje, SPAYD ani obsah zprávy.
+- **Konfigurace ≠ selhání doručení:** chybějící `RESEND_API_KEY`, testovací schránka (Preview)
+  nebo odesílatel (produkce) = `skipped`, bez dalšího upozornění.
+- **Interní upozornění při selhání providera:** timeout, síťová chyba nebo HTTP 4xx/5xx
+  z Resend → jeden best-effort e-mail správci na `CONFLICT_ALERT_EMAIL` (stejná adresa
+  a odesílatel `CONFLICT_ALERT_FROM` jako upozornění na kolize). Předmět
+  `POZOR: potvrzovací e-mail rezervace <kód> selhal` (mimo produkci s `[TEST]`), obsah jen
+  kód rezervace, `BOOKING_ENV`, druh chyby a čas – nikdy jméno, e-mail, telefon, IBAN,
+  číslo účtu, SPAYD, poznámka ani obsah potvrzení. Selhání upozornění se jen zaloguje
+  (`confirmation failure alert failed (…)`) a nic dalšího nespouští; bez `CONFLICT_ALERT_EMAIL`
+  se přeskočí. Potvrzení se automaticky neopakuje; při výpadku celého providera může selhat
+  i upozornění.
 - **Bez fronty:** stav doručení se neukládá a e-mail se automaticky neopakuje. Renderer
   (`renderReservationEmail`) je obecný – stejný půjde použít pro potvrzení platby, zrušení
   nebo připomínku splatnosti s jinými texty.
@@ -589,7 +603,7 @@ web dál nabízí poptávku přes e-chalupy.
   změnila z X na Y. Zkontrolujte ji a rezervaci znovu potvrďte.“ Další odeslání = vědomé
   potvrzení s novým klíčem.
 - **Úspěch:** potvrzení v panelu (bez eyebrow) – titulek „Rezervace přijata“, pod ním sekundární
-  věta „Potvrzení a platební údaje najdete také ve svém e-mailu.“, termín, délka pobytu,
+  věta „Potvrzení a platební údaje vám posíláme také e-mailem.“ (doručení je best-effort), termín, délka pobytu,
   hosté, splatnost (jen datum v `Europe/Prague`, `formatDeadlineDate`) a celková cena. Kód rezervace se v panelu nezobrazuje (je v odpovědi API a bude
   v potvrzovacím e-mailu). Platební část (bez nadpisu) navazuje přímo na souhrn: QR Platba jako
   skutečný `<img>` (lokálně vytvořený PNG, `components/booking/paymentQr.ts`; na mobilu jde uložit
@@ -1220,8 +1234,10 @@ npx wrangler preview base-config secret list                            # jen n�
 - `RESEND_API_KEY` a `BOOKING_CONFIRMATION_TEST_EMAIL` – potvrzovací e-mail po rezervaci.
   V Preview jde **jen** na `BOOKING_CONFIRMATION_TEST_EMAIL` (testovací schránka, nikdy adresa
   hosta); bez některého z nich se rezervace vytvoří a e-mail se jen přeskočí (log `skipped`).
-  Volitelně `BOOKING_EMAIL_FROM` (odesílatel; jinak testovací odesílatel Resend).
-- Volitelně `BOOKING_API_TOKEN`, `CONFLICT_ALERT_EMAIL`.
+  Volitelně `BOOKING_EMAIL_FROM` (odesílatel; v Preview jinak testovací odesílatel Resend,
+  v produkci povinný). `CONFLICT_ALERT_EMAIL` zároveň přijímá interní upozornění na selhání
+  potvrzovacího e-mailu.
+- Volitelně `BOOKING_API_TOKEN`.
 
 `npx wrangler preview secret put <KEY>` (bez `base-config`) nastaví secret jen **jednomu**
 Preview (výchozí název = aktuální git větev) – další PR Previews ho nedostanou.

@@ -62,6 +62,10 @@ Skutečný stav (nastaveno ručně v dashboardu, v diffu není vidět):
   rezervační POST 503 `not-configured` (fail closed). Potvrzovací e-mail v Preview potřebuje
   `RESEND_API_KEY` a `BOOKING_CONFIRMATION_TEST_EMAIL` a jde **jen** na tuto testovací schránku,
   nikdy na adresu hosta; selhání e-mailu je nefatální (rezervace i odpověď 201 zůstávají).
+  Produkce vyžaduje explicitní `BOOKING_EMAIL_FROM` (bez něj se potvrzení neodešle; nastavit
+  před zapnutím produkčního POST). Selhání providera generuje best-effort interní upozornění
+  na `CONFLICT_ALERT_EMAIL` jen s kódem rezervace, prostředím, druhem chyby a časem – nikdy
+  s osobními nebo bankovními údaji.
 - Hodnoty tokenů a secrets **nikdy** nevypisovat, necommitovat, nedávat do PR, logů ani výstupů
   testů. Ověřovat jen podle názvu (`wrangler secret list`) nebo chování endpointu.
 

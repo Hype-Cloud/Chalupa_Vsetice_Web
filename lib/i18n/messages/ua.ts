@@ -170,7 +170,7 @@ export const ua = {
   'reservation.retry': 'Спробувати ще раз',
   'reservation.priceChanged': 'Тим часом ціна змінилася з {from} на {to}. Перевірте її та підтвердьте бронювання ще раз.',
   'reservation.success.title': 'Бронювання прийнято',
-  'reservation.success.emailInfo': 'Підтвердження та платіжні реквізити ви знайдете також у своїй електронній пошті.',
+  'reservation.success.emailInfo': 'Підтвердження та платіжні реквізити ми також надсилаємо вам електронною поштою.',
   'reservation.success.thanks': 'Чекаємо на ваш приїзд.',
   'email.confirmation.subject': 'Бронювання прийнято – {code}',
   'email.confirmation.intro': 'Дякуємо за бронювання. Нижче ви знайдете підсумок перебування та платіжні реквізити.',

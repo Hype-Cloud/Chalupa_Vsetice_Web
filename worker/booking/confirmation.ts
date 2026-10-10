@@ -5,8 +5,14 @@
 // - Jazyk: locale uložené u rezervace (cs | en | de | ua), texty z lib/i18n.
 // - Příjemce: v produkci host; jinde (Preview) jen testovací schránka BOOKING_CONFIRMATION_TEST_EMAIL,
 //   skutečná adresa hosta se objeví jen v těle zprávy jako informace.
+// - Odesílatel: BOOKING_EMAIL_FROM; testovací odesílatel Resend jen mimo produkci. V produkci
+//   bez BOOKING_EMAIL_FROM se e-mail neodešle (skipped).
 // - Best-effort: selhání se jen zaloguje (druh chyby), rezervaci ani odpověď API neovlivní.
 //   Logy neobsahují jméno, e-mail, telefon, bankovní údaje, SPAYD ani obsah zprávy.
+// - Selhání providera (timeout, síť, HTTP 4xx/5xx) → best-effort interní upozornění správci
+//   (CONFLICT_ALERT_EMAIL) jen s kódem rezervace, prostředím, druhem chyby a časem. Selhání
+//   upozornění se jen zaloguje (žádné další upozornění). Chybějící konfigurace (skipped) není
+//   selhání doručení a upozornění negeneruje. Potvrzení se automaticky neopakuje.
 // - Renderer renderReservationEmail je obecný (nadpis, úvod, souhrn, platba) – stejný půjde
 //   použít pro potvrzení platby, zrušení nebo připomínku splatnosti s jinými texty.
 
@@ -20,10 +26,17 @@ export interface ConfirmationEnv {
   BOOKING_ENV?: string;
   /** Secret: API klíč Resend (stejný jako pro interní upozornění). */
   RESEND_API_KEY?: string;
-  /** Odesílatel e-mailů hostům (např. `Chalupa Všetice <rezervace@…>`); bez nastavení testovací odesílatel Resend. */
+  /**
+   * Odesílatel e-mailů hostům (např. `Chalupa Všetice <rezervace@…>`). Mimo produkci bez nastavení
+   * testovací odesílatel Resend; v produkci povinný – bez něj se potvrzení neodešle.
+   */
   BOOKING_EMAIL_FROM?: string;
   /** Secret (Preview): testovací schránka, kam jdou všechna potvrzení mimo produkci. */
   BOOKING_CONFIRMATION_TEST_EMAIL?: string;
+  /** Secret: adresa správce pro interní upozornění (sdílená s upozorněním na kolize). */
+  CONFLICT_ALERT_EMAIL?: string;
+  /** Odesílatel interních upozornění; bez nastavení testovací odesílatel Resend. */
+  CONFLICT_ALERT_FROM?: string;
 }
 
 export interface ConfirmationDeps {
@@ -151,18 +164,67 @@ export function confirmationRecipient(env: ConfirmationEnv, guestEmail: string):
   return testRecipient ? { to: testRecipient, test: true } : null;
 }
 
+/** Odesílatel potvrzení: explicitní BOOKING_EMAIL_FROM; testovací odesílatel Resend jen mimo produkci. */
+export function confirmationSender(env: ConfirmationEnv): string | null {
+  const from = env.BOOKING_EMAIL_FROM?.trim();
+  if (from) return from;
+  return env.BOOKING_ENV === 'production' ? null : RESEND_TEST_FROM;
+}
+
+/** Interní upozornění na selhání potvrzení – jen kód rezervace, prostředí, druh chyby a čas. */
+export function buildConfirmationFailureAlert(alert: { reservationCode: string; env: string; kind: string; failedAt: Date }): { subject: string; text: string } {
+  const prefix = alert.env === 'production' ? '' : '[TEST] ';
+  const time = new Intl.DateTimeFormat('cs-CZ', { timeZone: 'Europe/Prague', dateStyle: 'short', timeStyle: 'medium' }).format(alert.failedAt);
+  return {
+    subject: `${prefix}POZOR: potvrzovací e-mail rezervace ${alert.reservationCode} selhal`,
+    text: [
+      'Potvrzovací e-mail hostovi se nepodařilo odeslat. Rezervace je vytvořená.',
+      'Kontaktujte prosím hosta ručně (údaje v e-chalupách / exportu rezervací).',
+      '',
+      `Rezervace: ${alert.reservationCode}`,
+      `Prostředí: ${alert.env}`,
+      `Chyba: ${alert.kind}`,
+      `Čas: ${time} (${alert.failedAt.toISOString()})`,
+      '',
+      'Potvrzení se automaticky neopakuje.',
+    ].join('\n'),
+  };
+}
+
+/** Best-effort upozornění správci; nikdy nevyhazuje a samo žádné další upozornění nespouští. */
+async function sendConfirmationFailureAlert(env: ConfirmationEnv, apiKey: string, reservationCode: string, kind: string, deps: ConfirmationDeps & { now: () => Date }): Promise<void> {
+  const to = env.CONFLICT_ALERT_EMAIL?.trim();
+  if (!to) {
+    deps.log('reservations: confirmation failure alert skipped (not configured)');
+    return;
+  }
+  const bookingEnv = env.BOOKING_ENV ?? 'unknown';
+  const { subject, text } = buildConfirmationFailureAlert({ reservationCode, env: bookingEnv, kind, failedAt: deps.now() });
+  try {
+    await sendViaResend(
+      apiKey,
+      { from: env.CONFLICT_ALERT_FROM?.trim() || RESEND_TEST_FROM, to, subject, text, idempotencyKey: `confirmation-failure-alert-${bookingEnv}-${reservationCode}` },
+      deps.fetch,
+    );
+    deps.log('reservations: confirmation failure alert sent');
+  } catch (error) {
+    deps.log(`reservations: confirmation failure alert failed (${error instanceof MailError ? error.kind : 'unknown'})`);
+  }
+}
+
 /**
  * Odešle potvrzení nově vytvořené rezervace. Nikdy nevyhazuje (best-effort); vrací výsledek
  * jen pro testy a logy. Idempotency-Key z kódu rezervace brání duplicitě i na straně Resend.
+ * Pořadí kontrol konfigurace: RESEND_API_KEY → příjemce → odesílatel (každá chybějící = skipped).
  */
 export async function sendReservationConfirmation(
   env: ConfirmationEnv,
   data: ReservationResponse,
   guest: { email: string; locale: Locale },
-  deps: ConfirmationDeps,
+  deps: ConfirmationDeps & { now: () => Date },
 ): Promise<'sent' | 'skipped' | 'failed'> {
+  const apiKey = env.RESEND_API_KEY?.trim();
   try {
-    const apiKey = env.RESEND_API_KEY?.trim();
     if (!apiKey) {
       deps.log('reservations: confirmation email skipped (not configured)');
       return 'skipped';
@@ -172,9 +234,14 @@ export async function sendReservationConfirmation(
       deps.log('reservations: confirmation email skipped (no test recipient)');
       return 'skipped';
     }
+    const from = confirmationSender(env);
+    if (!from) {
+      deps.log('reservations: confirmation email skipped (no sender)');
+      return 'skipped';
+    }
     const email = renderConfirmationEmail(data, guest.locale, recipient.test ? { test: { originalRecipient: guest.email } } : {});
     const message: MailMessage = {
-      from: env.BOOKING_EMAIL_FROM?.trim() || RESEND_TEST_FROM,
+      from,
       to: recipient.to,
       ...email,
       idempotencyKey: `reservation-confirmation-${env.BOOKING_ENV ?? 'unknown'}-${data.reservation.reservationCode}`,
@@ -183,7 +250,10 @@ export async function sendReservationConfirmation(
     deps.log('reservations: confirmation email sent');
     return 'sent';
   } catch (error) {
-    deps.log(`reservations: confirmation email failed (${error instanceof MailError ? error.kind : 'unknown'})`);
+    const kind = error instanceof MailError ? error.kind : 'unknown';
+    deps.log(`reservations: confirmation email failed (${kind})`);
+    // Jen selhání doručení přes providera (timeout, síť, HTTP) – ne chyba v kódu ani konfiguraci.
+    if (error instanceof MailError && apiKey) await sendConfirmationFailureAlert(env, apiKey, data.reservation.reservationCode, kind, deps);
     return 'failed';
   }
 }

@@ -171,7 +171,7 @@ export const de = {
   'reservation.retry': 'Erneut versuchen',
   'reservation.priceChanged': 'Der Preis hat sich inzwischen von {from} auf {to} geändert. Bitte prüfen Sie ihn und bestätigen Sie die Buchung erneut.',
   'reservation.success.title': 'Buchung eingegangen',
-  'reservation.success.emailInfo': 'Die Bestätigung und die Zahlungsdaten finden Sie auch in Ihrer E-Mail.',
+  'reservation.success.emailInfo': 'Die Bestätigung und die Zahlungsdaten senden wir Ihnen auch per E-Mail.',
   'reservation.success.thanks': 'Wir freuen uns auf Ihren Aufenthalt.',
   'email.confirmation.subject': 'Buchung eingegangen – {code}',
   'email.confirmation.intro': 'Vielen Dank für Ihre Buchung. Unten finden Sie die Zusammenfassung Ihres Aufenthalts und die Zahlungsdaten.',

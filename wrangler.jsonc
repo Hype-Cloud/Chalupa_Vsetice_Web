@@ -47,7 +47,8 @@
   // a jen zde je zapnutý rezervační POST (Turnstile + rate limit, volitelně BOOKING_API_TOKEN) a výstupní iCal
   // (token BOOKING_ICAL_EXPORT_TOKEN v query stringu, skrytý přes redact_query_string).
   // Rezervační POST vyžaduje secret PAYMENT_IBAN (wrangler preview base-config secret put), nikdy zde.
-  // Potvrzovací e-mail: RESEND_API_KEY, BOOKING_CONFIRMATION_TEST_EMAIL (Preview jde jen sem), volitelně BOOKING_EMAIL_FROM.
+  // Potvrzovací e-mail: RESEND_API_KEY, BOOKING_CONFIRMATION_TEST_EMAIL (Preview jde jen sem), BOOKING_EMAIL_FROM
+  // (v produkci povinný); selhání doručení hlásí best-effort na CONFLICT_ALERT_EMAIL.
   "previews": {
     "observability": {
       "redact_query_string": true,
