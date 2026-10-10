@@ -1203,3 +1203,13 @@ s bezpečnostními hlavičkami). Exit 1 při selhání; `stale`/`partial` obsaze
 Nepoužívá žádné tokeny ani secrets: přijme jen origin (https, http jen localhost) bez cesty,
 query a přihlašovacích údajů, neposílá `Authorization` ani cookies a nic nezapisuje (rezervační
 POST jde bez údajů, nabídka je jen čtení).
+
+## License
+
+Copyright © 2026 Ondřej Novotný. All rights reserved.
+
+This repository is publicly available for viewing and portfolio purposes only.
+No permission is granted to copy, modify, redistribute, incorporate into another
+project, or commercially use the source code without prior written permission.
+
+See [LICENSE](./LICENSE) for details.
