@@ -59,7 +59,9 @@ Skutečný stav (nastaveno ručně v dashboardu, v diffu není vidět):
   minimálně `ECHALUPY_ICAL_URL`, `BOOKING_ICAL_EXPORT_TOKEN`, `TURNSTILE_SECRET_KEY`
   (testovací klíč Cloudflare) a `PAYMENT_IBAN`; bez `BOOKING_ICAL_EXPORT_TOKEN` vrací
   `/api/reservations.ics` v Preview 503 a smoke test selže, bez platného `PAYMENT_IBAN` vrací
-  rezervační POST 503 `not-configured` (fail closed).
+  rezervační POST 503 `not-configured` (fail closed). Potvrzovací e-mail v Preview potřebuje
+  `RESEND_API_KEY` a `BOOKING_CONFIRMATION_TEST_EMAIL` a jde **jen** na tuto testovací schránku,
+  nikdy na adresu hosta; selhání e-mailu je nefatální (rezervace i odpověď 201 zůstávají).
 - Hodnoty tokenů a secrets **nikdy** nevypisovat, necommitovat, nedávat do PR, logů ani výstupů
   testů. Ověřovat jen podle názvu (`wrangler secret list`) nebo chování endpointu.
 

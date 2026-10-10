@@ -26,6 +26,7 @@ const LOCAL = [
   '0006_ceny_pobytu.sql',
   '0007_poznamka_hosta.sql',
   '0008_kod_rezervace_platba.sql',
+  '0009_jazyk_rezervace.sql',
 ];
 const WRANGLER = readFileSync(join(ROOT, 'wrangler.jsonc'), 'utf8');
 const PREVIEW_MIGRATIONS = readFileSync(join(ROOT, 'wrangler.preview-migrations.jsonc'), 'utf8');
@@ -123,6 +124,8 @@ test('destruktivní migrace: skutečné migrace a syntetické případy', () => 
     '0007_poznamka_hosta.sql': [],
     // Nová tabulka a nullable sloupec – nedestruktivní.
     '0008_kod_rezervace_platba.sql': [],
+    // Nullable sloupec – nedestruktivní.
+    '0009_jazyk_rezervace.sql': [],
   });
   const cases: [string, string[]][] = [
     ['DROP TABLE daily_prices;', ['DROP']],

@@ -3,6 +3,7 @@
 
 import { addDays, diffDays, isIsoDate, type IsoDate } from '../../lib/availability/dates.ts';
 import { BOOKING_HORIZON_DAYS, CAPACITY, MAX_NIGHTS, MIN_NIGHTS } from '../../lib/booking/rules.ts';
+import { isLocale, type Locale } from '../../lib/i18n/index.ts';
 
 export interface BookingRequest {
   arrival: IsoDate;
@@ -16,6 +17,8 @@ export interface BookingRequest {
   note: string | null;
   /** Cena, kterou host viděl. Slouží jen ke kontrole; uložená cena je vždy spočítaná na serveru. */
   expectedPriceCzk: number | null;
+  /** Jazyk webu při rezervaci (cs | en | de | ua) – jazyk potvrzovacího a dalších e-mailů. */
+  locale: Locale;
 }
 
 export interface ValidBooking extends BookingRequest {
@@ -114,6 +117,10 @@ export function validateBooking(body: unknown, today: IsoDate): ValidationResult
   const note = validateNote(input.note);
   if (note === undefined) fields.push('note');
 
+  // Jen podporované jazyky; jiná nebo chybějící hodnota je chyba (žádný náhodný fallback).
+  const locale = isLocale(input.locale) ? input.locale : null;
+  if (!locale) fields.push('locale');
+
   const expected = input.expectedPriceCzk;
   if (expected !== undefined && expected !== null && (typeof expected !== 'number' || !Number.isInteger(expected) || expected <= 0)) fields.push('expectedPriceCzk');
 
@@ -128,6 +135,7 @@ export function validateBooking(body: unknown, today: IsoDate): ValidationResult
       email: email!,
       note: note!,
       expectedPriceCzk: typeof expected === 'number' ? expected : null,
+      locale: locale!,
     },
   };
 }

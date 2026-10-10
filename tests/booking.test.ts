@@ -9,7 +9,7 @@ import { RESERVATION_CODE } from '../lib/booking/codes.ts';
 import { fixture, RANGE_2030 } from './helpers.ts';
 
 const TODAY = '2030-01-10';
-const VALID = { arrival: '2030-02-01', departure: '2030-02-04', guests: 2, firstName: 'Jan', lastName: 'Testovací', phone: '+420 000 000 000', email: 'test@example.invalid' };
+const VALID = { arrival: '2030-02-01', departure: '2030-02-04', guests: 2, firstName: 'Jan', lastName: 'Testovací', phone: '+420 000 000 000', email: 'test@example.invalid', locale: 'cs' };
 const fields = (body: unknown) => {
   const result = validateBooking(body, TODAY);
   return result.ok ? [] : result.fields;
