@@ -556,9 +556,11 @@ web dál nabízí poptávku přes e-chalupy.
   znovu načte z `/api/quote` (summary ukáže novou cenu i rozpis) a panel zobrazí „Cena se mezitím
   změnila z X na Y. Zkontrolujte ji a rezervaci znovu potvrďte.“ Další odeslání = vědomé
   potvrzení s novým klíčem.
-- **Úspěch:** potvrzení v panelu (bez eyebrow) – titulek „Rezervace přijata“, termín, délka pobytu,
+- **Úspěch:** potvrzení v panelu (bez eyebrow) – titulek „Rezervace přijata“, pod ním sekundární
+  věta „Potvrzení a platební údaje najdete také ve svém e-mailu.“, termín, délka pobytu,
   hosté a celková cena. Kód rezervace se v panelu nezobrazuje (je v odpovědi API a bude
-  v potvrzovacím e-mailu). Blok Platba: jedna věta „Uhraďte prosím do {splatnost}.“, QR Platba jako
+  v potvrzovacím e-mailu). Blok Platba: hlavička „Platba“ se splatností vpravo („nejpozději 11. 10. 2026“, jen
+  datum v `Europe/Prague` přes `formatDeadlineDate`; na úzkém displeji se zalomí pod nadpis), QR Platba jako
   skutečný `<img>` (lokálně vytvořený PNG, `components/booking/paymentQr.ts`; na mobilu jde uložit
   dlouhým podržením, dotyková zařízení – `@media (hover:none) and (pointer:coarse)` – ukážou
   nápovědu) a sbalené `<details>` „Platební údaje“: částka, číslo účtu, IBAN, variabilní symbol
@@ -567,7 +569,8 @@ web dál nabízí poptávku přes e-chalupy.
   se SVG ze stejné matice; selže-li kódování, QR se nezobrazí a platební údaje jsou rozbalené.
   Vše je ze serverové odpovědi (`parseConfirmation` odmítne neúplnou nebo nekonzistentní
   odpověď); nic se nedopočítává. Splatnost: den → měsíc → rok a čas v `Europe/Prague`
-  (`formatDeadline`). O e-mailu se zatím nic netvrdí (odesílání potvrzení není implementované).
+  (`formatDeadline`). Odesílání potvrzovacího e-mailu zatím není implementované – věta o e-mailu
+  předjímá navazující PR (produkční POST je vypnutý).
   Kontaktní část pod blokem zmizí a stránka se po vykreslení posune zpět k bloku (celý grid,
   pokud se vejde do okna, jinak potvrzení); reveal animace respektuje `prefers-reduced-motion`.
 

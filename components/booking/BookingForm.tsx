@@ -146,6 +146,7 @@ export function BookingSuccess({ reservation }: { reservation: ReservationConfir
   return (
     <div className="booking-success" role="status" ref={root}>
       <p className="price booking-success-title" tabIndex={-1} ref={heading}>{t('reservation.success.title')}</p>
+      <p className="booking-success-email">{t('reservation.success.emailInfo')}</p>
       <dl className="estimate">
         <div><dt>{t('reservation.success.stay')}</dt><dd>{formatDate(reservation.arrival)} – {formatDate(reservation.departure)}</dd></div>
         <div><dt>{t('reservation.success.nights')}</dt><dd>{plural('booking.nights', reservation.nights)}</dd></div>
