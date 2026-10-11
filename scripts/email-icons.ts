@@ -1,12 +1,19 @@
-// Ikony do e-mailu jako PNG (inline přílohy `cid:`). E-mailoví klienti SVG spolehlivě nezobrazí
-// (Gmail, Outlook), proto se tahy ikon lucide (mřížka 24×24, tah 2, kulaté konce) rastrují
-// vlastním kódem do PNG (lib/png.ts) – bez závislostí, deterministicky, ve Workeru i v Node.
+// Generátor statických ikon e-mailu: `pnpm run email:icons` přepíše worker/email/iconAssets.ts.
 //
-// - Značka v hlavičce: plochá čtvercová dlaždice s vlastními barvami (domek + pozadí), bez
+// E-mailoví klienti SVG spolehlivě nezobrazí (Gmail, Outlook), proto se tahy ikon lucide
+// (mřížka 24×24, tah 2, kulaté konce) rastrují do PNG (lib/png.ts). Rastrování (parsování
+// SVG path, oblouky, supersampling) je drahé – sekundy CPU – a ikony mají pevný tvar i barvy,
+// proto běží jen tady při vývoji, nikdy ve Workeru. Worker čte hotové base64 řetězce.
+// Test tests/confirmation-email.test.ts hlídá, že commitnuté soubory odpovídají generátoru.
+//
+// - Značka v hlavičce: plná čtvercová dlaždice s vlastními barvami (domek + pozadí), bez
 //   průhlednosti – vypadá stejně v light i dark mode a nezávisí na barvě okolí.
 // - Sluchátko v tlačítku: průhledné pozadí, barva tahu podle varianty tlačítka.
 
-import { bytesToBase64, palettePng, type Rgb } from '../../lib/png.ts';
+import { writeFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
+import { bytesToBase64, palettePng, type Rgb } from '../lib/png.ts';
+import { CREAM, GREEN, WHITE } from '../worker/email/palette.ts';
 
 type Point = readonly [number, number];
 type Polyline = Point[];
@@ -169,14 +176,36 @@ export function phoneIconPng(stroke: Rgb, size = 54): Uint8Array {
   });
 }
 
-const cache = new Map<string, string>();
+const rgb = (hex: string): Rgb => [1, 3, 5].map((i) => parseInt(hex.slice(i, i + 2), 16)) as unknown as Rgb;
 
-/** Base64 PNG; výpočet jednou za běh Workeru pro daný klíč. */
-export function cachedBase64(key: string, render: () => Uint8Array): string {
-  let value = cache.get(key);
-  if (value === undefined) {
-    value = bytesToBase64(render());
-    cache.set(key, value);
-  }
-  return value;
+/** Base64 PNG všech statických ikon e-mailu. */
+export function renderIconAssets(): { brandMark: string; phoneLight: string; phoneDark: string } {
+  return {
+    brandMark: bytesToBase64(brandMarkPng(rgb(CREAM), rgb(GREEN))),
+    phoneLight: bytesToBase64(phoneIconPng(rgb(WHITE))),
+    phoneDark: bytesToBase64(phoneIconPng(rgb(GREEN))),
+  };
+}
+
+export const ICON_ASSETS_PATH = fileURLToPath(new URL('../worker/email/iconAssets.ts', import.meta.url));
+
+/** Obsah worker/email/iconAssets.ts. */
+export function iconAssetsSource(assets = renderIconAssets()): string {
+  return [
+    '// VYGENEROVÁNO: pnpm run email:icons (scripts/email-icons.ts). Needitovat ručně.',
+    '// Statické PNG ikony e-mailu (base64) – Worker je jen čte, nic nerastruje.',
+    '',
+    '/** Značka v hlavičce: dlaždice krémová s tmavě zeleným domkem (lucide House), bez průhlednosti. */',
+    `export const BRAND_MARK_PNG = '${assets.brandMark}';`,
+    '/** Sluchátko (lucide Phone), bílé na průhledném pozadí – tmavě zelené tlačítko. */',
+    `export const PHONE_ICON_LIGHT_PNG = '${assets.phoneLight}';`,
+    '/** Sluchátko, tmavě zelené na průhledném pozadí – krémové tlačítko v tmavém režimu. */',
+    `export const PHONE_ICON_DARK_PNG = '${assets.phoneDark}';`,
+    '',
+  ].join('\n');
+}
+
+if (process.argv[1] === fileURLToPath(import.meta.url)) {
+  writeFileSync(ICON_ASSETS_PATH, iconAssetsSource());
+  console.log(`email icons → ${ICON_ASSETS_PATH}`);
 }

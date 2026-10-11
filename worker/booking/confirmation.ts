@@ -18,14 +18,16 @@
 //   patička) – stejný půjde použít pro potvrzení platby, zrušení nebo připomínku s jinými texty.
 // - HTML pro e-mailové klienty: tabulky, inline styly a bgcolor (platí všude), bez skriptů,
 //   webfontů a externích CSS; obrázky (značka, sluchátko, QR) jako inline přílohy `cid:`.
+//   Značka a sluchátko jsou předgenerované PNG (worker/email/iconAssets.ts); za běhu se
+//   kreslí jen QR.
 //   Vložené <style> je jen vylepšení: užší okraje na mobilu, tmavý režim (Apple Mail,
 //   Outlook.com) a vypnutí automatických odkazů Apple Mail. Bez něj zůstává světlá varianta.
 
 import { businessIdentity, type BusinessIdentity } from '../../lib/business.ts';
 import { bytesToBase64, qrMatrix, qrPngBytes } from '../../lib/booking/qr.ts';
 import { createI18n, type Locale } from '../../lib/i18n/index.ts';
-import type { Rgb } from '../../lib/png.ts';
-import { brandMarkPng, cachedBase64, phoneIconPng } from '../email/icons.ts';
+import { BRAND_MARK_PNG, PHONE_ICON_DARK_PNG, PHONE_ICON_LIGHT_PNG } from '../email/iconAssets.ts';
+import { CREAM, GREEN, WHITE } from '../email/palette.ts';
 import { MailError, RESEND_TEST_FROM, sendViaResend, type MailAttachment, type MailMessage } from '../email/resend.ts';
 import type { ReservationResponse } from './response.ts';
 
@@ -73,12 +75,6 @@ const escapeHtml = (value: string) =>
 
 // Barvy webu (app/globals.css): tmavě zelená, světle krémově zelená (tlačítka na tmavém
 // pozadí), tlumená šedozelená. Žádné jiné odstíny – ani v tmavém režimu.
-const GREEN = '#163d33';
-const GREEN_RGB: Rgb = [0x16, 0x3d, 0x33];
-const CREAM = '#dbe8bd';
-const CREAM_RGB: Rgb = [0xdb, 0xe8, 0xbd];
-const WHITE = '#ffffff';
-const WHITE_RGB: Rgb = [0xff, 0xff, 0xff];
 const MUTED = '#5c6a63';
 const BORDER = '#e2e7e0';
 const PAGE = '#f8f9f5';
@@ -173,9 +169,10 @@ export function renderReservationEmail(
   // QR ze stejného SPAYD jako API a web; když ho nejde vytvořit, e-mail jde bez QR (ruční údaje stačí).
   const matrix = qrMatrix(p.spayd);
   const attachments: MailAttachment[] = [
-    { filename: 'znacka.png', content: cachedBase64('brand', () => brandMarkPng(CREAM_RGB, GREEN_RGB)), contentId: BRAND_MARK_CONTENT_ID },
-    { filename: 'telefon.png', content: cachedBase64('phone-light', () => phoneIconPng(WHITE_RGB)), contentId: PHONE_ICON_CONTENT_ID },
-    { filename: 'telefon-tmavy.png', content: cachedBase64('phone-dark', () => phoneIconPng(GREEN_RGB)), contentId: PHONE_ICON_DARK_CONTENT_ID },
+    // Statické ikony jsou předgenerované (scripts/email-icons.ts) – žádné rastrování za běhu.
+    { filename: 'znacka.png', content: BRAND_MARK_PNG, contentId: BRAND_MARK_CONTENT_ID },
+    { filename: 'telefon.png', content: PHONE_ICON_LIGHT_PNG, contentId: PHONE_ICON_CONTENT_ID },
+    { filename: 'telefon-tmavy.png', content: PHONE_ICON_DARK_PNG, contentId: PHONE_ICON_DARK_CONTENT_ID },
     ...(matrix ? [{ filename: 'qr-platba.png', content: bytesToBase64(qrPngBytes(matrix, 6)), contentId: QR_CONTENT_ID }] : []),
   ];
 
@@ -349,18 +346,24 @@ export function buildConfirmationFailureAlert(alert: { reservationCode: string; 
 }
 
 /** Best-effort upozornění správci; nikdy nevyhazuje a samo žádné další upozornění nespouští. */
-async function sendConfirmationFailureAlert(env: ConfirmationEnv, apiKey: string, reservationCode: string, kind: string, deps: ConfirmationDeps & { now: () => Date }): Promise<void> {
+async function sendConfirmationFailureAlert(
+  env: ConfirmationEnv,
+  apiKey: string,
+  reservation: { id: string; code: string },
+  kind: string,
+  deps: ConfirmationDeps & { now: () => Date },
+): Promise<void> {
   const to = env.CONFLICT_ALERT_EMAIL?.trim();
   if (!to) {
     deps.log('reservations: confirmation failure alert skipped (not configured)');
     return;
   }
   const bookingEnv = env.BOOKING_ENV ?? 'unknown';
-  const { subject, text } = buildConfirmationFailureAlert({ reservationCode, env: bookingEnv, kind, failedAt: deps.now() });
+  const { subject, text } = buildConfirmationFailureAlert({ reservationCode: reservation.code, env: bookingEnv, kind, failedAt: deps.now() });
   try {
     await sendViaResend(
       apiKey,
-      { from: env.CONFLICT_ALERT_FROM?.trim() || RESEND_TEST_FROM, to, subject, text, idempotencyKey: `confirmation-failure-alert-${bookingEnv}-${reservationCode}` },
+      { from: env.CONFLICT_ALERT_FROM?.trim() || RESEND_TEST_FROM, to, subject, text, idempotencyKey: `confirmation-failure-alert-${bookingEnv}-${reservation.id}` },
       deps.fetch,
     );
     deps.log('reservations: confirmation failure alert sent');
@@ -369,38 +372,56 @@ async function sendConfirmationFailureAlert(env: ConfirmationEnv, apiKey: string
   }
 }
 
+/** Údaje jen pro server (nikdy v API, e-mailu ani logu): identita rezervace a uložený kontakt hosta. */
+export interface ConfirmationTarget {
+  /** Interní `reservations.id` (UUID) – klíč idempotence u Resend. Veřejný kód se může po
+   *  úklidu Preview DB opakovat, UUID ne. */
+  reservationId: string;
+  /** E-mail a jazyk uložené u rezervace (při replay z DB, ne z opakovaného požadavku). */
+  guestEmail: string;
+  locale: Locale;
+}
+
+/** Klíč idempotence potvrzení u Resend – stejný pro první pokus i replay téže rezervace. */
+export const confirmationIdempotencyKey = (env: ConfirmationEnv, reservationId: string) =>
+  `reservation-confirmation-${env.BOOKING_ENV ?? 'unknown'}-${reservationId}`;
+
 /**
- * Odešle potvrzení nově vytvořené rezervace. Nikdy nevyhazuje (best-effort); vrací výsledek
- * jen pro testy a logy. Idempotency-Key z kódu rezervace brání duplicitě i na straně Resend.
+ * Odešle potvrzení rezervace (nové i replay). Nikdy nevyhazuje (best-effort); vrací výsledek
+ * jen pro testy a logy. Klíč idempotence z interního UUID rezervace: replay po ztracené
+ * odpovědi použije stejný klíč, takže Resend už přijatý e-mail nezdvojí a nepřijatý doručí.
  * Pořadí kontrol konfigurace: RESEND_API_KEY → příjemce (každá chybějící = skipped).
  */
 export async function sendReservationConfirmation(
   env: ConfirmationEnv,
   data: ReservationResponse,
-  context: { guestEmail: string; locale: Locale },
+  target: ConfirmationTarget,
   deps: ConfirmationDeps & { now: () => Date },
 ): Promise<'sent' | 'skipped' | 'failed'> {
+  // Nic (ani render) neběží synchronně v handleru: práce začne až po předání Promise do
+  // ctx.waitUntil, odpověď API na ni nečeká.
+  await Promise.resolve();
   const apiKey = env.RESEND_API_KEY?.trim();
   try {
     if (!apiKey) {
       deps.log('reservations: confirmation email skipped (not configured)');
       return 'skipped';
     }
-    const recipient = confirmationRecipient(env, context.guestEmail);
+    const recipient = confirmationRecipient(env, target.guestEmail);
     if (!recipient) {
       deps.log('reservations: confirmation email skipped (no test recipient)');
       return 'skipped';
     }
     const business = businessIdentity();
-    const email = renderConfirmationEmail(data, context.locale, {
+    const email = renderConfirmationEmail(data, target.locale, {
       business,
-      ...(recipient.test ? { test: { originalRecipient: context.guestEmail } } : {}),
+      ...(recipient.test ? { test: { originalRecipient: target.guestEmail } } : {}),
     });
     const message: MailMessage = {
       from: confirmationSender(business),
       to: recipient.to,
       ...email,
-      idempotencyKey: `reservation-confirmation-${env.BOOKING_ENV ?? 'unknown'}-${data.reservation.reservationCode}`,
+      idempotencyKey: confirmationIdempotencyKey(env, target.reservationId),
     };
     await sendViaResend(apiKey, message, deps.fetch);
     deps.log('reservations: confirmation email sent');
@@ -409,7 +430,9 @@ export async function sendReservationConfirmation(
     const kind = error instanceof MailError ? error.kind : 'unknown';
     deps.log(`reservations: confirmation email failed (${kind})`);
     // Jen selhání doručení přes providera (timeout, síť, HTTP) – ne chyba v kódu ani konfiguraci.
-    if (error instanceof MailError && apiKey) await sendConfirmationFailureAlert(env, apiKey, data.reservation.reservationCode, kind, deps);
+    if (error instanceof MailError && apiKey) {
+      await sendConfirmationFailureAlert(env, apiKey, { id: target.reservationId, code: data.reservation.reservationCode }, kind, deps);
+    }
     return 'failed';
   }
 }

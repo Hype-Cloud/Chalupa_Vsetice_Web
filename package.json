@@ -16,6 +16,7 @@
     "db:migrate:preview": "node scripts/d1-migrations.ts apply preview",
     "db:migrate:production": "node scripts/d1-migrations.ts apply production",
     "smoke": "node scripts/smoke.ts",
+    "email:icons": "node scripts/email-icons.ts",
     "test": "node --test 'tests/*.test.ts'"
   },
   "dependencies": {

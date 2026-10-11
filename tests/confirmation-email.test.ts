@@ -1,12 +1,12 @@
 import test, { after, before, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
+import { readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { inflateSync } from 'node:zlib';
 import { qrMatrix, QR_QUIET_MODULES } from '../lib/booking/qr.ts';
 import { createI18n, LOCALES, type Locale } from '../lib/i18n/index.ts';
 import { BUSINESS, businessIdentity, phoneNumber } from '../lib/business.ts';
-import { BRAND_MARK_CONTENT_ID, confirmationRecipient, PHONE_ICON_CONTENT_ID, PHONE_ICON_DARK_CONTENT_ID, confirmationSender, QR_CONTENT_ID, renderConfirmationEmail } from '../worker/booking/confirmation.ts';
+import { BRAND_MARK_CONTENT_ID, confirmationRecipient, sendReservationConfirmation, PHONE_ICON_CONTENT_ID, PHONE_ICON_DARK_CONTENT_ID, confirmationSender, QR_CONTENT_ID, renderConfirmationEmail } from '../worker/booking/confirmation.ts';
 import { handleCreateReservation, type BookingDeps, type BookingEnv } from '../worker/booking/handler.ts';
 import type { ReservationResponse } from '../worker/booking/response.ts';
 import { SITEVERIFY_URL } from '../worker/booking/turnstile.ts';
@@ -130,31 +130,131 @@ test('API: neplatný locale → 422 locale, nic se nezapíše ani neodešle', as
   assert.equal(s.mails.length, 0);
 });
 
-test('nová rezervace v Preview: právě jeden e-mail na testovací schránku, locale uložené; replay ani souběžný dvojklik další neodešle', async () => {
+/** Interní UUID n-té vygenerované rezervace v setup() (deterministické randomUUID). */
+const uuid = (n: number) => `00000000-0000-4000-8000-${String(n).padStart(12, '0')}`;
+const storedId = async (t: { db: D1Database }, code: string) =>
+  (await t.db.prepare('SELECT id FROM reservations WHERE public_code = ?1').bind(code).first<{ id: string }>())!.id;
+
+test('nová rezervace v Preview: 201, jeden záznam, jeden e-mail na testovací schránku; klíč idempotence = interní UUID', async () => {
   const s = setup();
-  const key = { 'idempotency-key': 'potvrzeni-0000000000000001' };
-  const first = await s.post(stay({ locale: 'de' }), key);
+  const first = await s.post(stay({ locale: 'de' }), { 'idempotency-key': 'potvrzeni-0000000000000001' });
   assert.equal(first.status, 201);
   const api = (await first.json()) as ReservationResponse;
+  assert.equal(await s.t.count('reservations'), 1);
   assert.equal(s.mails.length, 1);
   const [mail] = s.mails;
   assert.deepEqual(mail.body.to, [TEST_INBOX], 'v Preview nikdy na adresu hosta');
   assert.equal(mail.body.from, 'Chalupa Všetice <rezervace@chalupavsetice.cz>');
   assert.equal(mail.body.subject, `[TEST] Buchung eingegangen – ${api.reservation.reservationCode}`);
   assert.equal(mail.headers.get('authorization'), `Bearer ${RESEND_KEY}`);
-  assert.equal(mail.headers.get('idempotency-key'), `reservation-confirmation-preview-${api.reservation.reservationCode}`);
+  const id = await storedId(s.t, api.reservation.reservationCode);
+  assert.equal(id, uuid(1));
+  assert.equal(mail.headers.get('idempotency-key'), `reservation-confirmation-preview-${id}`);
   assert.ok(mail.body.text.includes(GUEST_EMAIL) && mail.body.html.includes(GUEST_EMAIL), 'adresa hosta jen jako informace v těle');
   assert.equal((await s.t.db.prepare('SELECT locale FROM reservations').first<{ locale: string }>())!.locale, 'de');
-  // Idempotentní replay (např. ztracená odpověď) – stejná rezervace, žádný další e-mail.
-  const replay = await s.post(stay({ locale: 'de' }), key);
+});
+
+test('replay (stejný Idempotency-Key): 200 + replayed, stejná rezervace, potvrzení znovu naplánované se stejným klíčem; e-mail a jazyk z uložené rezervace', async () => {
+  const s = setup({ defer: true });
+  const key = { 'idempotency-key': 'potvrzeni-0000000000000003' };
+  const first = await s.post(stay({ locale: 'de' }), key);
+  assert.equal(first.status, 201);
+  const api = (await first.json()) as ReservationResponse;
+  // Opakovaný požadavek s jiným jazykem webu (locale není v otisku požadavku).
+  const replay = await s.post(stay({ locale: 'en' }), key);
   assert.equal(replay.status, 200);
-  assert.equal(s.mails.length, 1);
-  // Souběžný dvojklik s novým klíčem: jedna rezervace, jeden e-mail.
-  const key2 = { 'idempotency-key': 'potvrzeni-0000000000000002' };
-  const pair = await Promise.all([s.post(stay({ arrival: '2030-03-01', departure: '2030-03-04' }), key2), s.post(stay({ arrival: '2030-03-01', departure: '2030-03-04' }), key2)]);
+  const replayed = (await replay.json()) as ReservationResponse & { replayed?: boolean };
+  assert.equal(replayed.replayed, true);
+  assert.deepEqual({ ...replayed, replayed: undefined }, { ...api, replayed: undefined });
+  assert.equal(await s.t.count('reservations'), 1);
+  assert.equal(s.deferred.length, 2, 'potvrzení naplánované i pro replay (ctx.waitUntil)');
+  await Promise.all(s.deferred);
+  const keys = s.confirmations().map((m) => m.headers.get('idempotency-key'));
+  assert.deepEqual(keys, [`reservation-confirmation-preview-${uuid(1)}`, `reservation-confirmation-preview-${uuid(1)}`], 'stejný klíč → Resend nezdvojí');
+  const second = s.confirmations()[1].body;
+  assert.ok(second.subject.includes('Buchung eingegangen'), 'jazyk uložený u rezervace, ne z opakovaného požadavku');
+  assert.ok(second.text.includes(GUEST_EMAIL), 'e-mail uložený u rezervace');
+  // Produkce: příjemce replay = uložený e-mail hosta.
+  const prod = setup({ db: 'production' });
+  await prod.post(stay(), key);
+  await prod.post(stay(), key);
+  assert.deepEqual(prod.confirmations().map((m) => m.body.to), [[GUEST_EMAIL], [GUEST_EMAIL]]);
+});
+
+test('souběžný dvojklik (UNIQUE idempotency_key po INSERTu): jedna rezervace, oba požadavky plánují potvrzení se stejným klíčem', async () => {
+  const s = setup();
+  const key = { 'idempotency-key': 'potvrzeni-0000000000000002' };
+  const pair = await Promise.all([s.post(stay(), key), s.post(stay(), key)]);
   assert.deepEqual(pair.map((r) => r.status).sort(), [200, 201]);
-  assert.equal(s.mails.length, 2);
-  assert.equal(await s.t.count('reservations'), 2);
+  assert.equal(await s.t.count('reservations'), 1);
+  const id = (await s.t.db.prepare('SELECT id FROM reservations').first<{ id: string }>())!.id;
+  assert.deepEqual(s.confirmations().map((m) => m.headers.get('idempotency-key')), [`reservation-confirmation-preview-${id}`, `reservation-confirmation-preview-${id}`]);
+});
+
+test('replay bez e-mailu: jiný otisk požadavku (422), zrušená rezervace, rezervace bez uloženého jazyka', async () => {
+  const s = setup();
+  const key = { 'idempotency-key': 'potvrzeni-0000000000000004' };
+  await s.post(stay(), key);
+  assert.equal((await s.post(stay({ guests: 3 }), key)).status, 422);
+  assert.equal(s.mails.length, 1);
+  await s.t.db.prepare('UPDATE reservations SET locale = NULL').run();
+  assert.equal((await s.post(stay(), key)).status, 200);
+  await s.t.db.prepare("UPDATE reservations SET status = 'cancelled'").run();
+  assert.equal((await s.post(stay(), key)).status, 200);
+  assert.equal(s.mails.length, 1, 'žádné další potvrzení');
+});
+
+test('dvě rezervace se stejným veřejným kódem (úklid Preview DB, reset čítače): různé UUID → různé klíče u Resend', async () => {
+  const s = setup();
+  const a = (await (await s.post(stay())).json()) as ReservationResponse;
+  // Ruční úklid Preview: smazané rezervace i denní čítač → další rezervace dostane stejný kód.
+  await s.t.db.batch([s.t.db.prepare('DELETE FROM reservations'), s.t.db.prepare('DELETE FROM reservation_code_counters')]);
+  const b = (await (await s.post(stay({ arrival: '2030-03-01', departure: '2030-03-04' }))).json()) as ReservationResponse;
+  assert.equal(a.reservation.reservationCode, b.reservation.reservationCode);
+  const keys = s.confirmations().map((m) => m.headers.get('idempotency-key'));
+  assert.deepEqual(keys, [`reservation-confirmation-preview-${uuid(1)}`, `reservation-confirmation-preview-${uuid(2)}`]);
+});
+
+test('interní UUID je jen pro server: není v odpovědi API, HTML, plaintextu ani logu', async () => {
+  const s = setup({ resend: () => new Response('', { status: 500 }) });
+  const key = { 'idempotency-key': 'potvrzeni-0000000000000005' };
+  const responses = [await s.post(stay(), key), await s.post(stay(), key)];
+  const id = uuid(1);
+  for (const r of responses) assert.ok(!(await r.text()).includes(id), 'API');
+  for (const m of s.confirmations()) {
+    assert.ok(!m.body.html.includes(id) && !m.body.text.includes(id) && !m.body.subject.includes(id), 'e-mail');
+  }
+  for (const m of s.alerts()) {
+    assert.equal(m.headers.get('idempotency-key'), `confirmation-failure-alert-preview-${id}`);
+    assert.ok(!JSON.stringify(m.body).includes(id), 'text upozornění');
+  }
+  assert.ok(!s.logs.join('\n').includes(id), 'log');
+  assert.ok(!s.logs.join('\n').includes('0000-4000-8000'), 'log');
+});
+
+test('potvrzení nic nedělá synchronně: Promise se vrátí dřív, než proběhne render nebo síť', async () => {
+  const calls: string[] = [];
+  const pending = sendReservationConfirmation(
+    { BOOKING_ENV: 'preview', RESEND_API_KEY: RESEND_KEY, BOOKING_CONFIRMATION_TEST_EMAIL: TEST_INBOX },
+    SAMPLE,
+    { reservationId: uuid(9), guestEmail: GUEST_EMAIL, locale: 'cs' },
+    { fetch: (async () => (calls.push('fetch'), Response.json({ id: 'x' }))) as typeof fetch, log: (m) => calls.push(m), now: () => NOW },
+  );
+  assert.deepEqual(calls, [], 'před předáním do ctx.waitUntil neproběhlo nic');
+  assert.equal(await pending, 'sent');
+  assert.deepEqual(calls, ['fetch', 'reservations: confirmation email sent']);
+});
+
+test('statické ikony e-mailu jsou předgenerované: Worker je nerastruje, soubor odpovídá generátoru', async () => {
+  const root = join(import.meta.dirname, '..');
+  const sources = (dir: string): string[] =>
+    readdirSync(join(root, dir), { withFileTypes: true }).flatMap((e) => (e.isDirectory() ? sources(join(dir, e.name)) : e.name.endsWith('.ts') ? [join(dir, e.name)] : []));
+  for (const file of [...sources('worker'), ...sources('lib')]) {
+    const source = readFileSync(join(root, file), 'utf8');
+    assert.ok(!/from '[^']*(scripts\/|email-icons)|pathToPolylines|strokeCoverage|brandMarkPng|phoneIconPng/.test(source), `${file}: rastrování ikon v kódu Workeru`);
+  }
+  const { iconAssetsSource, ICON_ASSETS_PATH } = await import('../scripts/email-icons.ts');
+  assert.equal(readFileSync(ICON_ASSETS_PATH, 'utf8'), iconAssetsSource(), 'worker/email/iconAssets.ts je zastaralý: pnpm run email:icons');
 });
 
 test('produkce: příjemce je e-mail hosta, bez označení TEST', async () => {
@@ -208,7 +308,7 @@ test('selhání providera (timeout, síť, HTTP 4xx/5xx): rezervace 201, jeden p
     const [alert] = s.alerts();
     assert.deepEqual(alert.body.to, [ADMIN_INBOX]);
     assert.equal(alert.body.subject, `[TEST] POZOR: potvrzovací e-mail rezervace ${code} selhal`);
-    assert.equal(alert.headers.get('idempotency-key'), `confirmation-failure-alert-preview-${code}`);
+    assert.equal(alert.headers.get('idempotency-key'), `confirmation-failure-alert-preview-${await storedId(s.t, code)}`);
     assert.ok(alert.body.text.includes(`Rezervace: ${code}`) && alert.body.text.includes('Prostředí: preview') && alert.body.text.includes(`Chyba: ${kind}`) && alert.body.text.includes(NOW.toISOString()));
     assert.equal(alert.body.html, undefined);
     assert.equal(alert.body.attachments, undefined);
@@ -427,7 +527,7 @@ test('CTA, patička a plaintext ve 4 jazycích: kontakty z konfigurace (telefon,
 });
 
 test('renderer nemá napevno údaje provozovatele: jiná konfigurace se propíše všude', () => {
-  for (const file of ['worker/booking/confirmation.ts', 'worker/email/icons.ts']) {
+  for (const file of ['worker/booking/confirmation.ts', 'worker/email/iconAssets.ts']) {
     const source = readFileSync(join(import.meta.dirname, '..', file), 'utf8');
     for (const value of ['Chalupa Všetice', 'chalupavsetice.cz', '736', '23380811', 'ares.gov.cz']) assert.ok(!source.includes(value), `${file}: ${value}`);
   }

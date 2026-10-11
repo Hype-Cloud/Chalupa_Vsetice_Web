@@ -16,8 +16,8 @@ import { paymentAccountFromIban, type PaymentAccount } from '../../lib/booking/p
 import type { AvailabilityDeps } from '../availability.ts';
 import { json } from '../http.ts';
 import { secretEquals, sha256 } from '../secrets.ts';
-import { databaseEnvironment, DuplicateError, findByIdempotencyKey, insertReservation, NightsTakenError, ReservationCodesExhaustedError, type ReservationSummary } from './db.ts';
-import { sendReservationConfirmation, type ConfirmationEnv } from './confirmation.ts';
+import { databaseEnvironment, DuplicateError, findByIdempotencyKey, insertReservation, NightsTakenError, ReservationCodesExhaustedError, type ReservationSummary, type StoredContact } from './db.ts';
+import { sendReservationConfirmation, type ConfirmationEnv, type ConfirmationTarget } from './confirmation.ts';
 import { checkExternalAvailability } from './external.ts';
 import { reservationResponse, type ReservationResponse } from './response.ts';
 import { PricingDataError, quoteStay, type Quote } from './pricing.ts';
@@ -174,7 +174,7 @@ async function createReservation(request: Request, env: BookingEnv, deps: Bookin
     // ještě před Turnstile, protože token je jednorázový.
     if (idempotencyKey) {
       const existing = await findByIdempotencyKey(db, idempotencyKey);
-      if (existing) return replay(existing, hash, account);
+      if (existing) return replay(existing, hash, account, env, deps);
     }
 
     const human = await verifyTurnstile(turnstileSecret, turnstileToken, { remoteIp, idempotencyKey }, deps.fetch);
@@ -230,11 +230,8 @@ async function createReservation(request: Request, env: BookingEnv, deps: Bookin
         });
         deps.log('reservations: created');
         const body = reservationResponse(reservation, account);
-        // Potvrzovací e-mail jen tady – po skutečně novém zápisu. Replay (níže i před Turnstile)
-        // e-mail neposílá. Best-effort: nikdy nevyhazuje, odpověď 201 nemění.
-        const confirmation = sendReservationConfirmation(env, body, { guestEmail: booking.email, locale: booking.locale }, deps);
-        if (deps.defer) deps.defer(confirmation);
-        else await confirmation;
+        // Potvrzovací e-mail až po skutečném zápisu; best-effort, odpověď 201 nemění.
+        await scheduleConfirmation(env, deps, body, { reservationId: id, guestEmail: booking.email, locale: booking.locale });
         return created(body);
       } catch (error) {
         if (error instanceof NightsTakenError) {
@@ -249,7 +246,7 @@ async function createReservation(request: Request, env: BookingEnv, deps: Bookin
         if (error instanceof DuplicateError && error.column === 'idempotency_key' && idempotencyKey) {
           // Souběžný požadavek se stejným klíčem byl rychlejší.
           const existing = await findByIdempotencyKey(db, idempotencyKey);
-          if (existing) return replay(existing, hash, account);
+          if (existing) return replay(existing, hash, account, env, deps);
         }
         if (error instanceof DuplicateError && (error.column === 'id' || error.column === 'ical_uid') && attempt < ID_ATTEMPTS) continue;
         throw error;
@@ -262,8 +259,36 @@ async function createReservation(request: Request, env: BookingEnv, deps: Bookin
   }
 }
 
-function replay(existing: ReservationSummary & { requestHash: string | null }, hash: string, account: PaymentAccount): Response {
+/**
+ * Naplánuje potvrzovací e-mail přes ctx.waitUntil (deps.defer); bez něj (testy) počká.
+ * sendReservationConfirmation nikdy nevyhazuje a nic nedělá synchronně, takže odpověď
+ * na e-mail nečeká a jeho selhání ji nezmění.
+ */
+async function scheduleConfirmation(env: BookingEnv, deps: BookingDeps, body: ReservationResponse, target: ConfirmationTarget): Promise<void> {
+  const confirmation = sendReservationConfirmation(env, body, target, deps);
+  if (deps.defer) deps.defer(confirmation);
+  else await confirmation;
+}
+
+/**
+ * Replay existující rezervace (stejný Idempotency-Key): stejná odpověď (200, replayed) a znovu
+ * best-effort naplánované potvrzení – obnova po ztracené odpovědi nebo nedokončeném e-mailu.
+ * Resend dostane stejný klíč idempotence (interní UUID), takže už doručený e-mail nezdvojí.
+ * E-mail a jazyk se berou z uložené rezervace, ne z opakovaného požadavku. Zrušená nebo
+ * zaplacená rezervace ani rezervace bez uloženého jazyka (před migrací 0009) e-mail nedostane.
+ */
+async function replay(
+  existing: ReservationSummary & { requestHash: string | null; stored: StoredContact },
+  hash: string,
+  account: PaymentAccount,
+  env: BookingEnv,
+  deps: BookingDeps,
+): Promise<Response> {
   if (existing.requestHash !== hash) return failure(422, 'idempotency-key-reused');
-  const { requestHash: _, ...reservation } = existing;
-  return created(reservationResponse(reservation, account), 200, true);
+  const { requestHash: _, stored, ...reservation } = existing;
+  const body = reservationResponse(reservation, account);
+  if (reservation.status === 'pending_payment' && stored.locale) {
+    await scheduleConfirmation(env, deps, body, { reservationId: stored.reservationId, guestEmail: stored.email, locale: stored.locale });
+  }
+  return created(body, 200, true);
 }

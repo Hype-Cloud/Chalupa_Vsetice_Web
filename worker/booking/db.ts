@@ -11,7 +11,7 @@ import { addDays, type IsoDate } from '../../lib/availability/dates.ts';
 import { mergeIntervals } from '../../lib/availability/occupancy.ts';
 import type { BusyInterval } from '../../lib/availability/types.ts';
 import { paymentDueAt, reservationCodeDay, reservationCodePrefix } from '../../lib/booking/payment.ts';
-import type { Locale } from '../../lib/i18n/index.ts';
+import { isLocale, type Locale } from '../../lib/i18n/index.ts';
 
 export type ReservationStatus = 'pending_payment' | 'paid' | 'cancelled';
 
@@ -135,16 +135,28 @@ export async function insertReservation(db: D1Database, r: NewReservation): Prom
   return { code: row.public_code, arrival: r.arrival, departure: r.departure, guests: r.guests, priceCzk: r.priceCzk, variableSymbol: row.variable_symbol, status: 'pending_payment', paymentDueAt: dueAt };
 }
 
-export async function findByIdempotencyKey(db: D1Database, key: string): Promise<(ReservationSummary & { requestHash: string | null }) | null> {
+/** Údaje existující rezervace jen pro server (replay potvrzovacího e-mailu); nikdy do API ani logu. */
+export interface StoredContact {
+  reservationId: string;
+  email: string;
+  /** Jazyk uložený u rezervace; u rezervací z doby před migrací 0009 null. */
+  locale: Locale | null;
+}
+
+export async function findByIdempotencyKey(
+  db: D1Database,
+  key: string,
+): Promise<(ReservationSummary & { requestHash: string | null; stored: StoredContact }) | null> {
   const row = await db
     .prepare(
-      `SELECT public_code, arrival, departure, guests, price_czk, variable_symbol, status, request_hash, created_at, payment_due_at
+      `SELECT id, email, locale, public_code, arrival, departure, guests, price_czk, variable_symbol, status, request_hash, created_at, payment_due_at
        FROM reservations WHERE idempotency_key = ?1`,
     )
     .bind(key)
-    .first<{ public_code: string; arrival: string; departure: string; guests: number; price_czk: number; variable_symbol: string; status: ReservationStatus; request_hash: string | null; created_at: string; payment_due_at: string | null }>();
+    .first<{ id: string; email: string; locale: string | null; public_code: string; arrival: string; departure: string; guests: number; price_czk: number; variable_symbol: string; status: ReservationStatus; request_hash: string | null; created_at: string; payment_due_at: string | null }>();
   if (!row) return null;
   return {
+    stored: { reservationId: row.id, email: row.email, locale: isLocale(row.locale) ? row.locale : null },
     code: row.public_code,
     arrival: row.arrival,
     departure: row.departure,

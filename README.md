@@ -216,9 +216,9 @@ Projekt využívá Node.js Test Runner. Databázové testy probíhají nad loká
 | reservation-form.test.ts | 20 | Rezervační formulář: request podle kontraktu, blokace odeslání (termín, cena, kontakty; Turnstile tlačítko neblokuje), kliknutí → Invisible Turnstile → POST, selhání Turnstile bez POST, Idempotency-Key a token svázané s operací (retry = stejný klíč i token bez nové challenge, nová operace = nový token i klíč, i po price-mismatch), chybové kódy → hlášky ve všech jazycích, POST proti skutečnému handleru, `GET /api/booking-config`, Preview Invisible site key jen ve `previews`; potvrzení jen z dat serverové odpovědi (neúplná nebo nekonzistentní odpověď se nepřijme). |
 | invisible-turnstile.test.ts | 8 | Invisible Turnstile na klientu: widget připravený předem bez spuštění challenge, po kliknutí jen `execute`, nejvýš jeden token na widget a čerstvý widget na pozadí, bez automatického obnovování, ignorování pozdních callbacků, chyba / timeout / prázdný token → `turnstile-failed`, nenačtený skript → `turnstile-unavailable` s opakováním přípravy, odpojení formuláře. |
 | stay-feedback.test.ts | 5 | Vizuální odezva na pobyt kratší než `MIN_NIGHTS`: validace a stav pobytu beze změny, nový trigger s kliknutým dnem při každém pokusu, validní klik ani jiné chyby flash nespustí, flash dne bez trvalého stavu a bez pohybu, pulse hlášky jen přes `transform`, `prefers-reduced-motion` bez animace. |
-| confirmation-email.test.ts | 19 | Potvrzovací e-mail: `locale` cs/en/de/ua (jiné → 422), nová rezervace = jeden e-mail, replay ani souběžný dvojklik další neodešle, Preview → testovací schránka, produkce → host, odesílatel z business identity, business config (telefon E.164 → `tel:` a český zápis, validace), hlavička (jméno, značka, termín pobytu), kompaktní termín ve 4 jazycích, pořadí platební sekce a QR bez popisku, telefonický kontakt a patička (`IČ` jako odkaz do rejstříku, bez viditelné URL, „ARES“ a „IČO“), výchozí světlá varianta, kontakty v plaintextu, renderer bez napevno zapsaných údajů provozovatele, chybějící konfigurace → skip bez upozornění, selhání providera (timeout, síť, HTTP 4xx/5xx) → 201 a jedno interní upozornění bez osobních a bankovních údajů, selhání upozornění nic dalšího nespouští, odložené odeslání, obsah HTML i textu ve 4 jazycích ze stejných dat jako API, QR příloha (cid) = SPAYD, escapování HTML, nové znění věty o e-mailu. |
+| confirmation-email.test.ts | 26 | Potvrzovací e-mail: `locale` cs/en/de/ua (jiné → 422), nová rezervace = jeden e-mail s klíčem z interního UUID, replay i souběžný dvojklik znovu naplánují potvrzení se stejným klíčem a s uloženým e-mailem a jazykem, replay bez e-mailu (422, zrušená, bez jazyka), stejný veřejný kód po resetu čítače → různé klíče, UUID mimo API/e-mail/log, žádná synchronní práce před `ctx.waitUntil`, předgenerované ikony (bez rastrování ve Workeru), Preview → testovací schránka, produkce → host, odesílatel z business identity, business config (telefon E.164 → `tel:` a český zápis, validace), hlavička (jméno, značka, termín pobytu), kompaktní termín ve 4 jazycích, pořadí platební sekce a QR bez popisku, telefonický kontakt a patička (`IČ` jako odkaz do rejstříku, bez viditelné URL, „ARES“ a „IČO“), výchozí světlá varianta, kontakty v plaintextu, renderer bez napevno zapsaných údajů provozovatele, chybějící konfigurace → skip bez upozornění, selhání providera (timeout, síť, HTTP 4xx/5xx) → 201 a jedno interní upozornění bez osobních a bankovních údajů, selhání upozornění nic dalšího nespouští, odložené odeslání, obsah HTML i textu ve 4 jazycích ze stejných dat jako API, QR příloha (cid) = SPAYD, escapování HTML, nové znění věty o e-mailu. |
 | payment.test.ts | 9 | Platby: pražské datum → `DDMMYY`, `NN` 01–99, splatnost (konec pražského dne po 24 h, změny času, vždy 24–48 h), IBAN (kontrolní součet, odvození čísla účtu), SPAYD (serverová cena, VS = kód, zpráva `Rezervace {kód}`), QR jako PNG (pixely = matice) se SVG fallbackem, kopírování do schránky, kontrola, že repozitář neobsahuje skutečný IBAN. |
-| **Celkem** | **353** | |
+| **Celkem** | **360** | |
 
 ### Testované scénáře
 
@@ -389,10 +389,21 @@ POST /api/reservations → validace → čerstvý export e-chalup → D1 batch (
 
 ### Potvrzovací e-mail (`worker/booking/confirmation.ts`)
 
-- **Kdy:** jen po skutečně novém zápisu rezervace (`insertReservation` uspěl). Idempotentní
-  replay (opakování se stejným `Idempotency-Key`, i souběžný dvojklik, kdy druhý požadavek
-  narazí na UNIQUE `idempotency_key`) vrací existující rezervaci a e-mail **neposílá**. Resend
-  navíc dostává `Idempotency-Key: reservation-confirmation-<BOOKING_ENV>-<kód>`.
+- **Kdy:** po úspěšném zápisu rezervace (`insertReservation`) a znovu při idempotentním
+  replay (opakování se stejným `Idempotency-Key` před Turnstile i souběžný dvojklik, kdy druhý
+  požadavek narazí na UNIQUE `idempotency_key`). Replay tak obnoví potvrzení po ztracené
+  odpovědi nebo nedokončeném odeslání.
+- **Idempotence u Resend:** `Idempotency-Key: reservation-confirmation-<BOOKING_ENV>-<reservations.id>`
+  – interní UUID, ne veřejný kód (`DDMMYYNN` se po úklidu Preview DB a resetu čítače může
+  opakovat; stejný klíč s jiným obsahem Resend odmítne HTTP 409). Replay posílá stejný klíč,
+  takže už přijatý e-mail Resend nezdvojí (klíč platí 24 h). UUID je jen v hlavičce pro Resend
+  – ne v odpovědi API, v e-mailu ani v logu.
+- **Replay používá uložená data:** e-mail a `locale` se čtou z rezervace v D1, ne z opakovaného
+  požadavku. Bez e-mailu zůstává replay se špatným otiskem (422), zrušená nebo zaplacená
+  rezervace a rezervace bez uloženého jazyka (před migrací 0009). Odpověď replay je dál
+  200 + `replayed: true` a veřejný kontrakt se nemění.
+- **Mimo request path:** `sendReservationConfirmation` začíná `await`, takže render ani síť
+  neběží synchronně v handleru – celá práce běží až v `ctx.waitUntil` a odpověď na ni nečeká.
 - **Data:** stejný objekt jako úspěšná odpověď API (`worker/booking/response.ts` →
   `reservationResponse`): kód rezervace, termín, noci, hosté, splatnost, `totalCzk`
   a `PaymentInstructions` (částka, účet, IBAN, VS, SPAYD). Nic se nepočítá znovu.
@@ -421,8 +432,12 @@ POST /api/reservations → validace → čerstvý export e-chalup → D1 batch (
   obrázky ani na barvu okolí.
 - **Obrázky (inline přílohy `cid:`):** QR = PNG ze stejného SPAYD (`lib/booking/qr.ts`,
   sdílené s webem) jako `<img src="cid:qr-platba">`; bez externí QR služby. Značka a sluchátko
-  jsou tahy ikon lucide `House` a `Phone` rastrované do PNG (`worker/email/icons.ts`, enkodér
-  `lib/png.ts`) – SVG e-mailoví klienti spolehlivě nezobrazí. Značka je plná dlaždice
+  jsou tahy ikon lucide `House` a `Phone` předem rastrované do PNG – SVG e-mailoví klienti
+  spolehlivě nezobrazí. Rastrování (SVG path, oblouky, supersampling) trvá sekundy CPU, proto
+  běží jen v generátoru `scripts/email-icons.ts` (`pnpm run email:icons`) a Worker čte hotové
+  base64 z `worker/email/iconAssets.ts`; za běhu se kreslí jen QR. Test hlídá, že soubor
+  odpovídá generátoru a že kód Workeru rasterizér neimportuje. Barvy sdílí renderer
+  i generátor z `worker/email/palette.ts`. Značka je plná dlaždice
   s vlastními barvami (bez průhlednosti), sluchátko má světlou a tmavou variantu podle
   barvy tlačítka. Bez obrázků zůstane čitelné jméno v hlavičce i text tlačítka.
 - **Příjemce:**
@@ -458,12 +473,13 @@ POST /api/reservations → validace → čerstvý export e-chalup → D1 batch (
   z Resend → jeden best-effort e-mail správci na `CONFLICT_ALERT_EMAIL` (stejná adresa
   a odesílatel `CONFLICT_ALERT_FROM` jako upozornění na kolize). Předmět
   `POZOR: potvrzovací e-mail rezervace <kód> selhal` (mimo produkci s `[TEST]`), obsah jen
-  kód rezervace, `BOOKING_ENV`, druh chyby a čas – nikdy jméno, e-mail, telefon, IBAN,
+  kód rezervace, `BOOKING_ENV`, druh chyby a čas (`Idempotency-Key:
+  confirmation-failure-alert-<env>-<reservations.id>`) – nikdy jméno, e-mail, telefon, IBAN,
   číslo účtu, SPAYD, poznámka ani obsah potvrzení. Selhání upozornění se jen zaloguje
   (`confirmation failure alert failed (…)`) a nic dalšího nespouští; bez `CONFLICT_ALERT_EMAIL`
-  se přeskočí. Potvrzení se automaticky neopakuje; při výpadku celého providera může selhat
+  se přeskočí. Potvrzení se automaticky neopakuje (jen replay klienta); při výpadku celého providera může selhat
   i upozornění.
-- **Bez fronty:** stav doručení se neukládá a e-mail se automaticky neopakuje. Renderer
+- **Bez fronty:** stav doručení se neukládá a e-mail se sám neopakuje (jen při replay). Renderer
   (`renderReservationEmail`) je obecný – stejný půjde použít pro potvrzení platby, zrušení
   nebo připomínku splatnosti s jinými texty.
 
