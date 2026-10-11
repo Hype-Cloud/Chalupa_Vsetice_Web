@@ -224,12 +224,12 @@ export function renderReservationEmail(
         `<tr><td class="e-text e-total" style="padding:14px 0 0;border-top:1px solid ${GREEN};color:${GREEN};font-size:16px;line-height:22px;font-weight:bold;">${escapeHtml(total[0])}</td>` +
         `<td class="e-text e-total" align="right" style="padding:14px 0 0 24px;border-top:1px solid ${GREEN};color:${GREEN};font-size:16px;line-height:22px;font-weight:bold;text-align:right;white-space:nowrap;">${escapeHtml(total[1])}</td></tr>`,
     ),
-    // Platba uzavřená jemnými linkami nahoře i dole: nadpis, pod ním vnořená tabulka – na
-    // desktopu QR vlevo a ruční údaje vpravo (svisle na střed), na mobilu (media query) pod
-    // sebou. Bez podpory media queries zůstávají dva sloupce. Splatnost je v úvodu, VS
-    // v údajích. Spodní odsazení 14 px + 12 px poslední buňky ≈ 26 px nad spodní linkou.
-    `<div class="e-line" style="margin:36px 0 0;padding:22px 0 14px;border-top:1px solid ${BORDER};border-bottom:1px solid ${BORDER};">`,
-    sectionHeading(paymentHeading, '0 0 18px'),
+    // Platba: mezera po souhrnu, nadpis, pod ním jemná linka (1 px, BORDER; v tmavém režimu
+    // přes .e-line), pak vnořená tabulka – na desktopu QR vlevo a ruční údaje vpravo (svisle
+    // na střed), na mobilu (media query) pod sebou. Bez podpory media queries zůstávají dva
+    // sloupce. Splatnost je v úvodu, VS v údajích. „Těšíme se…“ následuje bez linky.
+    sectionHeading(paymentHeading, '44px 0 12px'),
+    `<div class="e-line" style="padding:20px 0 0;border-top:1px solid ${BORDER};">`,
     table(
       '<tr>' +
         (matrix

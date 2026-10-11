@@ -598,8 +598,8 @@ test('úvod bez věty o souhrnu, nadpis „Souhrn rezervace“ ve 4 jazycích na
   const cs = renderConfirmationEmail(SAMPLE, 'cs');
   assert.ok(!cs.html.includes('Níže najdete') && !cs.text.includes('Níže najdete'));
   assert.ok(createI18n('cs').t('email.confirmation.intro', { date: 'X' }).endsWith('V případě jakýchkoli dotazů nás neváhejte kontaktovat.'));
-  // Mezi souhrnem a platbou jemná linka v barvě ohraničení.
-  assert.match(cs.html, /<div class="e-line" style="[^"]*border-top:1px solid #e2e7e0;[^"]*"><h2[^>]*>Platební údaje<\/h2>/);
+  // Jemná linka v barvě ohraničení až pod nadpisem „Platební údaje“ (mezi souhrnem a nadpisem jen mezera).
+  assert.match(cs.html, /<h2[^>]*>Platební údaje<\/h2><div class="e-line" style="[^"]*border-top:1px solid #e2e7e0;[^"]*">/);
 });
 
 test('platba: na desktopu QR vlevo a údaje vpravo ve vnořené tabulce, na mobilu (media query) pod sebou; IBAN se láme bezpečně', () => {
@@ -658,7 +658,7 @@ test('hlavička a značka se úpravou těla nezměnily (otisk HTML hlavičky a P
   }
 });
 
-test('platba: QR 174 px se zaoblenými rohy jen přes CSS, PNG beze změny; linka nad i pod sekcí, „Těšíme se…“ až pod ní', () => {
+test('platba: QR 174 px se zaoblenými rohy jen přes CSS, PNG beze změny; linka pod nadpisem, „Těšíme se…“ bez linky nad sebou', () => {
   const email = renderConfirmationEmail(SAMPLE, 'cs');
   // QR <img>: menší zobrazení a border-radius; data přílohy = beze změny (scale 6, okraj QR_QUIET_MODULES).
   const img = /<img src="cid:qr-platba"[^>]*>/.exec(email.html)![0];
@@ -668,14 +668,21 @@ test('platba: QR 174 px se zaoblenými rohy jen přes CSS, PNG beze změny; link
   const png = email.attachments.find((a) => a.contentId === QR_CONTENT_ID)!.content;
   assert.deepEqual(decodeQrPng(png), qrMatrix(SAMPLE.payment.spayd)!.data);
   assert.equal(bytesToBase64(qrPngBytes(qrMatrix(SAMPLE.payment.spayd)!, 6)), png, 'PNG = výstup generátoru (scale 6)');
-  // Linka nad i pod platební sekcí ve stejné barvě a tloušťce.
-  const open = /<div class="e-line" style="([^"]*)"><h2[^>]*>Platební údaje<\/h2>/.exec(email.html)!;
-  assert.match(open[1], /border-top:1px solid #e2e7e0;border-bottom:1px solid #e2e7e0;/);
+  // Jediná linka platební sekce je pod nadpisem (1 px, BORDER, v tmavém režimu přes .e-line);
+  // nad nadpisem ani pod údaji žádná.
+  const heading = email.html.indexOf('>Platební údaje</h2>');
+  const under = /^>Platební údaje<\/h2><div class="e-line" style="([^"]*)">/.exec(email.html.slice(heading))!;
+  assert.equal(under[1], 'padding:20px 0 0;border-top:1px solid #e2e7e0;');
+  const summaryEnd = email.html.lastIndexOf('</table>', heading);
+  assert.doesNotMatch(email.html.slice(summaryEnd, heading), /border|<hr|e-line/, 'nad nadpisem jen mezera');
+  assert.doesNotMatch(email.html.slice(heading), /border-bottom/, 'žádná spodní linka sekce');
   // Pořadí: údaje → konec sekce (spodní linka) → „Těšíme se…“ → linka před CTA.
   const end = email.html.indexOf('</div>', email.html.indexOf('>Variabilní symbol<'));
   const thanks = email.html.indexOf('Těšíme se na váš pobyt.');
   const cta = email.html.indexOf('Potřebujete se na něčem domluvit?');
   assert.ok(end > 0 && end < thanks && thanks < cta);
+  // Mezi koncem platby a „Těšíme se…“ žádná linka.
+  assert.doesNotMatch(email.html.slice(end, thanks), /border|<hr|e-line/, '„Těšíme se…“ bez linky nad sebou');
   assert.match(email.html.slice(thanks, cta), /<div class="e-line" style="border-top:1px solid #e2e7e0;/, 'linka před CTA zachovaná');
   // Mobil: QR a údaje dál pod sebou.
   assert.match(email.html, /@media only screen and \(max-width:620px\)\{[^@]*\.e-pay-qr,\.e-pay-details\{display:block!important;width:100%!important;padding:0!important\}/);
@@ -686,5 +693,15 @@ test('patička se úpravou platební sekce nezměnila (otisk HTML)', async () =>
   for (const locale of LOCALES) {
     const email = renderConfirmationEmail(SAMPLE, locale);
     assert.equal(createHash('sha256').update(email.html.slice(email.html.indexOf('<tr><td class="e-foot'))).digest('hex').slice(0, 16), '560eca57c9b6231a', locale);
+  }
+});
+
+test('telefonický kontakt (CTA) se přesunem linky nezměnil (otisk HTML)', async () => {
+  const { createHash } = await import('node:crypto');
+  const expected = { cs: 'cbf0059a8198db72', en: 'a7cd9f2cdce61ef3', de: '9eed3be17ced3b83', ua: '93cc64e3c751164f' };
+  for (const locale of LOCALES) {
+    const html = renderConfirmationEmail(SAMPLE, locale).html;
+    const cta = html.slice(html.indexOf('<tr><td class="e-px" align="center"'), html.indexOf('<tr><td class="e-foot'));
+    assert.equal(createHash('sha256').update(cta).digest('hex').slice(0, 16), expected[locale], locale);
   }
 });
