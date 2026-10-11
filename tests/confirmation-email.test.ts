@@ -400,7 +400,6 @@ test('obsah e-mailu: stejná data jako odpověď API (kód, cena, VS, splatnost,
     const email = renderConfirmationEmail(api, locale);
     const expected = [
       i18n.t('reservation.success.title'),
-      i18n.t('email.confirmation.intro', { date: i18n.formatDeadlineDate(api.payment.dueAt) }),
       i18n.t('email.summaryHeading'),
       api.reservation.reservationCode,
       `${i18n.formatDate(api.reservation.arrival)} – ${i18n.formatDate(api.reservation.departure)}`,
@@ -420,12 +419,13 @@ test('obsah e-mailu: stejná data jako odpověď API (kód, cena, VS, splatnost,
       assert.ok(email.text.includes(value), `${locale} text: ${value}`);
       assert.ok(email.html.replaceAll('<wbr>', '').includes(escape(value)), `${locale} html: ${value}`);
     }
+    assert.ok(email.text.includes(introText(i18n, api.payment.dueAt)) && visibleText(email.html).includes(introText(i18n, api.payment.dueAt)), `${locale}: úvod`);
     assert.equal(email.subject, i18n.t('email.confirmation.subject', { code: api.reservation.reservationCode }));
     // Bez skriptů, externích zdrojů a webfontů; vložené <style> jen jako vylepšení. Obrázky
     // jen cid:, odkazy jen tel:, mailto: a rejstřík provozovatele.
     assert.doesNotMatch(email.html, /<script|<link|@import|@font-face|url\(/i);
     assert.deepEqual([...email.html.matchAll(/src="([^"]*)"/g)].map((m) => m[1]), [BRAND_MARK_CONTENT_ID, QR_CONTENT_ID, PHONE_ICON_CONTENT_ID, PHONE_ICON_DARK_CONTENT_ID].map((id) => `cid:${id}`));
-    assert.deepEqual([...email.html.matchAll(/href="([^"]*)"/g)].map((m) => m[1]), ['tel:+420736125104', 'https://chalupavsetice.cz', 'mailto:info@chalupavsetice.cz']);
+    assert.deepEqual([...email.html.matchAll(/href="([^"]*)"/g)].map((m) => m[1]), ['tel:+420736125104', 'tel:+420736125104', 'https://chalupavsetice.cz', 'mailto:info@chalupavsetice.cz']);
   }
   assert.ok(!mail.text.includes('<'), 'plaintext bez HTML');
 });
@@ -455,9 +455,13 @@ test('HTML e-mailu escapuje hodnoty; Preview má stejný obsah jako produkce, je
   assert.deepEqual(email.attachments.map((a) => a.contentId), [BRAND_MARK_CONTENT_ID, PHONE_ICON_CONTENT_ID, PHONE_ICON_DARK_CONTENT_ID, QR_CONTENT_ID]);
 });
 
+/** Úvod e-mailu jako prostý text (slovo s odkazem tel: dosazené). */
+const introText = (i18n: ReturnType<typeof createI18n>, dueAt: string) =>
+  i18n.t('email.confirmation.intro', { date: i18n.formatDeadlineDate(dueAt), contact: i18n.t('email.confirmation.contactLink') });
+
 /** Viditelný text HTML (bez značek, hodnot atributů a entit). */
 const visibleText = (html: string) =>
-  html.replace(/<title>[^<]*<\/title>/, '').replace(/<[^>]+>/g, ' ').replace(/&nbsp;/g, ' ').replace(/&amp;/g, '&').replace(/\s+/g, ' ');
+  html.replace(/<title>[^<]*<\/title>/, '').replace(/<\/?a\b[^>]*>/g, '').replace(/<[^>]+>/g, ' ').replace(/&nbsp;/g, ' ').replace(/&amp;/g, '&').replace(/\s+/g, ' ');
 
 const SAMPLE: ReservationResponse = {
   reservation: { reservationCode: '10013001', arrival: '2030-02-01', departure: '2030-02-04', nights: 3, guests: 2, totalCzk: 8970, status: 'pending_payment', paymentDueAt: '2030-01-11T22:59:59.000Z' },
@@ -504,7 +508,7 @@ test('termín pobytu v hlavičce: kompaktně, den → měsíc → rok, jednozna�
 test('úvod (splatnost, instrukce před příjezdem, kontakt) → Souhrn rezervace → Platební údaje (QR, ruční údaje) → kontakt → patička', () => {
   const email = renderConfirmationEmail(SAMPLE, 'cs');
   const intro = 'Děkujeme za rezervaci. Prosíme o úhradu celé částky do 11. 1. 2030. Před příjezdem vám ještě zašleme podrobnější instrukce k pobytu. V případě jakýchkoli dotazů nás neváhejte kontaktovat.';
-  const order = ['Rezervace přijata', intro, '>Souhrn rezervace</h2>', 'Celková cena', 'Platební údaje', `cid:${QR_CONTENT_ID}`, 'Číslo účtu', 'Potřebujete se na něčem domluvit?', 'Rádi vám poradíme po telefonu.', 'Zavolat 736 125 104', 'info@chalupavsetice.cz', 'IČ: 23380811'];
+  const order = ['Rezervace přijata', 'Děkujeme za rezervaci.', '>Souhrn rezervace</h2>', 'Celková cena', 'Platební údaje', `cid:${QR_CONTENT_ID}`, 'Číslo účtu', 'Potřebujete se na něčem domluvit?', 'Rádi vám poradíme po telefonu.', 'Zavolat 736 125 104', 'info@chalupavsetice.cz', 'IČ: 23380811'];
   const positions = order.map((value) => email.html.indexOf(value));
   assert.ok(positions.every((p) => p >= 0), JSON.stringify(Object.fromEntries(order.map((v, i) => [v, positions[i]]))));
   assert.deepEqual([...positions].sort((a, b) => a - b), positions, 'pořadí sekcí');
@@ -513,13 +517,16 @@ test('úvod (splatnost, instrukce před příjezdem, kontakt) → Souhrn rezerva
   // CTA: kanonický tel: odkaz a zobrazení z konfigurace.
   assert.match(email.html, /<a href="tel:\+420736125104"[^>]*>(?:(?!<\/a>).)*Zavolat 736 125 104<\/span><\/a>/);
   assert.ok(email.text.includes(intro));
+  // „kontaktovat“ v úvodu je odkaz tel: na BUSINESS_PHONE.
+  assert.ok(email.html.includes('V případě jakýchkoli dotazů nás neváhejte <a class="e-text" href="tel:+420736125104" style="color:#163d33;text-decoration:underline;">kontaktovat</a>.</p>'));
   // Variabilní symbol ani splatnost se v platební sekci textem neopakují.
   assert.ok(!email.html.includes('Pro platbu použijte variabilní symbol') && !email.text.includes('Pro platbu použijte variabilní symbol'));
   const payment = email.html.slice(email.html.indexOf('Platební údaje'), email.html.indexOf(`cid:${QR_CONTENT_ID}`));
   assert.doesNotMatch(payment, /<p\b/, 'mezi nadpisem a QR žádný textový odstavec');
   // Patička: jméno → web, info e-mail → mailto, IČ prostý text; žádný registr.
-  const links = [...email.html.matchAll(/<a href="([^"]*)"[^>]*>([^<]*)<\/a>/g)].map(([, href, label]) => ({ href, label }));
+  const links = [...email.html.matchAll(/<a [^>]*?href="([^"]*)"[^>]*>([^<]*)<\/a>/g)].map(([, href, label]) => ({ href, label }));
   assert.deepEqual(links, [
+    { href: 'tel:+420736125104', label: 'kontaktovat' },
     { href: BUSINESS.BUSINESS_WEBSITE_URL, label: BUSINESS.BUSINESS_NAME },
     { href: `mailto:${BUSINESS.BUSINESS_EMAIL_INFO}`, label: BUSINESS.BUSINESS_EMAIL_INFO },
   ]);
@@ -545,7 +552,8 @@ test('CTA, patička a plaintext ve 4 jazycích: kontakty z konfigurace (telefon,
     const email = renderConfirmationEmail(SAMPLE, locale);
     const phone = locale === 'cs' ? '736 125 104' : '+420 736 125 104';
     const call = i18n.t('email.cta.call', { phone });
-    const intro = i18n.t('email.confirmation.intro', { date: i18n.formatDeadlineDate(SAMPLE.payment.dueAt) });
+    const intro = introText(i18n, SAMPLE.payment.dueAt);
+    assert.ok(email.html.includes(`<a class="e-text" href="tel:+420736125104" style="color:#163d33;text-decoration:underline;">${i18n.t('email.confirmation.contactLink')}</a>`), `${locale}: odkaz v úvodu`);
     assert.ok(intro.includes(i18n.formatDeadlineDate(SAMPLE.payment.dueAt)), `${locale}: splatnost v úvodu`);
     for (const value of [intro, i18n.t('email.summaryHeading'), i18n.t('email.cta.heading'), i18n.t('email.cta.text'), call, business.name, business.emailInfo, `IČ: ${business.ico}`]) {
       assert.ok(email.text.includes(value), `${locale} text: ${value}`);
@@ -593,11 +601,11 @@ test('úvod bez věty o souhrnu, nadpis „Souhrn rezervace“ ve 4 jazycích na
     assert.equal(style(h2[0]), style(h2[1]));
     assert.match(h2[0][1], /Georgia[^"]*font-weight:normal[^"]*color:#163d33/);
     // Úvod končí kontaktní větou; věta o souhrnu nikde.
-    assert.ok(email.text.includes(`${i18n.t('email.confirmation.intro', { date: i18n.formatDeadlineDate(SAMPLE.payment.dueAt) })}\n\n${headings[locale]}`), locale);
+    assert.ok(email.text.includes(`${introText(i18n, SAMPLE.payment.dueAt)}\n\n${headings[locale]}`), locale);
   }
   const cs = renderConfirmationEmail(SAMPLE, 'cs');
   assert.ok(!cs.html.includes('Níže najdete') && !cs.text.includes('Níže najdete'));
-  assert.ok(createI18n('cs').t('email.confirmation.intro', { date: 'X' }).endsWith('V případě jakýchkoli dotazů nás neváhejte kontaktovat.'));
+  assert.ok(introText(createI18n('cs'), SAMPLE.payment.dueAt).endsWith('V případě jakýchkoli dotazů nás neváhejte kontaktovat.'));
   // Jemná linka v barvě ohraničení až pod nadpisem „Platební údaje“ (mezi souhrnem a nadpisem jen mezera).
   assert.match(cs.html, /<h2[^>]*>Platební údaje<\/h2><div class="e-line" style="[^"]*border-top:1px solid #e2e7e0;[^"]*">/);
 });

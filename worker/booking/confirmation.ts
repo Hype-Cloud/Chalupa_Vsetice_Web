@@ -138,7 +138,7 @@ const STYLES = [
 export function renderReservationEmail(
   data: ReservationResponse,
   locale: Locale,
-  texts: { subject: string; heading: string; intro: string[]; summaryHeading: string },
+  texts: { subject: string; heading: string; intro: string[]; summaryHeading: string; contactLink?: string },
   options: EmailOptions = {},
 ): RenderedEmail {
   const i18n = createI18n(locale);
@@ -190,6 +190,7 @@ export function renderReservationEmail(
   const breakable = (value: string) => escapeHtml(value).replace(/(.{4})(?=.)/g, '$1<wbr>');
   const sectionHeading = (text: string, margin: string) =>
     `<h2 class="e-text" style="margin:${margin};font-family:${SERIF};font-weight:normal;font-size:21px;line-height:28px;color:${GREEN};">${escapeHtml(text)}</h2>`;
+  const contactLinkHtml = `<a class="e-text" href="${escapeHtml(business.phone.href)}" style="color:${GREEN};text-decoration:underline;">${escapeHtml(texts.contactLink ?? '')}</a>`;
   const link = (href: string, label: string) => `<a href="${escapeHtml(href)}" style="color:${MUTED};text-decoration:underline;">${escapeHtml(label)}</a>`;
 
   const header =
@@ -214,8 +215,9 @@ export function renderReservationEmail(
     `<tr><td class="e-px" style="padding:36px ${PAD}px 8px;">`,
     `<h1 class="e-text e-h1" style="margin:0 0 10px;font-family:${SERIF};font-weight:normal;font-size:28px;line-height:34px;color:${GREEN};">${escapeHtml(texts.heading)}</h1>`,
     // Úvod (poděkování, splatnost, instrukce před příjezdem, kontakt).
+    // `{contact}` v úvodu = odkaz tel: na BUSINESS_PHONE (text odkazu z i18n).
     ...texts.intro.map((paragraph, i, all) =>
-      `<p class="e-text" style="margin:0 0 ${i === all.length - 1 ? 32 : 12}px;font-size:15px;line-height:23px;color:${GREEN};">${escapeHtml(paragraph)}</p>`,
+      `<p class="e-text" style="margin:0 0 ${i === all.length - 1 ? 32 : 12}px;font-size:15px;line-height:23px;color:${GREEN};">${escapeHtml(paragraph).replace('{contact}', contactLinkHtml)}</p>`,
     ),
     // Souhrn; celková cena jen tučněji, o stupeň větší a s výraznější linkou nad sebou.
     sectionHeading(texts.summaryHeading, '0 0 6px'),
@@ -307,7 +309,7 @@ export function renderReservationEmail(
     '',
     texts.heading,
     '',
-    ...texts.intro.flatMap((paragraph) => [paragraph, '']),
+    ...texts.intro.flatMap((paragraph) => [paragraph.replace('{contact}', texts.contactLink ?? ''), '']),
     texts.summaryHeading,
     ...[...summary, total].map(([label, value]) => `${label}: ${value}`),
     '',
@@ -334,7 +336,12 @@ export function renderConfirmationEmail(data: ReservationResponse, locale: Local
   const i18n = createI18n(locale);
   const subject = `${options.test ? '[TEST] ' : ''}${i18n.t('email.confirmation.subject', { code: data.reservation.reservationCode })}`;
   const intro = [i18n.t('email.confirmation.intro', { date: i18n.formatDeadlineDate(data.payment.dueAt) })];
-  return renderReservationEmail(data, locale, { subject, heading: i18n.t('reservation.success.title'), intro, summaryHeading: i18n.t('email.summaryHeading') }, options);
+  return renderReservationEmail(
+    data,
+    locale,
+    { subject, heading: i18n.t('reservation.success.title'), intro, summaryHeading: i18n.t('email.summaryHeading'), contactLink: i18n.t('email.confirmation.contactLink') },
+    options,
+  );
 }
 
 /** Komu e-mail poslat: v produkci host, jinde jen testovací schránka (nebo nikomu). */
