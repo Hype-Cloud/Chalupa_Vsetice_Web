@@ -174,7 +174,7 @@ export const ua = {
   'reservation.success.thanks': 'Чекаємо на ваш приїзд.',
   'email.confirmation.subject': 'Бронювання прийнято – {code}',
   'email.confirmation.intro': 'Дякуємо за бронювання. Будь ласка, сплатіть повну суму до {date}. Перед приїздом ми надішлемо вам детальніші інструкції щодо перебування. Якщо у вас виникнуть запитання, звертайтеся до нас.',
-  'email.confirmation.summaryLead': 'Нижче ви знайдете підсумок перебування та платіжні реквізити.',
+  'email.summaryHeading': 'Підсумок бронювання',
   'email.reservationCode': 'Код бронювання',
   'email.qrAlt': 'Платіжний QR-код',
   'email.cta.heading': 'Потрібно щось узгодити?',

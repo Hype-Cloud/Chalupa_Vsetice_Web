@@ -101,11 +101,12 @@ const STYLES = [
   '.e-brand{font-size:14px!important;letter-spacing:.5px!important}',
   '.e-stay{font-size:12px!important;white-space:normal!important}',
   '.e-btn a{white-space:normal!important;padding:12px 20px!important}',
-  '.e-sep{display:none!important}',
-  '.e-item{display:block!important}',
+  // Platba: QR a údaje pod sebou (QR na střed, tabulka přes celou šířku).
+  '.e-pay-qr,.e-pay-details{display:block!important;width:100%!important;padding:0!important}',
+  '.e-pay-qr{text-align:center!important;padding-bottom:20px!important}',
+  // Patička: položky pod sebou.
+  '.e-item{display:block!important;padding:0!important}',
   '}',
-  // IBAN se láme jen na velmi úzkém displeji (jinak se zalomí popisky).
-  '@media only screen and (max-width:360px){.e-nowrap{white-space:normal!important;overflow-wrap:anywhere!important;word-break:break-all!important}}',
   '@media (prefers-color-scheme:dark){',
   `.e-page{background-color:${DARK.page}!important}`,
   `.e-card{background-color:${DARK.card}!important;border-color:${DARK.line}!important}`,
@@ -137,7 +138,7 @@ const STYLES = [
 export function renderReservationEmail(
   data: ReservationResponse,
   locale: Locale,
-  texts: { subject: string; heading: string; intro: string[] },
+  texts: { subject: string; heading: string; intro: string[]; summaryHeading: string },
   options: EmailOptions = {},
 ): RenderedEmail {
   const i18n = createI18n(locale);
@@ -177,13 +178,18 @@ export function renderReservationEmail(
 
   const table = (content: string, attrs = 'width="100%"', style = '') =>
     `<table role="presentation" ${attrs} cellpadding="0" cellspacing="0" border="0" style="border-collapse:collapse;${style}">${content}</table>`;
-  const row = ([label, value]: [string, string], first: boolean, nowrap = false) => {
+  const row = ([label, value]: [string, string], first: boolean, wrap = false) => {
     const line = first ? '' : `border-top:1px solid ${BORDER};`;
     return (
       `<tr><td class="e-muted${first ? '' : ' e-line'}" style="padding:12px 0;${line}color:${MUTED};font-size:14px;line-height:21px;">${escapeHtml(label)}</td>` +
-      `<td class="e-text e-val${first ? '' : ' e-line'}${nowrap ? ' e-nowrap' : ''}" align="right" style="padding:12px 0 12px 24px;${line}color:${GREEN};font-size:15px;line-height:21px;text-align:right;${nowrap ? 'white-space:nowrap;' : ''}">${escapeHtml(value)}</td></tr>`
+      `<td class="e-text e-val${first ? '' : ' e-line'}" align="right" style="padding:12px 0 12px 24px;${line}color:${GREEN};font-size:15px;line-height:21px;text-align:right;${wrap ? 'overflow-wrap:anywhere;word-break:break-word;' : ''}">${wrap ? breakable(value) : escapeHtml(value)}</td></tr>`
     );
   };
+  // Číslo účtu a IBAN: zalomení jen mezi skupinami po 4 znacích (<wbr>, při kopírování bez
+  // mezer), nouzově kdekoli (overflow-wrap) – nikdy nevyteče ze šířky e-mailu.
+  const breakable = (value: string) => escapeHtml(value).replace(/(.{4})(?=.)/g, '$1<wbr>');
+  const sectionHeading = (text: string, margin: string) =>
+    `<h2 class="e-text" style="margin:${margin};font-family:${SERIF};font-weight:normal;font-size:21px;line-height:28px;color:${GREEN};">${escapeHtml(text)}</h2>`;
   const link = (href: string, label: string) => `<a href="${escapeHtml(href)}" style="color:${MUTED};text-decoration:underline;">${escapeHtml(label)}</a>`;
 
   const header =
@@ -207,24 +213,33 @@ export function renderReservationEmail(
   const body = [
     `<tr><td class="e-px" style="padding:36px ${PAD}px 8px;">`,
     `<h1 class="e-text e-h1" style="margin:0 0 10px;font-family:${SERIF};font-weight:normal;font-size:28px;line-height:34px;color:${GREEN};">${escapeHtml(texts.heading)}</h1>`,
-    // Úvod: první odstavec (poděkování, splatnost, instrukce, kontakt) plnou barvou, uvedení
-    // souhrnu tlumeně.
+    // Úvod (poděkování, splatnost, instrukce před příjezdem, kontakt).
     ...texts.intro.map((paragraph, i, all) =>
-      `<p class="${i === 0 ? 'e-text' : 'e-muted'}" style="margin:0 0 ${i === all.length - 1 ? 28 : 12}px;font-size:15px;line-height:23px;color:${i === 0 ? GREEN : MUTED};">${escapeHtml(paragraph)}</p>`,
+      `<p class="e-text" style="margin:0 0 ${i === all.length - 1 ? 32 : 12}px;font-size:15px;line-height:23px;color:${GREEN};">${escapeHtml(paragraph)}</p>`,
     ),
     // Souhrn; celková cena jen tučněji, o stupeň větší a s výraznější linkou nad sebou.
+    sectionHeading(texts.summaryHeading, '0 0 6px'),
     table(
       summary.map((item, i) => row(item, i === 0)).join('') +
         `<tr><td class="e-text e-total" style="padding:14px 0 0;border-top:1px solid ${GREEN};color:${GREEN};font-size:16px;line-height:22px;font-weight:bold;">${escapeHtml(total[0])}</td>` +
         `<td class="e-text e-total" align="right" style="padding:14px 0 0 24px;border-top:1px solid ${GREEN};color:${GREEN};font-size:16px;line-height:22px;font-weight:bold;text-align:right;white-space:nowrap;">${escapeHtml(total[1])}</td></tr>`,
     ),
-    // Platba: nadpis → QR → ruční údaje (splatnost je v úvodu a souhrnu, VS v údajích).
-    `<h2 class="e-text" style="margin:44px 0 20px;font-family:${SERIF};font-weight:normal;font-size:21px;line-height:28px;color:${GREEN};">${escapeHtml(paymentHeading)}</h2>`,
-    matrix
-      ? `<p style="margin:0 0 22px;text-align:center;"><img src="cid:${QR_CONTENT_ID}" width="180" height="180" alt="${escapeHtml(i18n.t('email.qrAlt'))}" style="display:inline-block;width:180px;height:180px;border:0;"></p>`
-      : '',
-    // Účet a IBAN v jednom kuse (opisují se), popisky se případně zalomí.
-    table(payment.map((item, i) => row(item, i === 0, i === 1 || i === 2)).join('')),
+    // Platba odděleně jemnou linkou: nadpis, pod ním vnořená tabulka – na desktopu QR vlevo
+    // a ruční údaje vpravo (svisle na střed), na mobilu (media query) pod sebou. Bez
+    // podpory media queries zůstávají dva sloupce. Splatnost je v úvodu, VS v údajích.
+    `<div class="e-line" style="margin:36px 0 0;padding:32px 0 0;border-top:1px solid ${BORDER};">`,
+    sectionHeading(paymentHeading, '0 0 18px'),
+    table(
+      '<tr>' +
+        (matrix
+          ? `<td class="e-pay-qr" width="180" valign="middle" style="width:180px;padding:0 28px 0 0;vertical-align:middle;">` +
+            `<img src="cid:${QR_CONTENT_ID}" width="180" height="180" alt="${escapeHtml(i18n.t('email.qrAlt'))}" style="display:inline-block;width:180px;height:180px;border:0;"></td>`
+          : '') +
+        `<td class="e-pay-details" valign="middle" style="padding:0;vertical-align:middle;">${table(payment.map((item, i) => row(item, i === 0, i === 1 || i === 2)).join(''))}</td>` +
+        '</tr>',
+      'class="e-pay" width="100%"',
+    ),
+    '</div>',
     `<p class="e-text" style="margin:40px 0 0;font-family:${SERIF};font-size:18px;line-height:26px;color:${GREEN};text-align:center;">${escapeHtml(thanks)}</p>`,
     '</td></tr>',
     // Telefonický kontakt: plné tlačítko se sluchátkem. Světlá ikona je výchozí; tmavá se
@@ -246,14 +261,20 @@ export function renderReservationEmail(
     '</td></tr>',
   ].join('');
 
-  // Patička: řádky položek oddělených tečkou (na mobilu pod sebou). Další řádek (např. odkaz
-  // na ubytovací řád) se přidá jako další pole položek – bez změny layoutu. Odkazy jen na
-  // vlastní web a info e-mail; IČ je prostý text.
+  // Patička: řádky položek jako buňky tabulky oddělené jen odsazením (bez oddělovacích znaků;
+  // na mobilu pod sebou). Další řádek (např. odkaz na ubytovací řád) se přidá jako další pole
+  // položek – bez změny layoutu. Odkazy jen na vlastní web a info e-mail; IČ je prostý text.
   const footerRows: string[][] = [[link(business.websiteUrl, business.name), link(`mailto:${business.emailInfo}`, business.emailInfo), escapeHtml(ico)]];
   const footer =
     `<tr><td class="e-foot e-muted" align="center" style="padding:28px 16px 0;color:${MUTED};font-family:${SANS};font-size:13px;line-height:22px;text-align:center;">` +
     footerRows
-      .map((items) => `<p style="margin:0;">${items.map((item) => `<span class="e-item" style="white-space:nowrap;">${item}</span>`).join(' <span class="e-sep" aria-hidden="true" style="padding:0 6px;">·</span> ')}</p>`)
+      .map((items) =>
+        table(
+          `<tr>${items.map((item) => `<td class="e-item" align="center" style="padding:0 14px;color:${MUTED};font-size:13px;line-height:22px;white-space:nowrap;">${item}</td>`).join('')}</tr>`,
+          'align="center"',
+          'margin:0 auto;',
+        ),
+      )
       .join('') +
     '</td></tr>';
 
@@ -284,6 +305,7 @@ export function renderReservationEmail(
     texts.heading,
     '',
     ...texts.intro.flatMap((paragraph) => [paragraph, '']),
+    texts.summaryHeading,
     ...[...summary, total].map(([label, value]) => `${label}: ${value}`),
     '',
     paymentHeading,
@@ -296,7 +318,9 @@ export function renderReservationEmail(
     cta.call,
     '',
     '--',
-    ...[[business.name, business.emailInfo, ico]].map((items) => items.join(' · ')),
+    business.name,
+    business.emailInfo,
+    ico,
   ];
 
   return { subject: texts.subject, html, text: textLines.join('\n'), attachments };
@@ -306,8 +330,8 @@ export function renderReservationEmail(
 export function renderConfirmationEmail(data: ReservationResponse, locale: Locale, options: EmailOptions = {}): RenderedEmail {
   const i18n = createI18n(locale);
   const subject = `${options.test ? '[TEST] ' : ''}${i18n.t('email.confirmation.subject', { code: data.reservation.reservationCode })}`;
-  const intro = [i18n.t('email.confirmation.intro', { date: i18n.formatDeadlineDate(data.payment.dueAt) }), i18n.t('email.confirmation.summaryLead')];
-  return renderReservationEmail(data, locale, { subject, heading: i18n.t('reservation.success.title'), intro }, options);
+  const intro = [i18n.t('email.confirmation.intro', { date: i18n.formatDeadlineDate(data.payment.dueAt) })];
+  return renderReservationEmail(data, locale, { subject, heading: i18n.t('reservation.success.title'), intro, summaryHeading: i18n.t('email.summaryHeading') }, options);
 }
 
 /** Komu e-mail poslat: v produkci host, jinde jen testovací schránka (nebo nikomu). */

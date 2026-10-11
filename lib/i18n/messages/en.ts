@@ -174,7 +174,7 @@ export const en = {
   'reservation.success.thanks': 'We look forward to your stay.',
   'email.confirmation.subject': 'Booking received – {code}',
   'email.confirmation.intro': 'Thank you for your booking. Please pay the full amount by {date}. Before your arrival, we will send you more detailed instructions for your stay. If you have any questions, please do not hesitate to contact us.',
-  'email.confirmation.summaryLead': 'Below you will find a summary of your stay and the payment details.',
+  'email.summaryHeading': 'Booking summary',
   'email.reservationCode': 'Booking code',
   'email.qrAlt': 'Payment QR code',
   'email.cta.heading': 'Need to arrange something?',

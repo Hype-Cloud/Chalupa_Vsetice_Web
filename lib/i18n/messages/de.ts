@@ -175,7 +175,7 @@ export const de = {
   'reservation.success.thanks': 'Wir freuen uns auf Ihren Aufenthalt.',
   'email.confirmation.subject': 'Buchung eingegangen – {code}',
   'email.confirmation.intro': 'Vielen Dank für Ihre Buchung. Bitte überweisen Sie den vollen Betrag bis {date}. Vor Ihrer Anreise senden wir Ihnen noch ausführlichere Hinweise zu Ihrem Aufenthalt. Bei Fragen können Sie sich jederzeit gern an uns wenden.',
-  'email.confirmation.summaryLead': 'Unten finden Sie die Zusammenfassung Ihres Aufenthalts und die Zahlungsdaten.',
+  'email.summaryHeading': 'Buchungsübersicht',
   'email.reservationCode': 'Buchungscode',
   'email.qrAlt': 'Zahlungs-QR-Code',
   'email.cta.heading': 'Möchten Sie etwas absprechen?',

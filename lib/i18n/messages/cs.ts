@@ -176,7 +176,7 @@ export const cs = {
   'reservation.success.thanks': 'Těšíme se na váš pobyt.',
   'email.confirmation.subject': 'Rezervace přijata – {code}',
   'email.confirmation.intro': 'Děkujeme za rezervaci. Prosíme o úhradu celé částky do {date}. Před příjezdem vám ještě zašleme podrobnější instrukce k pobytu. V případě jakýchkoli dotazů nás neváhejte kontaktovat.',
-  'email.confirmation.summaryLead': 'Níže najdete souhrn pobytu a platební údaje.',
+  'email.summaryHeading': 'Souhrn rezervace',
   'email.reservationCode': 'Kód rezervace',
   'email.qrAlt': 'Platební QR kód',
   'email.cta.heading': 'Potřebujete se na něčem domluvit?',
