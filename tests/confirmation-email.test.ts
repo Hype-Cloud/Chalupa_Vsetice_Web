@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { inflateSync } from 'node:zlib';
-import { qrMatrix, QR_QUIET_MODULES } from '../lib/booking/qr.ts';
+import { bytesToBase64, qrMatrix, qrPngBytes, QR_QUIET_MODULES } from '../lib/booking/qr.ts';
 import { createI18n, LOCALES, type Locale } from '../lib/i18n/index.ts';
 import { BUSINESS, businessIdentity, phoneNumber } from '../lib/business.ts';
 import { BRAND_MARK_CONTENT_ID, confirmationRecipient, sendReservationConfirmation, PHONE_ICON_CONTENT_ID, PHONE_ICON_DARK_CONTENT_ID, confirmationSender, QR_CONTENT_ID, renderConfirmationEmail } from '../worker/booking/confirmation.ts';
@@ -610,8 +610,8 @@ test('platba: na desktopu QR vlevo a údaje vpravo ve vnořené tabulce, na mobi
   assert.deepEqual(cells.map((m) => m[1]), ['e-pay-qr', 'e-pay-details']);
   assert.match(section, /<table role="presentation" class="e-pay" width="100%"[^>]*><tr><td class="e-pay-qr"/);
   for (const [, , attrs] of cells) assert.match(attrs, /valign="middle"/);
-  assert.match(cells[0][2], /width="180"/);
-  assert.match(cells[0][2], /padding:0 28px 0 0/, 'mezera mezi QR a údaji');
+  assert.match(cells[0][2], /width="174"/);
+  assert.match(cells[0][2], /padding:0 24px 0 0/, 'mezera mezi QR a údaji 24 px');
   assert.ok(section.indexOf(`cid:${QR_CONTENT_ID}`) < section.indexOf('Číslo účtu'));
   assert.doesNotMatch(section, /display:(flex|grid)/);
   // Mobil: v media query se obě buňky přepnou na bloky přes celou šířku, QR na střed.
@@ -655,5 +655,36 @@ test('hlavička a značka se úpravou těla nezměnily (otisk HTML hlavičky a P
     const email = renderConfirmationEmail(SAMPLE, locale);
     assert.equal(sha(email.html.slice(email.html.indexOf('<tr><td class="e-header'), email.html.indexOf('<h1'))), expected[locale], locale);
     assert.equal(sha(email.attachments.find((a) => a.contentId === BRAND_MARK_CONTENT_ID)!.content), '286c1b7ac1876964');
+  }
+});
+
+test('platba: QR 174 px se zaoblenými rohy jen přes CSS, PNG beze změny; linka nad i pod sekcí, „Těšíme se…“ až pod ní', () => {
+  const email = renderConfirmationEmail(SAMPLE, 'cs');
+  // QR <img>: menší zobrazení a border-radius; data přílohy = beze změny (scale 6, okraj QR_QUIET_MODULES).
+  const img = /<img src="cid:qr-platba"[^>]*>/.exec(email.html)![0];
+  assert.match(img, /width="174" height="174"/);
+  assert.match(img, /width:174px;height:174px;/);
+  assert.match(img, /border-radius:8px/);
+  const png = email.attachments.find((a) => a.contentId === QR_CONTENT_ID)!.content;
+  assert.deepEqual(decodeQrPng(png), qrMatrix(SAMPLE.payment.spayd)!.data);
+  assert.equal(bytesToBase64(qrPngBytes(qrMatrix(SAMPLE.payment.spayd)!, 6)), png, 'PNG = výstup generátoru (scale 6)');
+  // Linka nad i pod platební sekcí ve stejné barvě a tloušťce.
+  const open = /<div class="e-line" style="([^"]*)"><h2[^>]*>Platební údaje<\/h2>/.exec(email.html)!;
+  assert.match(open[1], /border-top:1px solid #e2e7e0;border-bottom:1px solid #e2e7e0;/);
+  // Pořadí: údaje → konec sekce (spodní linka) → „Těšíme se…“ → linka před CTA.
+  const end = email.html.indexOf('</div>', email.html.indexOf('>Variabilní symbol<'));
+  const thanks = email.html.indexOf('Těšíme se na váš pobyt.');
+  const cta = email.html.indexOf('Potřebujete se na něčem domluvit?');
+  assert.ok(end > 0 && end < thanks && thanks < cta);
+  assert.match(email.html.slice(thanks, cta), /<div class="e-line" style="border-top:1px solid #e2e7e0;/, 'linka před CTA zachovaná');
+  // Mobil: QR a údaje dál pod sebou.
+  assert.match(email.html, /@media only screen and \(max-width:620px\)\{[^@]*\.e-pay-qr,\.e-pay-details\{display:block!important;width:100%!important;padding:0!important\}/);
+});
+
+test('patička se úpravou platební sekce nezměnila (otisk HTML)', async () => {
+  const { createHash } = await import('node:crypto');
+  for (const locale of LOCALES) {
+    const email = renderConfirmationEmail(SAMPLE, locale);
+    assert.equal(createHash('sha256').update(email.html.slice(email.html.indexOf('<tr><td class="e-foot'))).digest('hex').slice(0, 16), '560eca57c9b6231a', locale);
   }
 });

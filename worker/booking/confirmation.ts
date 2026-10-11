@@ -224,23 +224,26 @@ export function renderReservationEmail(
         `<tr><td class="e-text e-total" style="padding:14px 0 0;border-top:1px solid ${GREEN};color:${GREEN};font-size:16px;line-height:22px;font-weight:bold;">${escapeHtml(total[0])}</td>` +
         `<td class="e-text e-total" align="right" style="padding:14px 0 0 24px;border-top:1px solid ${GREEN};color:${GREEN};font-size:16px;line-height:22px;font-weight:bold;text-align:right;white-space:nowrap;">${escapeHtml(total[1])}</td></tr>`,
     ),
-    // Platba odděleně jemnou linkou: nadpis, pod ním vnořená tabulka – na desktopu QR vlevo
-    // a ruční údaje vpravo (svisle na střed), na mobilu (media query) pod sebou. Bez
-    // podpory media queries zůstávají dva sloupce. Splatnost je v úvodu, VS v údajích.
-    `<div class="e-line" style="margin:36px 0 0;padding:32px 0 0;border-top:1px solid ${BORDER};">`,
+    // Platba uzavřená jemnými linkami nahoře i dole: nadpis, pod ním vnořená tabulka – na
+    // desktopu QR vlevo a ruční údaje vpravo (svisle na střed), na mobilu (media query) pod
+    // sebou. Bez podpory media queries zůstávají dva sloupce. Splatnost je v úvodu, VS
+    // v údajích. Spodní odsazení 14 px + 12 px poslední buňky ≈ 26 px nad spodní linkou.
+    `<div class="e-line" style="margin:36px 0 0;padding:22px 0 14px;border-top:1px solid ${BORDER};border-bottom:1px solid ${BORDER};">`,
     sectionHeading(paymentHeading, '0 0 18px'),
     table(
       '<tr>' +
         (matrix
-          ? `<td class="e-pay-qr" width="180" valign="middle" style="width:180px;padding:0 28px 0 0;vertical-align:middle;">` +
-            `<img src="cid:${QR_CONTENT_ID}" width="180" height="180" alt="${escapeHtml(i18n.t('email.qrAlt'))}" style="display:inline-block;width:180px;height:180px;border:0;"></td>`
+          ? // QR 174 px se zaoblenými rohy jen přes CSS (PNG i bílý okraj beze změny; klient
+            // bez border-radius ukáže čtverec). Mezera k údajům 24 px.
+            `<td class="e-pay-qr" width="174" valign="middle" style="width:174px;padding:0 24px 0 0;vertical-align:middle;">` +
+            `<img src="cid:${QR_CONTENT_ID}" width="174" height="174" alt="${escapeHtml(i18n.t('email.qrAlt'))}" style="display:inline-block;width:174px;height:174px;border:0;border-radius:8px;"></td>`
           : '') +
         `<td class="e-pay-details" valign="middle" style="padding:0;vertical-align:middle;">${table(payment.map((item, i) => row(item, i === 0, i === 1 || i === 2)).join(''))}</td>` +
         '</tr>',
       'class="e-pay" width="100%"',
     ),
     '</div>',
-    `<p class="e-text" style="margin:40px 0 0;font-family:${SERIF};font-size:18px;line-height:26px;color:${GREEN};text-align:center;">${escapeHtml(thanks)}</p>`,
+    `<p class="e-text" style="margin:32px 0 0;font-family:${SERIF};font-size:18px;line-height:26px;color:${GREEN};text-align:center;">${escapeHtml(thanks)}</p>`,
     '</td></tr>',
     // Telefonický kontakt: plné tlačítko se sluchátkem. Světlá ikona je výchozí; tmavá se
     // zobrazí jen tam, kde klient použije tmavý režim z <style> (tlačítko pak krémové).
