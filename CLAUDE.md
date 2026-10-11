@@ -89,11 +89,11 @@ Skutečný stav (nastaveno ručně v dashboardu, v diffu není vidět):
 
 ## Identita provozovatele
 
-- Jméno, telefon, IČO, odkaz do rejstříku, info e-mail a odesílatel rezervací jsou jen
+- Jméno, telefon, IČ, hlavní web, info e-mail a odesílatel rezervací jsou jen
   v `lib/business.ts` (šest hodnot `BUSINESS_*`, nejde o secrets). Šablony a renderery je
   nesmí zapisovat napevno; pro jiný objekt se mění jen tyto hodnoty.
-- V e-mailu se IČ zobrazuje jen jako odkaz `IČ: …` na `BUSINESS_REGISTER_URL` – bez viditelné
-  URL a bez názvu rejstříku.
+- V e-mailu je `IČ: …` prostý text (žádný odkaz na rejstřík); odkazy jen na vlastní web
+  (`BUSINESS_WEBSITE_URL`), `mailto:` info e-mailu a `tel:`.
 
 ## Secrets a data
 

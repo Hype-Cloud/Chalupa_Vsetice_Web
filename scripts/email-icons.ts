@@ -6,14 +6,14 @@
 // proto běží jen tady při vývoji, nikdy ve Workeru. Worker čte hotové base64 řetězce.
 // Test tests/confirmation-email.test.ts hlídá, že commitnuté soubory odpovídají generátoru.
 //
-// - Značka v hlavičce: plná čtvercová dlaždice s vlastními barvami (domek + pozadí), bez
-//   průhlednosti – vypadá stejně v light i dark mode a nezávisí na barvě okolí.
+// - Domek v hlavičce: bílý tah na průhledném pozadí – leží přímo na tmavě zelené hlavičce,
+//   bez dlaždice; i když klient hlavičku přebarví, kolem ikony nevznikne žádná plocha.
 // - Sluchátko v tlačítku: průhledné pozadí, barva tahu podle varianty tlačítka.
 
 import { writeFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { bytesToBase64, palettePng, type Rgb } from '../lib/png.ts';
-import { CREAM, GREEN, WHITE } from '../worker/email/palette.ts';
+import { GREEN, WHITE } from '../worker/email/palette.ts';
 
 type Point = readonly [number, number];
 type Polyline = Point[];
@@ -129,17 +129,17 @@ function distanceToSegment([px, py]: Point, [ax, ay]: Point, [bx, by]: Point): n
   return Math.hypot(px - ax - t * dx, py - ay - t * dy);
 }
 
-/** Pokrytí pixelů tahem (0–LEVELS-1). Ikona 24×24 se vykreslí do čtverce `inner` px posunutého o `offset`. */
-function strokeCoverage(paths: string[], size: number, inner: number, offset: number): number[][] {
+/** Pokrytí pixelů tahem (0–LEVELS-1); ikona 24×24 vyplní čtverec `size` px. */
+function strokeCoverage(paths: string[], size: number): number[][] {
   const lines = paths.flatMap(pathToPolylines);
-  const unit = GRID / inner;
+  const unit = GRID / size;
   const inStroke = (p: Point) => lines.some((line) => line.slice(1).some((end, k) => distanceToSegment(p, line[k], end) <= STROKE_RADIUS));
   return Array.from({ length: size }, (_, y) =>
     Array.from({ length: size }, (_, x) => {
       let covered = 0;
       for (let sy = 0; sy < SAMPLES; sy++) {
         for (let sx = 0; sx < SAMPLES; sx++) {
-          if (inStroke([(x - offset + (sx + 0.5) / SAMPLES) * unit, (y - offset + (sy + 0.5) / SAMPLES) * unit])) covered++;
+          if (inStroke([(x + (sx + 0.5) / SAMPLES) * unit, (y + (sy + 0.5) / SAMPLES) * unit])) covered++;
         }
       }
       return Math.round((covered / (SAMPLES * SAMPLES)) * (LEVELS - 1));
@@ -147,25 +147,9 @@ function strokeCoverage(paths: string[], size: number, inner: number, offset: nu
   );
 }
 
-const mix = (from: Rgb, to: Rgb, amount: number): Rgb =>
-  [0, 1, 2].map((k) => Math.round(from[k] + (to[k] - from[k]) * amount)) as unknown as Rgb;
-
-/** Značka: plná čtvercová dlaždice `tile` s domkem v barvě `stroke`, bez průhlednosti. */
-export function brandMarkPng(tile: Rgb, stroke: Rgb, size = 84): Uint8Array {
-  const inner = Math.round(size * 0.68);
-  const coverage = strokeCoverage(HOUSE_PATHS, size, inner, Math.round((size - inner) / 2));
-  return palettePng({
-    width: size,
-    height: size,
-    palette: Array.from({ length: LEVELS }, (_, level) => mix(tile, stroke, level / (LEVELS - 1))),
-    bitDepth: 4,
-    pixel: (x, y) => coverage[y][x],
-  });
-}
-
-/** Sluchátko: tah v barvě `stroke` na průhledném pozadí (vyhlazení přes alfa kanál palety). */
-export function phoneIconPng(stroke: Rgb, size = 54): Uint8Array {
-  const coverage = strokeCoverage(PHONE_PATHS, size, size, 0);
+/** Ikona (tahy `paths`) v barvě `stroke` na průhledném pozadí; vyhlazení přes alfa kanál palety. */
+function strokeIconPng(paths: string[], stroke: Rgb, size: number): Uint8Array {
+  const coverage = strokeCoverage(paths, size);
   return palettePng({
     width: size,
     height: size,
@@ -176,12 +160,17 @@ export function phoneIconPng(stroke: Rgb, size = 54): Uint8Array {
   });
 }
 
+/** Domek z loga webu (zobrazuje se 24 × 24 px, PNG 3×). */
+export const houseIconPng = (stroke: Rgb) => strokeIconPng(HOUSE_PATHS, stroke, 72);
+/** Sluchátko v tlačítku (zobrazuje se 18 × 18 px, PNG 3×). */
+export const phoneIconPng = (stroke: Rgb) => strokeIconPng(PHONE_PATHS, stroke, 54);
+
 const rgb = (hex: string): Rgb => [1, 3, 5].map((i) => parseInt(hex.slice(i, i + 2), 16)) as unknown as Rgb;
 
 /** Base64 PNG všech statických ikon e-mailu. */
 export function renderIconAssets(): { brandMark: string; phoneLight: string; phoneDark: string } {
   return {
-    brandMark: bytesToBase64(brandMarkPng(rgb(CREAM), rgb(GREEN))),
+    brandMark: bytesToBase64(houseIconPng(rgb(WHITE))),
     phoneLight: bytesToBase64(phoneIconPng(rgb(WHITE))),
     phoneDark: bytesToBase64(phoneIconPng(rgb(GREEN))),
   };
@@ -195,7 +184,7 @@ export function iconAssetsSource(assets = renderIconAssets()): string {
     '// VYGENEROVÁNO: pnpm run email:icons (scripts/email-icons.ts). Needitovat ručně.',
     '// Statické PNG ikony e-mailu (base64) – Worker je jen čte, nic nerastruje.',
     '',
-    '/** Značka v hlavičce: dlaždice krémová s tmavě zeleným domkem (lucide House), bez průhlednosti. */',
+    '/** Domek v hlavičce (lucide House), bílý na průhledném pozadí – bez vlastní plochy kolem ikony. */',
     `export const BRAND_MARK_PNG = '${assets.brandMark}';`,
     '/** Sluchátko (lucide Phone), bílé na průhledném pozadí – tmavě zelené tlačítko. */',
     `export const PHONE_ICON_LIGHT_PNG = '${assets.phoneLight}';`,

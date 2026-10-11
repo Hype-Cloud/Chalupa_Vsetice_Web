@@ -5,8 +5,9 @@
 // - Jazyk: locale uložené u rezervace (cs | en | de | ua), texty z lib/i18n.
 // - Identita provozovatele (jméno, telefon, e-maily, IČO, odkaz do rejstříku, odesílatel) jen
 //   z lib/business.ts – renderer žádné údaje o provozovateli nezná napevno.
-// - Příjemce: v produkci host; jinde (Preview) jen testovací schránka BOOKING_CONFIRMATION_TEST_EMAIL,
-//   skutečná adresa hosta se objeví jen v těle zprávy jako informace.
+// - Příjemce: v produkci host; jinde (Preview) jen testovací schránka BOOKING_CONFIRMATION_TEST_EMAIL.
+//   Obsah je v Preview stejný jako v produkci (kvůli kontrole vzhledu), liší se jen prefix
+//   `[TEST]` v předmětu.
 // - Odesílatel: vždy `BUSINESS_NAME <BUSINESS_EMAIL_RESERVATIONS>` (doména ověřená v Resend).
 // - Best-effort: selhání se jen zaloguje (druh chyby), rezervaci ani odpověď API neovlivní.
 //   Logy neobsahují jméno, e-mail, telefon, bankovní údaje, SPAYD ani obsah zprávy.
@@ -51,7 +52,7 @@ export interface ConfirmationDeps {
 
 /** Content-ID inline obrázku QR Platby. */
 export const QR_CONTENT_ID = 'qr-platba';
-/** Content-ID značky (domek) v hlavičce a sluchátka v tlačítku (světlá / tmavá varianta). */
+/** Content-ID domku v hlavičce a sluchátka v tlačítku (světlá / tmavá varianta). */
 export const BRAND_MARK_CONTENT_ID = 'znacka';
 export const PHONE_ICON_CONTENT_ID = 'telefon';
 export const PHONE_ICON_DARK_CONTENT_ID = 'telefon-tmavy';
@@ -66,8 +67,8 @@ export interface RenderedEmail {
 export interface EmailOptions {
   /** Identita provozovatele; výchozí z lib/business.ts. */
   business?: BusinessIdentity;
-  /** Poznámka o skutečném příjemci (Preview). */
-  test?: { originalRecipient: string };
+  /** Preview: jen prefix `[TEST]` v předmětu; obsah je stejný jako v produkci. */
+  test?: boolean;
 }
 
 const escapeHtml = (value: string) =>
@@ -117,7 +118,6 @@ const STYLES = [
   '.e-ico{display:none!important}',
   '.e-ico-dark{display:inline-block!important;width:18px!important;height:18px!important;max-height:none!important}',
   `.e-foot a{color:${DARK.link}!important}`,
-  '.e-note{background-color:#2c2a22!important;color:#e9dcc4!important}',
   '}',
   '</style>',
   '<style>',
@@ -137,7 +137,7 @@ const STYLES = [
 export function renderReservationEmail(
   data: ReservationResponse,
   locale: Locale,
-  texts: { subject: string; heading: string; intro: string },
+  texts: { subject: string; heading: string; intro: string[] },
   options: EmailOptions = {},
 ): RenderedEmail {
   const i18n = createI18n(locale);
@@ -159,7 +159,6 @@ export function renderReservationEmail(
   ];
   const stay = i18n.formatDateRange(r.arrival, r.departure);
   const paymentHeading = i18n.t('reservation.payment.details');
-  const paymentNote = i18n.t('email.paymentNote', { date: i18n.formatDeadlineDate(p.dueAt), vs: p.variableSymbol });
   const thanks = i18n.t('reservation.success.thanks');
   // Čeští hosté vidí číslo bez předvolby, ostatní mezinárodní zápis.
   const phone = locale === 'cs' ? business.phone.national : business.phone.international;
@@ -176,10 +175,6 @@ export function renderReservationEmail(
     ...(matrix ? [{ filename: 'qr-platba.png', content: bytesToBase64(qrPngBytes(matrix, 6)), contentId: QR_CONTENT_ID }] : []),
   ];
 
-  const testNote = options.test
-    ? `TEST (Preview): v produkci by tento e-mail šel na adresu ${options.test.originalRecipient}.`
-    : null;
-
   const table = (content: string, attrs = 'width="100%"', style = '') =>
     `<table role="presentation" ${attrs} cellpadding="0" cellspacing="0" border="0" style="border-collapse:collapse;${style}">${content}</table>`;
   const row = ([label, value]: [string, string], first: boolean, nowrap = false) => {
@@ -191,17 +186,16 @@ export function renderReservationEmail(
   };
   const link = (href: string, label: string) => `<a href="${escapeHtml(href)}" style="color:${MUTED};text-decoration:underline;">${escapeHtml(label)}</a>`;
 
-  // Značka jako na webu: první slovo tučně, zbytek normálně, verzálky s prostrkáním.
-  const [firstWord, ...restWords] = business.name.split(' ');
-  const brandName = `<b style="font-weight:bold;">${escapeHtml(firstWord)}</b>${restWords.length ? ` <span style="font-weight:normal;">${escapeHtml(restWords.join(' '))}</span>` : ''}`;
   const header =
     `<tr><td class="e-header e-px" bgcolor="${GREEN}" style="background-color:${GREEN};padding:14px ${PAD}px;color:${WHITE};">` +
     table(
       '<tr>' +
         `<td valign="middle" style="padding:0;">` +
         table(
-          `<tr><td width="28" valign="middle" style="width:28px;padding:0;"><img src="cid:${BRAND_MARK_CONTENT_ID}" width="28" height="28" alt="" style="display:block;width:28px;height:28px;border:0;"></td>` +
-            `<td valign="middle" class="e-brand" style="padding:0 0 0 12px;color:${WHITE};font-family:${SANS};font-size:15px;line-height:20px;letter-spacing:1px;text-transform:uppercase;white-space:nowrap;">${brandName}</td></tr>`,
+          // Domek jako logo webu (24 px), bílý na průhledném pozadí přímo na hlavičce – bez
+          // vlastní plochy. Jméno jednotnou normální vahou ve verzálkách s prostrkáním.
+          `<tr><td width="24" valign="middle" style="width:24px;padding:0;"><img src="cid:${BRAND_MARK_CONTENT_ID}" width="24" height="24" alt="" style="display:block;width:24px;height:24px;border:0;"></td>` +
+            `<td valign="middle" class="e-brand" style="padding:0 0 0 14px;color:${WHITE};font-family:${SANS};font-size:15px;line-height:20px;font-weight:normal;letter-spacing:1.5px;text-transform:uppercase;white-space:nowrap;">${escapeHtml(business.name)}</td></tr>`,
           '',
         ) +
         '</td>' +
@@ -212,18 +206,20 @@ export function renderReservationEmail(
 
   const body = [
     `<tr><td class="e-px" style="padding:36px ${PAD}px 8px;">`,
-    testNote ? `<p class="e-note" style="margin:0 0 24px;padding:10px 12px;background-color:#f6efe6;color:#784b37;font-size:13px;line-height:18px;">${escapeHtml(testNote)}</p>` : '',
     `<h1 class="e-text e-h1" style="margin:0 0 10px;font-family:${SERIF};font-weight:normal;font-size:28px;line-height:34px;color:${GREEN};">${escapeHtml(texts.heading)}</h1>`,
-    `<p class="e-muted" style="margin:0 0 28px;font-size:15px;line-height:23px;color:${MUTED};">${escapeHtml(texts.intro)}</p>`,
+    // Úvod: první odstavec (poděkování, splatnost, instrukce, kontakt) plnou barvou, uvedení
+    // souhrnu tlumeně.
+    ...texts.intro.map((paragraph, i, all) =>
+      `<p class="${i === 0 ? 'e-text' : 'e-muted'}" style="margin:0 0 ${i === all.length - 1 ? 28 : 12}px;font-size:15px;line-height:23px;color:${i === 0 ? GREEN : MUTED};">${escapeHtml(paragraph)}</p>`,
+    ),
     // Souhrn; celková cena jen tučněji, o stupeň větší a s výraznější linkou nad sebou.
     table(
       summary.map((item, i) => row(item, i === 0)).join('') +
         `<tr><td class="e-text e-total" style="padding:14px 0 0;border-top:1px solid ${GREEN};color:${GREEN};font-size:16px;line-height:22px;font-weight:bold;">${escapeHtml(total[0])}</td>` +
         `<td class="e-text e-total" align="right" style="padding:14px 0 0 24px;border-top:1px solid ${GREEN};color:${GREEN};font-size:16px;line-height:22px;font-weight:bold;text-align:right;white-space:nowrap;">${escapeHtml(total[1])}</td></tr>`,
     ),
-    // Platba jako jeden celek: nadpis → instrukce → QR → ruční údaje.
-    `<h2 class="e-text" style="margin:44px 0 8px;font-family:${SERIF};font-weight:normal;font-size:21px;line-height:28px;color:${GREEN};">${escapeHtml(paymentHeading)}</h2>`,
-    `<p class="e-text" style="margin:0 0 22px;font-size:15px;line-height:23px;color:${GREEN};">${escapeHtml(paymentNote)}</p>`,
+    // Platba: nadpis → QR → ruční údaje (splatnost je v úvodu a souhrnu, VS v údajích).
+    `<h2 class="e-text" style="margin:44px 0 20px;font-family:${SERIF};font-weight:normal;font-size:21px;line-height:28px;color:${GREEN};">${escapeHtml(paymentHeading)}</h2>`,
     matrix
       ? `<p style="margin:0 0 22px;text-align:center;"><img src="cid:${QR_CONTENT_ID}" width="180" height="180" alt="${escapeHtml(i18n.t('email.qrAlt'))}" style="display:inline-block;width:180px;height:180px;border:0;"></p>`
       : '',
@@ -250,9 +246,10 @@ export function renderReservationEmail(
     '</td></tr>',
   ].join('');
 
-  // Patička: řádky položek oddělených tečkou (na mobilu pod sebou). Další řádek (např. odkaz na ubytovací řád) se
-  // přidá jako další pole položek – bez změny layoutu.
-  const footerRows: string[][] = [[escapeHtml(business.name), link(`mailto:${business.emailInfo}`, business.emailInfo), link(business.registerUrl, ico)]];
+  // Patička: řádky položek oddělených tečkou (na mobilu pod sebou). Další řádek (např. odkaz
+  // na ubytovací řád) se přidá jako další pole položek – bez změny layoutu. Odkazy jen na
+  // vlastní web a info e-mail; IČ je prostý text.
+  const footerRows: string[][] = [[link(business.websiteUrl, business.name), link(`mailto:${business.emailInfo}`, business.emailInfo), escapeHtml(ico)]];
   const footer =
     `<tr><td class="e-foot e-muted" align="center" style="padding:28px 16px 0;color:${MUTED};font-family:${SANS};font-size:13px;line-height:22px;text-align:center;">` +
     footerRows
@@ -282,17 +279,14 @@ export function renderReservationEmail(
   ].join('');
 
   const textLines = [
-    ...(testNote ? [testNote, ''] : []),
     `${business.name} · ${stay}`,
     '',
     texts.heading,
     '',
-    texts.intro,
-    '',
+    ...texts.intro.flatMap((paragraph) => [paragraph, '']),
     ...[...summary, total].map(([label, value]) => `${label}: ${value}`),
     '',
     paymentHeading,
-    paymentNote,
     ...payment.map(([label, value]) => `${label}: ${value}`),
     '',
     thanks,
@@ -312,7 +306,8 @@ export function renderReservationEmail(
 export function renderConfirmationEmail(data: ReservationResponse, locale: Locale, options: EmailOptions = {}): RenderedEmail {
   const i18n = createI18n(locale);
   const subject = `${options.test ? '[TEST] ' : ''}${i18n.t('email.confirmation.subject', { code: data.reservation.reservationCode })}`;
-  return renderReservationEmail(data, locale, { subject, heading: i18n.t('reservation.success.title'), intro: i18n.t('email.confirmation.intro') }, options);
+  const intro = [i18n.t('email.confirmation.intro', { date: i18n.formatDeadlineDate(data.payment.dueAt) }), i18n.t('email.confirmation.summaryLead')];
+  return renderReservationEmail(data, locale, { subject, heading: i18n.t('reservation.success.title'), intro }, options);
 }
 
 /** Komu e-mail poslat: v produkci host, jinde jen testovací schránka (nebo nikomu). */
@@ -415,7 +410,7 @@ export async function sendReservationConfirmation(
     const business = businessIdentity();
     const email = renderConfirmationEmail(data, target.locale, {
       business,
-      ...(recipient.test ? { test: { originalRecipient: target.guestEmail } } : {}),
+      test: recipient.test,
     });
     const message: MailMessage = {
       from: confirmationSender(business),

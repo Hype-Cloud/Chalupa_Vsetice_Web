@@ -1,4 +1,4 @@
-// Identita provozovatele – jediný zdroj pravdy pro jméno, kontakty, IČO a odesílatele e-mailů.
+// Identita provozovatele – jediný zdroj pravdy pro jméno, web, kontakty, IČ a odesílatele e-mailů.
 // Nejde o tajné hodnoty. Pro jiný objekt stačí změnit těchto šest hodnot; zbytek (zobrazení
 // telefonu, odkaz tel:, adresa odesílatele) se z nich odvozuje v businessIdentity().
 
@@ -7,7 +7,8 @@ export const BUSINESS = {
   /** Kanonický tvar E.164. */
   BUSINESS_PHONE: '+420736125104',
   BUSINESS_ICO: '23380811',
-  BUSINESS_REGISTER_URL: 'https://ares.gov.cz/ekonomicke-subjekty/res/23380811',
+  /** Hlavní web (odkaz ze jména v patičce e-mailu). */
+  BUSINESS_WEBSITE_URL: 'https://chalupavsetice.cz',
   /** Veřejný kontakt (patička e-mailu). */
   BUSINESS_EMAIL_INFO: 'info@chalupavsetice.cz',
   /** Odesílatel transakčních e-mailů (potvrzení rezervace). */
@@ -30,7 +31,7 @@ export interface BusinessIdentity {
     international: string;
   };
   ico: string;
-  registerUrl: string;
+  websiteUrl: string;
   emailInfo: string;
   emailReservations: string;
   /** Hlavička From, např. `Chalupa Všetice <rezervace@chalupavsetice.cz>`. */
@@ -57,12 +58,12 @@ export function businessIdentity(config: BusinessConfig = BUSINESS): BusinessIde
     if (!EMAIL.test(email)) throw new RangeError('business-email-invalid');
   }
   if (!/^\d{8}$/.test(config.BUSINESS_ICO)) throw new RangeError('business-ico-invalid');
-  if (!config.BUSINESS_REGISTER_URL.startsWith('https://')) throw new RangeError('business-register-url-invalid');
+  if (!/^https:\/\/[^\s"<>]+$/.test(config.BUSINESS_WEBSITE_URL)) throw new RangeError('business-website-url-invalid');
   return {
     name,
     phone: phoneNumber(config.BUSINESS_PHONE),
     ico: config.BUSINESS_ICO,
-    registerUrl: config.BUSINESS_REGISTER_URL,
+    websiteUrl: config.BUSINESS_WEBSITE_URL,
     emailInfo: config.BUSINESS_EMAIL_INFO,
     emailReservations: config.BUSINESS_EMAIL_RESERVATIONS,
     reservationsSender: `${name} <${config.BUSINESS_EMAIL_RESERVATIONS}>`,
