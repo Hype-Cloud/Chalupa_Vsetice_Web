@@ -12,17 +12,19 @@
 
 import { diffDays, todayInPrague } from '../../lib/availability/dates.ts';
 import { icalUidFor } from '../../lib/booking/codes.ts';
-import { paymentAccountFromIban, paymentInstructions, type PaymentAccount } from '../../lib/booking/payment.ts';
+import { paymentAccountFromIban, type PaymentAccount } from '../../lib/booking/payment.ts';
 import type { AvailabilityDeps } from '../availability.ts';
 import { json } from '../http.ts';
 import { secretEquals, sha256 } from '../secrets.ts';
 import { databaseEnvironment, DuplicateError, findByIdempotencyKey, insertReservation, NightsTakenError, ReservationCodesExhaustedError, type ReservationSummary } from './db.ts';
+import { sendReservationConfirmation, type ConfirmationEnv } from './confirmation.ts';
 import { checkExternalAvailability } from './external.ts';
+import { reservationResponse, type ReservationResponse } from './response.ts';
 import { PricingDataError, quoteStay, type Quote } from './pricing.ts';
 import { isTestTurnstileSecret, MAX_TOKEN_LENGTH, verifyTurnstile } from './turnstile.ts';
 import { validateBooking, type ValidBooking } from './validation.ts';
 
-export interface BookingEnv {
+export interface BookingEnv extends ConfirmationEnv {
   ECHALUPY_ICAL_URL?: string;
   DB?: D1Database;
   /** Označení prostředí (production / preview); musí souhlasit s meta.environment v D1. */
@@ -50,6 +52,11 @@ export interface RateLimiter {
 
 export interface BookingDeps extends Pick<AvailabilityDeps, 'fetch' | 'now' | 'log'> {
   randomUUID: () => string;
+  /**
+   * Odložení práce po odeslání odpovědi (ctx.waitUntil). Bez něj (testy) se na potvrzovací
+   * e-mail čeká před odpovědí; výsledek odpovědi to nemění.
+   */
+  defer?: (promise: Promise<unknown>) => void;
 }
 
 // 16 KB: poznámka (až 2000 znaků) může mít v UTF-8 až 8 000 bajtů.
@@ -80,21 +87,7 @@ const requestHash = async (b: ValidBooking) =>
  * Úspěšná odpověď: veřejný souhrn rezervace a platební údaje (bez interního ID, kontaktů,
  * poznámky a secrets). Frontend nic nepřepočítává – cena, splatnost i SPAYD jsou ze serveru.
  */
-const created = (reservation: ReservationSummary, account: PaymentAccount, status = 201, replayed = false) =>
-  noStore(status, {
-    reservation: {
-      reservationCode: reservation.code,
-      arrival: reservation.arrival,
-      departure: reservation.departure,
-      nights: diffDays(reservation.arrival, reservation.departure),
-      guests: reservation.guests,
-      totalCzk: reservation.priceCzk,
-      status: reservation.status,
-      paymentDueAt: reservation.paymentDueAt,
-    },
-    payment: paymentInstructions(reservation, account),
-    ...(replayed ? { replayed: true } : {}),
-  });
+const created = (body: ReservationResponse, status = 201, replayed = false) => noStore(status, { ...body, ...(replayed ? { replayed: true } : {}) });
 
 export async function handleCreateReservation(request: Request, env: BookingEnv, deps: BookingDeps): Promise<Response> {
   try {
@@ -233,9 +226,16 @@ async function createReservation(request: Request, env: BookingEnv, deps: Bookin
           idempotencyKey,
           requestHash: hash,
           createdAt: now.toISOString(),
+          locale: booking.locale,
         });
         deps.log('reservations: created');
-        return created(reservation, account);
+        const body = reservationResponse(reservation, account);
+        // Potvrzovací e-mail jen tady – po skutečně novém zápisu. Replay (níže i před Turnstile)
+        // e-mail neposílá. Best-effort: nikdy nevyhazuje, odpověď 201 nemění.
+        const confirmation = sendReservationConfirmation(env, body, { guestEmail: booking.email, locale: booking.locale }, deps);
+        if (deps.defer) deps.defer(confirmation);
+        else await confirmation;
+        return created(body);
       } catch (error) {
         if (error instanceof NightsTakenError) {
           deps.log('reservations: rejected (nights-taken)');
@@ -265,5 +265,5 @@ async function createReservation(request: Request, env: BookingEnv, deps: Bookin
 function replay(existing: ReservationSummary & { requestHash: string | null }, hash: string, account: PaymentAccount): Response {
   if (existing.requestHash !== hash) return failure(422, 'idempotency-key-reused');
   const { requestHash: _, ...reservation } = existing;
-  return created(reservation, account, 200, true);
+  return created(reservationResponse(reservation, account), 200, true);
 }

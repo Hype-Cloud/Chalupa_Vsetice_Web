@@ -23,7 +23,7 @@ import { bookingConfig, handleBookingConfig } from '../worker/booking/config.ts'
 import { handleCreateReservation, type BookingEnv } from '../worker/booking/handler.ts';
 import { SITEVERIFY_URL } from '../worker/booking/turnstile.ts';
 import { TurnstileError } from '../components/booking/invisibleTurnstile.ts';
-import { CATALOGS, createI18n, LOCALES } from '../lib/i18n/index.ts';
+import { CATALOGS, createI18n, LOCALES, type Locale } from '../lib/i18n/index.ts';
 import { parseJsonc } from '../scripts/lib/d1-migrations.ts';
 import { createTestDatabase } from './d1.ts';
 import { fixture, FAKE_ACCOUNT_NUMBER, FAKE_PAYMENT_IBAN } from './helpers.ts';
@@ -33,8 +33,8 @@ import { fixture, FAKE_ACCOUNT_NUMBER, FAKE_PAYMENT_IBAN } from './helpers.ts';
 
 const CONTACT: ContactDraft = { firstName: 'Jan', lastName: 'Testovací', email: 'host@example.invalid', phone: '+420 000 000 000', note: '' };
 const TOKEN = 'XXXX.DUMMY.TOKEN.XXXX';
-const payload = (overrides: Partial<{ arrival: string; departure: string; guests: number; contact: ContactDraft; expectedPriceCzk: number }> = {}): ReservationPayload =>
-  reservationPayload({ arrival: '2030-02-01', departure: '2030-02-04', guests: 2, contact: CONTACT, expectedPriceCzk: 8970, ...overrides });
+const payload = (overrides: Partial<{ arrival: string; departure: string; guests: number; contact: ContactDraft; expectedPriceCzk: number; locale: Locale }> = {}): ReservationPayload =>
+  reservationPayload({ arrival: '2030-02-01', departure: '2030-02-04', guests: 2, contact: CONTACT, expectedPriceCzk: 8970, locale: 'cs', ...overrides });
 
 // --- request a pravidla odeslání ---
 
@@ -49,7 +49,11 @@ test('request: pole podle backendového kontraktu, prázdná poznámka = null, c
     phone: '+420 000 000 000',
     note: null,
     expectedPriceCzk: 8970,
+    locale: 'cs',
   });
+  // Jazyk webu jde s rezervací (jazyk potvrzovacího e-mailu).
+  assert.equal(payload({ locale: 'ua' }).locale, 'ua');
+  assert.notEqual(payloadFingerprint(payload()), payloadFingerprint(payload({ locale: 'en' })));
   assert.equal(payload({ contact: { ...CONTACT, note: '   ' } }).note, null);
   assert.equal(payload({ contact: { ...CONTACT, note: 'Přijedeme pozdě.' } }).note, 'Přijedeme pozdě.');
   // Otisk operace zahrnuje obsah i potvrzenou cenu, ne token.

@@ -70,7 +70,7 @@ export function BookingSection() {
   });
   const submit = () => {
     if (block || !request || !quoteReady) return;
-    void reservation.submit(reservationPayload({ arrival: request.arrivalDate, departure: request.departureDate, guests, contact, expectedPriceCzk: quoteReady.totalCzk }));
+    void reservation.submit(reservationPayload({ arrival: request.arrivalDate, departure: request.departureDate, guests, contact, expectedPriceCzk: quoteReady.totalCzk, locale: i18n.locale }));
   };
   const submission = reservation.state;
   const priceChanged =

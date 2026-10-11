@@ -216,8 +216,9 @@ Projekt využívá Node.js Test Runner. Databázové testy probíhají nad loká
 | reservation-form.test.ts | 20 | Rezervační formulář: request podle kontraktu, blokace odeslání (termín, cena, kontakty; Turnstile tlačítko neblokuje), kliknutí → Invisible Turnstile → POST, selhání Turnstile bez POST, Idempotency-Key a token svázané s operací (retry = stejný klíč i token bez nové challenge, nová operace = nový token i klíč, i po price-mismatch), chybové kódy → hlášky ve všech jazycích, POST proti skutečnému handleru, `GET /api/booking-config`, Preview Invisible site key jen ve `previews`; potvrzení jen z dat serverové odpovědi (neúplná nebo nekonzistentní odpověď se nepřijme). |
 | invisible-turnstile.test.ts | 8 | Invisible Turnstile na klientu: widget připravený předem bez spuštění challenge, po kliknutí jen `execute`, nejvýš jeden token na widget a čerstvý widget na pozadí, bez automatického obnovování, ignorování pozdních callbacků, chyba / timeout / prázdný token → `turnstile-failed`, nenačtený skript → `turnstile-unavailable` s opakováním přípravy, odpojení formuláře. |
 | stay-feedback.test.ts | 5 | Vizuální odezva na pobyt kratší než `MIN_NIGHTS`: validace a stav pobytu beze změny, nový trigger s kliknutým dnem při každém pokusu, validní klik ani jiné chyby flash nespustí, flash dne bez trvalého stavu a bez pohybu, pulse hlášky jen přes `transform`, `prefers-reduced-motion` bez animace. |
+| confirmation-email.test.ts | 19 | Potvrzovací e-mail: `locale` cs/en/de/ua (jiné → 422), nová rezervace = jeden e-mail, replay ani souběžný dvojklik další neodešle, Preview → testovací schránka, produkce → host, odesílatel z business identity, business config (telefon E.164 → `tel:` a český zápis, validace), hlavička (jméno, značka, termín pobytu), kompaktní termín ve 4 jazycích, pořadí platební sekce a QR bez popisku, telefonický kontakt a patička (`IČ` jako odkaz do rejstříku, bez viditelné URL, „ARES“ a „IČO“), výchozí světlá varianta, kontakty v plaintextu, renderer bez napevno zapsaných údajů provozovatele, chybějící konfigurace → skip bez upozornění, selhání providera (timeout, síť, HTTP 4xx/5xx) → 201 a jedno interní upozornění bez osobních a bankovních údajů, selhání upozornění nic dalšího nespouští, odložené odeslání, obsah HTML i textu ve 4 jazycích ze stejných dat jako API, QR příloha (cid) = SPAYD, escapování HTML, nové znění věty o e-mailu. |
 | payment.test.ts | 9 | Platby: pražské datum → `DDMMYY`, `NN` 01–99, splatnost (konec pražského dne po 24 h, změny času, vždy 24–48 h), IBAN (kontrolní součet, odvození čísla účtu), SPAYD (serverová cena, VS = kód, zpráva `Rezervace {kód}`), QR jako PNG (pixely = matice) se SVG fallbackem, kopírování do schránky, kontrola, že repozitář neobsahuje skutečný IBAN. |
-| **Celkem** | **334** | |
+| **Celkem** | **353** | |
 
 ### Testované scénáře
 
@@ -316,8 +317,6 @@ Aktualizace poznámky již importované rezervace nebyla spolehlivě potvrzena. 
 Dosud nejsou implementovány:
 
 - Zapnutí rezervačního formuláře v produkci (produkční Turnstile widget a secret, `BOOKING_API_ENABLED`).
-- Potvrzovací e-mail hostovi (ve 4 jazycích; v Preview jen na testovací schránku) – použije
-  stejná platební data (`paymentInstructions`).
 - Expirace nezaplacených rezervací po splatnosti a uvolnění termínu, párování plateb, označení `paid`.
 - Administrace rezervací a branding e-mailu.
 
@@ -388,6 +387,86 @@ POST /api/reservations → validace → čerstvý export e-chalup → D1 batch (
 - **Sdílená data:** `paymentInstructions()` je jediný zdroj platebních údajů (částka, účet, IBAN,
   VS, zpráva, splatnost, SPAYD) – používá ho odpověď API a má ho použít i budoucí potvrzovací e-mail.
 
+### Potvrzovací e-mail (`worker/booking/confirmation.ts`)
+
+- **Kdy:** jen po skutečně novém zápisu rezervace (`insertReservation` uspěl). Idempotentní
+  replay (opakování se stejným `Idempotency-Key`, i souběžný dvojklik, kdy druhý požadavek
+  narazí na UNIQUE `idempotency_key`) vrací existující rezervaci a e-mail **neposílá**. Resend
+  navíc dostává `Idempotency-Key: reservation-confirmation-<BOOKING_ENV>-<kód>`.
+- **Data:** stejný objekt jako úspěšná odpověď API (`worker/booking/response.ts` →
+  `reservationResponse`): kód rezervace, termín, noci, hosté, splatnost, `totalCzk`
+  a `PaymentInstructions` (částka, účet, IBAN, VS, SPAYD). Nic se nepočítá znovu.
+- **Jazyk:** `reservations.locale` z požadavku (`cs` | `en` | `de` | `ua`), texty z `lib/i18n`.
+- **Obsah:** HTML (tabulkový layout, inline styly a `bgcolor`, bez skriptů, externích zdrojů
+  a webfontů) i plaintext se stejnými údaji, v tomto pořadí:
+  - hlavička: tmavě zelený pruh se značkou (domek) a jménem provozovatele, vpravo termín
+    pobytu kompaktně podle jazyka (`2.–4. 12. 2026`, `29. 11. – 2. 12. 2026`,
+    `30. 12. 2026 – 2. 1. 2027`; `formatDateRange` v `lib/i18n`),
+  - nadpis, úvod a souhrn: kód rezervace, termín, délka pobytu, hosté, splatnost a celková
+    cena (tučně, o stupeň větší, s výraznější linkou nad řádkem),
+  - platba: „Platební údaje“, instrukce (celá částka, splatnost, variabilní symbol), QR Platba
+    bez popisku (jen `alt`) a ruční údaje (částka, účet, IBAN, VS),
+  - telefonický kontakt: plné tlačítko se sluchátkem a `tel:` odkazem,
+  - patička pod kartou: jméno · info e-mail (`mailto:`) · `IČ: …` jako odkaz do veřejného
+    rejstříku (URL ani název rejstříku se nezobrazují). Patička je řádek položek; další
+    sekundární odkaz (např. budoucí ubytovací řád) se přidá jako další řádek.
+- **Layout:** karta max. 680 px (Outlook přes podmíněnou tabulku s pevnou šířkou), na mobilu
+  plynulá šířka s menšími okraji (media query). Bez horizontálního posunu od 320 px.
+- **Tmavý režim:** e-mail deklaruje `color-scheme: light dark`. Výchozí inline styly jsou
+  světlé; vložené `<style>` přidává tmavou variantu z barev webu (tmavě zelené plochy,
+  krémově zelený text a tlačítko) pro klienty s `prefers-color-scheme` (Apple Mail),
+  `[data-ogsc]`/`[data-ogsb]` pro Outlook.com a vypíná automatické modré odkazy Apple Mail
+  (`format-detection`, `x-apple-data-detectors`). Gmail (aplikace) a Outlook pro Windows
+  barvy přebarvují vlastním algoritmem; to nejde řídit, design proto nespoléhá na průhledné
+  obrázky ani na barvu okolí.
+- **Obrázky (inline přílohy `cid:`):** QR = PNG ze stejného SPAYD (`lib/booking/qr.ts`,
+  sdílené s webem) jako `<img src="cid:qr-platba">`; bez externí QR služby. Značka a sluchátko
+  jsou tahy ikon lucide `House` a `Phone` rastrované do PNG (`worker/email/icons.ts`, enkodér
+  `lib/png.ts`) – SVG e-mailoví klienti spolehlivě nezobrazí. Značka je plná dlaždice
+  s vlastními barvami (bez průhlednosti), sluchátko má světlou a tmavou variantu podle
+  barvy tlačítka. Bez obrázků zůstane čitelné jméno v hlavičce i text tlačítka.
+- **Příjemce:**
+  - produkce (`BOOKING_ENV=production`): e-mail hosta (až bude produkční POST zapnutý),
+  - jinde (Preview): jen secret `BOOKING_CONFIRMATION_TEST_EMAIL`; předmět má `[TEST]` a tělo
+    uvádí, komu by e-mail šel v produkci. Bez tohoto secretu se e-mail neodešle.
+- **Odesílatel:** vždy z identity provozovatele – `BUSINESS_NAME <BUSINESS_EMAIL_RESERVATIONS>`
+  (`Chalupa Všetice <rezervace@chalupavsetice.cz>`), v Preview i v produkci. Doména musí být
+  ověřená v Resend; jinak Resend odeslání odmítne (HTTP 4xx) → rezervace zůstává a odejde
+  interní upozornění. API klíč `RESEND_API_KEY` (secret) je společný s upozorněními na kolize.
+- **Identita provozovatele (`lib/business.ts`):** jediný zdroj pravdy pro jméno, telefon,
+  IČO, odkaz do rejstříku, veřejný info e-mail a odesílatele rezervací. Nejde o secrets, proto
+  je to typovaný modul v repozitáři (Worker `vars` by se kvůli `previews` musely držet dvakrát).
+
+  | Hodnota | Použití |
+  | --- | --- |
+  | `BUSINESS_NAME` | hlavička, patička, jméno odesílatele |
+  | `BUSINESS_PHONE` | telefon v E.164; z něj `tel:` odkaz a zobrazení (`736 125 104`, v en/de/ua `+420 736 125 104`) |
+  | `BUSINESS_ICO` | patička `IČ: …` |
+  | `BUSINESS_REGISTER_URL` | cíl odkazu `IČ: …` (URL se nezobrazuje) |
+  | `BUSINESS_EMAIL_INFO` | veřejný kontakt v patičce |
+  | `BUSINESS_EMAIL_RESERVATIONS` | odesílatel transakčních e-mailů |
+
+  Pro jiný objekt stačí změnit těchto šest hodnot; `businessIdentity()` je validuje a odvodí
+  z nich zbytek. Renderer žádné údaje o provozovateli napevno nezná (hlídá test).
+- **Selhání je nefatální:** odeslání běží přes `ctx.waitUntil` až po odpovědi. Timeout,
+  HTTP 4xx/5xx, výpadek nebo chybějící konfigurace rezervaci nevrátí ani nezmění odpověď 201.
+  Log obsahuje jen druh výsledku (`reservations: confirmation email sent | skipped (…) |
+  failed (http-500)`), nikdy jméno, e-mail, telefon, bankovní údaje, SPAYD ani obsah zprávy.
+- **Konfigurace ≠ selhání doručení:** chybějící `RESEND_API_KEY` nebo testovací schránka
+  (Preview) = `skipped`, bez dalšího upozornění.
+- **Interní upozornění při selhání providera:** timeout, síťová chyba nebo HTTP 4xx/5xx
+  z Resend → jeden best-effort e-mail správci na `CONFLICT_ALERT_EMAIL` (stejná adresa
+  a odesílatel `CONFLICT_ALERT_FROM` jako upozornění na kolize). Předmět
+  `POZOR: potvrzovací e-mail rezervace <kód> selhal` (mimo produkci s `[TEST]`), obsah jen
+  kód rezervace, `BOOKING_ENV`, druh chyby a čas – nikdy jméno, e-mail, telefon, IBAN,
+  číslo účtu, SPAYD, poznámka ani obsah potvrzení. Selhání upozornění se jen zaloguje
+  (`confirmation failure alert failed (…)`) a nic dalšího nespouští; bez `CONFLICT_ALERT_EMAIL`
+  se přeskočí. Potvrzení se automaticky neopakuje; při výpadku celého providera může selhat
+  i upozornění.
+- **Bez fronty:** stav doručení se neukládá a e-mail se automaticky neopakuje. Renderer
+  (`renderReservationEmail`) je obecný – stejný půjde použít pro potvrzení platby, zrušení
+  nebo připomínku splatnosti s jinými texty.
+
 ### Transakce v D1
 
 Ověřeno v lokálním runtime (Miniflare/workerd) a testy:
@@ -428,7 +507,10 @@ VS se nespotřebuje. Kolize se neověřuje dotazem před zápisem, ten by nebyl 
    - 2–30 nocí (`MIN_NIGHTS` / `MAX_NIGHTS` v `lib/booking/rules.ts`),
    - 1–7 hostů,
    - jméno, telefon a e-mail bez řídicích znaků,
-   - volitelná poznámka `note` (viz [Poznámka hosta](#poznámka-hosta-note)).
+   - volitelná poznámka `note` (viz [Poznámka hosta](#poznámka-hosta-note)),
+   - povinný jazyk webu `locale` (`cs` | `en` | `de` | `ua`; jiná nebo chybějící hodnota =
+     422 `fields: ["locale"]`, žádný fallback) – ukládá se k rezervaci (`reservations.locale`,
+     `migrations/0009_jazyk_rezervace.sql`) jako jazyk potvrzovacího a dalších e-mailů.
 3. Cena se počítá jen na serveru stejným výpočtem jako `POST /api/quote`
    (`worker/booking/pricing.ts`, viz [Ceník](#ceník-a-cenová-nabídka)) – po ověření Turnstile.
    Hodnota z prohlížeče se neukládá. Volitelné `expectedPriceCzk` (frontend posílá `totalCzk`
@@ -533,7 +615,8 @@ web dál nabízí poptávku přes e-chalupy.
   a vyplněnými kontakty; Turnstile tlačítko neblokuje. Po kliknutí se nejdřív získá token
   z Invisible Turnstile, teprve potom proběhne POST (obojí jeden loading stav tlačítka).
   Request: `arrival`, `departure`, `guests`, kontakty,
-  `note` (prázdná = `null`), `turnstileToken`, `expectedPriceCzk` (= `totalCzk` nabídky)
+  `note` (prázdná = `null`), `turnstileToken`, `expectedPriceCzk` (= `totalCzk` nabídky),
+  `locale` (aktuální jazyk webu)
   a hlavička `Idempotency-Key` (`crypto.randomUUID()`). Formát kontaktů ověřuje server; chyby
   z 422 se zobrazí u polí (`aria-invalid`, `aria-describedby`).
 - **Logická operace = Idempotency-Key + jeden Turnstile token** (stejný obsah requestu včetně
@@ -557,7 +640,7 @@ web dál nabízí poptávku přes e-chalupy.
   změnila z X na Y. Zkontrolujte ji a rezervaci znovu potvrďte.“ Další odeslání = vědomé
   potvrzení s novým klíčem.
 - **Úspěch:** potvrzení v panelu (bez eyebrow) – titulek „Rezervace přijata“, pod ním sekundární
-  věta „Potvrzení a platební údaje najdete také ve svém e-mailu.“, termín, délka pobytu,
+  věta „Potvrzení a platební údaje vám posíláme také e-mailem.“ (doručení je best-effort), termín, délka pobytu,
   hosté, splatnost (jen datum v `Europe/Prague`, `formatDeadlineDate`) a celková cena. Kód rezervace se v panelu nezobrazuje (je v odpovědi API a bude
   v potvrzovacím e-mailu). Platební část (bez nadpisu) navazuje přímo na souhrn: QR Platba jako
   skutečný `<img>` (lokálně vytvořený PNG, `components/booking/paymentQr.ts`; na mobilu jde uložit
@@ -567,8 +650,8 @@ web dál nabízí poptávku přes e-chalupy.
   se SVG ze stejné matice; selže-li kódování, QR se nezobrazí a platební údaje jsou rozbalené.
   Vše je ze serverové odpovědi (`parseConfirmation` odmítne neúplnou nebo nekonzistentní
   odpověď); nic se nedopočítává. Splatnost: den → měsíc → rok a čas v `Europe/Prague`
-  (`formatDeadline`). Odesílání potvrzovacího e-mailu zatím není implementované – věta o e-mailu
-  předjímá navazující PR (produkční POST je vypnutý).
+  (`formatDeadline`). Věta o e-mailu odpovídá potvrzovacímu e-mailu (viz Potvrzovací e-mail);
+  v Preview chodí jen do testovací schránky.
   Kontaktní část pod blokem zmizí a stránka se po vykreslení posune zpět k bloku (celý grid,
   pokud se vejde do okna, jinak potvrzení); reveal animace respektuje `prefers-reduced-motion`.
 
@@ -1170,6 +1253,8 @@ npx wrangler preview base-config secret put ECHALUPY_ICAL_URL
 npx wrangler preview base-config secret put BOOKING_ICAL_EXPORT_TOKEN   # jiný token než v produkci
 npx wrangler preview base-config secret put TURNSTILE_SECRET_KEY        # testovací klíč Cloudflare
 npx wrangler preview base-config secret put PAYMENT_IBAN                # český IBAN pro platby rezervací
+npx wrangler preview base-config secret put RESEND_API_KEY              # potvrzovací e-mail (Resend)
+npx wrangler preview base-config secret put BOOKING_CONFIRMATION_TEST_EMAIL  # testovací schránka pro Preview
 npx wrangler preview base-config secret list                            # jen názvy
 ```
 
@@ -1182,7 +1267,13 @@ npx wrangler preview base-config secret list                            # jen n�
   503 `not-configured` a rezervaci nezaloží (smoke test selže). Hodnota se nikdy nevypisuje
   ani necommituje; ověřuje se jen názvem (`secret list`) a chováním endpointu. Produkční
   `npx wrangler secret put PAYMENT_IBAN` bude potřeba až při zapnutí produkčního POST.
-- Volitelně `BOOKING_API_TOKEN`, `RESEND_API_KEY`, `CONFLICT_ALERT_EMAIL`.
+- `RESEND_API_KEY` a `BOOKING_CONFIRMATION_TEST_EMAIL` – potvrzovací e-mail po rezervaci.
+  V Preview jde **jen** na `BOOKING_CONFIRMATION_TEST_EMAIL` (testovací schránka, nikdy adresa
+  hosta); bez některého z nich se rezervace vytvoří a e-mail se jen přeskočí (log `skipped`).
+  Odesílatel je `rezervace@chalupavsetice.cz` z `lib/business.ts` (doména ověřená v Resend,
+  i pro Preview). `CONFLICT_ALERT_EMAIL` zároveň přijímá interní upozornění na selhání
+  potvrzovacího e-mailu.
+- Volitelně `BOOKING_API_TOKEN`.
 
 `npx wrangler preview secret put <KEY>` (bez `base-config`) nastaví secret jen **jednomu**
 Preview (výchozí název = aktuální git větev) – další PR Previews ho nedostanou.

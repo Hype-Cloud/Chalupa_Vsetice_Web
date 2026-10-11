@@ -15,7 +15,7 @@
 
 import type { IsoDate } from '../../lib/availability/dates.ts';
 import type { PaymentInstructions } from '../../lib/booking/payment.ts';
-import type { MessageKey } from '../../lib/i18n/index.ts';
+import type { Locale, MessageKey } from '../../lib/i18n/index.ts';
 import type { BookingRequest } from '../../worker/booking/validation.ts';
 
 export interface ContactDraft {
@@ -32,12 +32,12 @@ export const EMPTY_CONTACT: ContactDraft = { firstName: '', lastName: '', email:
 /** Povinné kontaktní údaje vyplněné (formát ověří server – frontend validaci neduplikuje). */
 export const contactComplete = (c: ContactDraft) => [c.firstName, c.lastName, c.email, c.phone].every((v) => v.trim() !== '');
 
-/** Tělo POST /api/reservations bez Turnstile tokenu (pole podle BookingRequest). */
-export type ReservationPayload = Pick<BookingRequest, 'arrival' | 'departure' | 'guests' | 'firstName' | 'lastName' | 'phone' | 'email' | 'note'> & {
+/** Tělo POST /api/reservations bez Turnstile tokenu (pole podle BookingRequest; locale = jazyk webu → jazyk e-mailu). */
+export type ReservationPayload = Pick<BookingRequest, 'arrival' | 'departure' | 'guests' | 'firstName' | 'lastName' | 'phone' | 'email' | 'note' | 'locale'> & {
   expectedPriceCzk: number;
 };
 
-export function reservationPayload(input: { arrival: IsoDate; departure: IsoDate; guests: number; contact: ContactDraft; expectedPriceCzk: number }): ReservationPayload {
+export function reservationPayload(input: { arrival: IsoDate; departure: IsoDate; guests: number; contact: ContactDraft; expectedPriceCzk: number; locale: Locale }): ReservationPayload {
   const { contact } = input;
   return {
     arrival: input.arrival,
@@ -49,12 +49,13 @@ export function reservationPayload(input: { arrival: IsoDate; departure: IsoDate
     phone: contact.phone,
     note: contact.note.trim() === '' ? null : contact.note,
     expectedPriceCzk: input.expectedPriceCzk,
+    locale: input.locale,
   };
 }
 
 /** Otisk obsahu operace (vše kromě tokenu) – rozhoduje, zda jde o stejnou logickou operaci. */
 export const payloadFingerprint = (p: ReservationPayload) =>
-  JSON.stringify([p.arrival, p.departure, p.guests, p.firstName, p.lastName, p.email, p.phone, p.note, p.expectedPriceCzk]);
+  JSON.stringify([p.arrival, p.departure, p.guests, p.firstName, p.lastName, p.email, p.phone, p.note, p.expectedPriceCzk, p.locale]);
 
 /**
  * Rezervace z odpovědi serveru (veřejný souhrn bez kontaktů) včetně platebních údajů. Vše se

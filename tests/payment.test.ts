@@ -127,7 +127,7 @@ test('QR Platba: skutečný PNG obrázek ze stejné matice; při selhání přev
   assert.deepEqual(qrRendering(spayd, () => { throw new Error('png'); }), { kind: 'svg', size: matrix.size, d: qrSvgPath(matrix) });
   // Selže samotné kódování → žádné QR (UI rozbalí ruční platební údaje).
   assert.deepEqual(qrRendering('x'.repeat(10_000)), { kind: 'none' });
-  const source = ['paymentQr.ts', 'PaymentDetails.tsx', 'CopyButton.tsx', 'clipboard.ts'].map((f) => readFileSync(join(ROOT, 'components/booking', f), 'utf8')).join('\n');
+  const source = [...['paymentQr.ts', 'PaymentDetails.tsx', 'CopyButton.tsx', 'clipboard.ts'].map((f) => join('components/booking', f)), 'lib/booking/qr.ts'].map((f) => readFileSync(join(ROOT, f), 'utf8')).join('\n');
   assert.doesNotMatch(source, /https?:\/\/|fetch\(|dangerouslySetInnerHTML|getContext\(|toDataURL\(/);
 });
 

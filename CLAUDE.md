@@ -59,7 +59,13 @@ Skutečný stav (nastaveno ručně v dashboardu, v diffu není vidět):
   minimálně `ECHALUPY_ICAL_URL`, `BOOKING_ICAL_EXPORT_TOKEN`, `TURNSTILE_SECRET_KEY`
   (testovací klíč Cloudflare) a `PAYMENT_IBAN`; bez `BOOKING_ICAL_EXPORT_TOKEN` vrací
   `/api/reservations.ics` v Preview 503 a smoke test selže, bez platného `PAYMENT_IBAN` vrací
-  rezervační POST 503 `not-configured` (fail closed).
+  rezervační POST 503 `not-configured` (fail closed). Potvrzovací e-mail v Preview potřebuje
+  `RESEND_API_KEY` a `BOOKING_CONFIRMATION_TEST_EMAIL` a jde **jen** na tuto testovací schránku,
+  nikdy na adresu hosta; selhání e-mailu je nefatální (rezervace i odpověď 201 zůstávají).
+  Odesílatel je `BUSINESS_NAME <BUSINESS_EMAIL_RESERVATIONS>` z `lib/business.ts` (doména
+  musí být ověřená v Resend, i pro Preview). Selhání providera generuje best-effort interní upozornění
+  na `CONFLICT_ALERT_EMAIL` jen s kódem rezervace, prostředím, druhem chyby a časem – nikdy
+  s osobními nebo bankovními údaji.
 - Hodnoty tokenů a secrets **nikdy** nevypisovat, necommitovat, nedávat do PR, logů ani výstupů
   testů. Ověřovat jen podle názvu (`wrangler secret list`) nebo chování endpointu.
 
@@ -80,6 +86,14 @@ Skutečný stav (nastaveno ručně v dashboardu, v diffu není vidět):
   a v API jen ISO `YYYY-MM-DD`.
 - Rezervační formulář se nabízí jen podle `GET /api/booking-config` (`bookingEnabled`); produkce
   zůstává na poptávce přes e-chalupy, dokud o zapnutí nerozhodne uživatel.
+
+## Identita provozovatele
+
+- Jméno, telefon, IČO, odkaz do rejstříku, info e-mail a odesílatel rezervací jsou jen
+  v `lib/business.ts` (šest hodnot `BUSINESS_*`, nejde o secrets). Šablony a renderery je
+  nesmí zapisovat napevno; pro jiný objekt se mění jen tyto hodnoty.
+- V e-mailu se IČ zobrazuje jen jako odkaz `IČ: …` na `BUSINESS_REGISTER_URL` – bez viditelné
+  URL a bez názvu rejstříku.
 
 ## Secrets a data
 
