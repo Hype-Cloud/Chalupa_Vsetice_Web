@@ -396,7 +396,8 @@ test('platba: nadpis → instrukce (splatnost, celá částka, VS) → QR bez po
   // CTA: kanonický tel: odkaz a zobrazení z konfigurace.
   assert.match(email.html, /<a href="tel:\+420736125104"[^>]*>(?:(?!<\/a>).)*Zavolat 736 125 104<\/span><\/a>/);
   // Patička: celé „IČ: …“ je odkaz přesně na BUSINESS_REGISTER_URL; žádné ARES, „IČO“ ani viditelná URL.
-  assert.match(email.html, new RegExp(`<a href="${BUSINESS.BUSINESS_REGISTER_URL.replace(/[.]/g, '\\.')}"[^>]*>IČ: ${BUSINESS.BUSINESS_ICO}</a>`));
+  const links = [...email.html.matchAll(/<a href="([^"]*)"[^>]*>([^<]*)<\/a>/g)].map(([, href, label]) => ({ href, label }));
+  assert.deepEqual(links.filter((l) => l.label === `IČ: ${BUSINESS.BUSINESS_ICO}`), [{ href: BUSINESS.BUSINESS_REGISTER_URL, label: `IČ: ${BUSINESS.BUSINESS_ICO}` }]);
   assert.ok(!email.html.includes('IČO') && !email.text.includes('IČO'));
   // Tmavý režim jen jako vylepšení: e-mail ho deklaruje, výchozí (inline) stav je světlý
   // a tmavá varianta ikony je bez podpory <style> skrytá.
