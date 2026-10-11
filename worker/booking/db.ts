@@ -11,6 +11,7 @@ import { addDays, type IsoDate } from '../../lib/availability/dates.ts';
 import { mergeIntervals } from '../../lib/availability/occupancy.ts';
 import type { BusyInterval } from '../../lib/availability/types.ts';
 import { paymentDueAt, reservationCodeDay, reservationCodePrefix } from '../../lib/booking/payment.ts';
+import { isLocale, type Locale } from '../../lib/i18n/index.ts';
 
 export type ReservationStatus = 'pending_payment' | 'paid' | 'cancelled';
 
@@ -31,6 +32,8 @@ export interface NewReservation {
   requestHash: string | null;
   /** Čas vytvoření (ISO 8601, UTC). Určuje pražský den v kódu rezervace i splatnost. */
   createdAt: string;
+  /** Jazyk webu při rezervaci (jazyk e-mailů); u starších volání/rezervací chybí. */
+  locale?: Locale | null;
 }
 
 /** Veřejně bezpečný souhrn rezervace (bez interního ID, jména, kontaktů a poznámky). */
@@ -106,17 +109,17 @@ export async function insertReservation(db: D1Database, r: NewReservation): Prom
   const nights = nightsOf(r.arrival, r.departure);
   const day = reservationCodeDay(new Date(r.createdAt));
   const dueAt = paymentDueAt(r.createdAt);
-  const code = `(SELECT ?16 || printf('%02d', last) FROM reservation_code_counters WHERE day = ?17)`;
+  const code = `(SELECT ?17 || printf('%02d', last) FROM reservation_code_counters WHERE day = ?18)`;
   const statements = [
     db.prepare(`INSERT INTO reservation_code_counters (day, last) VALUES (?1, 1) ON CONFLICT (day) DO UPDATE SET last = last + 1`).bind(day),
     db
       .prepare(
         `INSERT INTO reservations (id, public_code, arrival, departure, guests, first_name, last_name, phone, email, price_czk,
-           variable_symbol, status, ical_uid, idempotency_key, request_hash, created_at, updated_at, note, payment_due_at)
+           variable_symbol, status, ical_uid, idempotency_key, request_hash, created_at, updated_at, note, payment_due_at, locale)
          VALUES (?1, ${code}, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9,
-           ${code}, 'pending_payment', ?10, ?11, ?12, ?13, ?13, ?14, ?15)`,
+           ${code}, 'pending_payment', ?10, ?11, ?12, ?13, ?13, ?14, ?15, ?16)`,
       )
-      .bind(r.id, r.arrival, r.departure, r.guests, r.firstName, r.lastName, r.phone, r.email, r.priceCzk, r.icalUid, r.idempotencyKey, r.requestHash, r.createdAt, r.note ?? null, dueAt, reservationCodePrefix(day), day),
+      .bind(r.id, r.arrival, r.departure, r.guests, r.firstName, r.lastName, r.phone, r.email, r.priceCzk, r.icalUid, r.idempotencyKey, r.requestHash, r.createdAt, r.note ?? null, dueAt, r.locale ?? null, reservationCodePrefix(day), day),
     // Jeden řádek na noc; PRIMARY KEY (night) odmítne noc, kterou už má jiná rezervace.
     ...nights.map((night) => db.prepare('INSERT INTO reserved_nights (night, reservation_id) VALUES (?1, ?2)').bind(night, r.id)),
     db.prepare(`SELECT public_code, variable_symbol FROM reservations WHERE id = ?1`).bind(r.id),
@@ -132,16 +135,28 @@ export async function insertReservation(db: D1Database, r: NewReservation): Prom
   return { code: row.public_code, arrival: r.arrival, departure: r.departure, guests: r.guests, priceCzk: r.priceCzk, variableSymbol: row.variable_symbol, status: 'pending_payment', paymentDueAt: dueAt };
 }
 
-export async function findByIdempotencyKey(db: D1Database, key: string): Promise<(ReservationSummary & { requestHash: string | null }) | null> {
+/** Údaje existující rezervace jen pro server (replay potvrzovacího e-mailu); nikdy do API ani logu. */
+export interface StoredContact {
+  reservationId: string;
+  email: string;
+  /** Jazyk uložený u rezervace; u rezervací z doby před migrací 0009 null. */
+  locale: Locale | null;
+}
+
+export async function findByIdempotencyKey(
+  db: D1Database,
+  key: string,
+): Promise<(ReservationSummary & { requestHash: string | null; stored: StoredContact }) | null> {
   const row = await db
     .prepare(
-      `SELECT public_code, arrival, departure, guests, price_czk, variable_symbol, status, request_hash, created_at, payment_due_at
+      `SELECT id, email, locale, public_code, arrival, departure, guests, price_czk, variable_symbol, status, request_hash, created_at, payment_due_at
        FROM reservations WHERE idempotency_key = ?1`,
     )
     .bind(key)
-    .first<{ public_code: string; arrival: string; departure: string; guests: number; price_czk: number; variable_symbol: string; status: ReservationStatus; request_hash: string | null; created_at: string; payment_due_at: string | null }>();
+    .first<{ id: string; email: string; locale: string | null; public_code: string; arrival: string; departure: string; guests: number; price_czk: number; variable_symbol: string; status: ReservationStatus; request_hash: string | null; created_at: string; payment_due_at: string | null }>();
   if (!row) return null;
   return {
+    stored: { reservationId: row.id, email: row.email, locale: isLocale(row.locale) ? row.locale : null },
     code: row.public_code,
     arrival: row.arrival,
     departure: row.departure,

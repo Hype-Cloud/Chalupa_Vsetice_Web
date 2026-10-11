@@ -11,7 +11,7 @@ import { fixture, FAKE_PAYMENT_IBAN } from './helpers.ts';
 // Volitelná poznámka hosta (note) v POST /api/reservations. Očekávané hodnoty jsou zapsané
 // ručně. Jen smyšlené údaje; Siteverify i export e-chalup jsou falešné.
 const EXPORT_TOKEN = 'exportni-token-0123456789abcdef0123456789';
-const GUEST = { guests: 2, firstName: 'Jan', lastName: 'Testovací', phone: '+420 000 000 000', email: 'test@example.invalid', turnstileToken: 'XXXX.DUMMY.TOKEN.XXXX' };
+const GUEST = { guests: 2, firstName: 'Jan', lastName: 'Testovací', phone: '+420 000 000 000', email: 'test@example.invalid', locale: 'cs', turnstileToken: 'XXXX.DUMMY.TOKEN.XXXX' };
 /** Značka v poznámkách, podle které se hledá únik obsahu do logů a odpovědí. */
 const MARKER = 'TAJNA-POZNAMKA-7f3a';
 

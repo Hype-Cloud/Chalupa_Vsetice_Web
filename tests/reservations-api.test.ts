@@ -12,7 +12,7 @@ import { fixture, FAKE_ACCOUNT_NUMBER, FAKE_PAYMENT_IBAN } from './helpers.ts';
 const SECRET_URL = 'https://ical.test.invalid/api/calendar/0/SECRET-TOKEN-123/default.ics';
 const TOKEN = 'testovaci-token-0123456789';
 const NOW = new Date('2030-01-10T10:00:00Z');
-const GUEST = { firstName: 'Jan', lastName: 'Testovací', phone: '+420 000 000 000', email: 'test@example.invalid' };
+const GUEST = { firstName: 'Jan', lastName: 'Testovací', phone: '+420 000 000 000', email: 'test@example.invalid', locale: 'cs' };
 // Testovací klíče Cloudflare Turnstile (veřejně dokumentované, ne secrets).
 const TURNSTILE_TEST_SECRET = '1x0000000000000000000000000000000AA';
 const DUMMY_TOKEN = 'XXXX.DUMMY.TOKEN.XXXX';

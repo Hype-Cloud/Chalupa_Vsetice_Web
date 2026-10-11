@@ -57,6 +57,11 @@ export interface I18n {
   formatDeadlineDate: (iso: string) => string;
   /** První den měsíce → „Prosinec 2030“. */
   formatMonth: (monthStart: string) => string;
+  /**
+   * Termín pobytu (ISO data) kompaktně, vždy den → měsíc → rok: „2.–4. 12. 2026“,
+   * „29. 11. – 2. 12. 2026“, přes rok celé obě data.
+   */
+  formatDateRange: (from: string, to: string) => string;
   /** Rozsah zobrazených měsíců → „říjen – prosinec 2026“ podle jazyka. */
   formatMonthRange: (first: string, last: string) => string;
   /** Zkratky dnů v týdnu, pondělí první. */
@@ -83,6 +88,7 @@ export function createI18n(locale: Locale = DEFAULT_LOCALE, options: { currency?
   const fullDate = new Intl.DateTimeFormat(intl, { ...utc, weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
   // Angličtina se zkratkou měsíce: číselné „08/10“ by se dalo číst jako americké měsíc/den.
   const dateTime = new Intl.DateTimeFormat(intl, { timeZone: 'Europe/Prague', day: 'numeric', month: locale === 'en' ? 'short' : 'numeric', hour: '2-digit', minute: '2-digit' });
+  const rangeDate = new Intl.DateTimeFormat(intl, { ...utc, day: 'numeric', month: locale === 'en' ? 'short' : 'numeric', year: 'numeric' });
   const deadlineDate = new Intl.DateTimeFormat(intl, { timeZone: 'Europe/Prague', day: 'numeric', month: locale === 'en' ? 'short' : 'numeric', year: 'numeric' });
   const deadline = new Intl.DateTimeFormat(intl, { timeZone: 'Europe/Prague', day: 'numeric', month: locale === 'en' ? 'short' : 'numeric', year: 'numeric', hour: '2-digit', minute: '2-digit' });
   const month = new Intl.DateTimeFormat(intl, { ...utc, month: 'long', year: 'numeric' });
@@ -106,6 +112,14 @@ export function createI18n(locale: Locale = DEFAULT_LOCALE, options: { currency?
     formatDeadline: (iso) => deadline.format(new Date(iso)),
     formatDeadlineDate: (iso) => deadlineDate.format(new Date(iso)),
     formatMonth: (monthStart) => capitalize(month.format(asDate(monthStart))),
+    formatDateRange: (from, to) => {
+      // Části ve všech jazycích webu jdou v pořadí den, oddělovač, měsíc, oddělovač, rok.
+      const [a, b] = [from, to].map((date) => rangeDate.formatToParts(asDate(date)).map((part) => part.value));
+      if (a.length !== 5 || b.length !== 5) return `${a.join('')} – ${b.join('')}`;
+      if (from.slice(0, 7) === to.slice(0, 7)) return `${a[0]}${a[1].trim()}–${b.join('')}`;
+      if (from.slice(0, 4) === to.slice(0, 4)) return `${a.slice(0, 3).join('')}${a[3].trim()} – ${b.join('')}`;
+      return `${a.join('')} – ${b.join('')}`;
+    },
     formatMonthRange: (first, last) => {
       if (first === last) return month.format(asDate(first));
       const sameYear = first.slice(0, 4) === last.slice(0, 4);

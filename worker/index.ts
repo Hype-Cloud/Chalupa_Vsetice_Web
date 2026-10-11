@@ -44,6 +44,8 @@ export default {
         now: () => new Date(),
         randomUUID: () => crypto.randomUUID(),
         log: (message) => console.warn(message),
+        // Potvrzovací e-mail až po odeslání odpovědi (neprodlužuje ani nemění úspěšnou odpověď).
+        defer: (promise) => ctx.waitUntil(promise),
       });
     }
     if (pathname === '/api/booking-config') return handleBookingConfig(request, env);

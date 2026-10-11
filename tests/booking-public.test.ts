@@ -11,7 +11,7 @@ const EXPORT_URL = 'https://ical.test.invalid/api/calendar/0/SECRET-TOKEN-123/de
 const TURNSTILE_SECRET = 'turnstile-secret-PRIVATE-789';
 const TOKEN = 'XXXX.DUMMY.TOKEN.XXXX';
 const IP = '203.0.113.7';
-const GUEST = { firstName: 'Jan', lastName: 'Testovací', phone: '+420 000 000 000', email: 'test@example.invalid' };
+const GUEST = { firstName: 'Jan', lastName: 'Testovací', phone: '+420 000 000 000', email: 'test@example.invalid', locale: 'cs' };
 
 let t: Awaited<ReturnType<typeof createTestDatabase>>;
 before(async () => (t = await createTestDatabase('preview')));

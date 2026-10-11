@@ -271,7 +271,7 @@ function booking() {
       ),
   };
 }
-const GUEST = { guests: 2, firstName: 'Jan', lastName: 'Testovací', phone: '+420 000 000 000', email: 'test@example.invalid', turnstileToken: 'XXXX.DUMMY.TOKEN.XXXX' };
+const GUEST = { guests: 2, firstName: 'Jan', lastName: 'Testovací', phone: '+420 000 000 000', email: 'test@example.invalid', locale: 'cs', turnstileToken: 'XXXX.DUMMY.TOKEN.XXXX' };
 
 test('15: /api/quote a rezervace dávají pro stejný termín stejnou cenu', async () => {
   await setPrices({ '2030-02-03': 4500, '2030-02-08': 6000 });

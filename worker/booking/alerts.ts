@@ -5,7 +5,10 @@
 // (at-least-once). Duplicity při souběhu nebo opakování omezuje Idempotency-Key odvozený
 // z ID kolize. E-mail neobsahuje jméno, kontakty hosta, cizí UID ani adresu exportu.
 
+import { MailError, RESEND_TEST_FROM, sendViaResend } from '../email/resend.ts';
 import { markConflictsNotified, pendingConflictNotifications } from './conflicts.ts';
+
+export { MailError, RESEND_ENDPOINT, sendViaResend } from '../email/resend.ts';
 
 export interface AlertEnv {
   BOOKING_ENV?: string;
@@ -22,9 +25,7 @@ export interface AlertDeps {
   log: (message: string) => void;
 }
 
-export const RESEND_ENDPOINT = 'https://api.resend.com/emails';
-const DEFAULT_FROM = 'Chalupa Všetice <onboarding@resend.dev>';
-const SEND_TIMEOUT_MS = 10_000;
+const DEFAULT_FROM = RESEND_TEST_FROM;
 /** Pojistka proti zahlcení schránky při hromadné chybě; zbytek počká na další běh. */
 export const MAX_ALERTS_PER_RUN = 20;
 
@@ -63,35 +64,6 @@ export function buildConflictAlert(alert: ConflictAlert, test: boolean): { subje
       'Nic se automaticky neruší. Kolizi je potřeba vyřešit ručně.',
     ].join('\n'),
   };
-}
-
-export class MailError extends Error {
-  readonly kind: string;
-  constructor(kind: string) {
-    super(kind);
-    this.kind = kind;
-  }
-}
-
-/** Jeden e-mail přes Resend HTTP API. @throws MailError (bez obsahu odpovědi) */
-export async function sendViaResend(
-  apiKey: string,
-  message: { from: string; to: string; subject: string; text: string; idempotencyKey: string },
-  fetchFn: typeof fetch,
-): Promise<void> {
-  let response: Response;
-  try {
-    response = await fetchFn(RESEND_ENDPOINT, {
-      method: 'POST',
-      headers: { authorization: `Bearer ${apiKey}`, 'content-type': 'application/json', 'idempotency-key': message.idempotencyKey },
-      body: JSON.stringify({ from: message.from, to: [message.to], subject: message.subject, text: message.text }),
-      signal: AbortSignal.timeout(SEND_TIMEOUT_MS),
-    });
-  } catch (error) {
-    throw new MailError(error instanceof Error && error.name === 'TimeoutError' ? 'timeout' : 'network');
-  }
-  await response.body?.cancel().catch(() => undefined);
-  if (!response.ok) throw new MailError(`http-${response.status}`);
 }
 
 /**
