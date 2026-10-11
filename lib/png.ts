@@ -9,6 +9,8 @@ export interface PalettePngInput {
   height: number;
   /** Barvy palety (nejvýš 2^bitDepth). */
   palette: readonly Rgb[];
+  /** Volitelná průhlednost položek palety (0 = průhledná, 255 = plná; chunk tRNS). */
+  alpha?: readonly number[];
   bitDepth: 1 | 2 | 4 | 8;
   /** Index barvy v paletě pro pixel (x, y). */
   pixel: (x: number, y: number) => number;
@@ -74,7 +76,7 @@ function zlibStored(raw: Uint8Array): Uint8Array {
 }
 
 /** Bajty PNG obrázku s paletou. */
-export function palettePng({ width, height, palette, bitDepth, pixel }: PalettePngInput): Uint8Array {
+export function palettePng({ width, height, palette, alpha, bitDepth, pixel }: PalettePngInput): Uint8Array {
   if (palette.length < 1 || palette.length > 2 ** bitDepth) throw new RangeError('png-palette-size');
   const rowBytes = Math.ceil((width * bitDepth) / 8);
   const raw = new Uint8Array((rowBytes + 1) * height);
@@ -93,6 +95,7 @@ export function palettePng({ width, height, palette, bitDepth, pixel }: PaletteP
     new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
     chunk('IHDR', ihdr),
     chunk('PLTE', new Uint8Array(palette.flat())),
+    ...(alpha ? [chunk('tRNS', new Uint8Array(alpha))] : []),
     chunk('IDAT', zlibStored(raw)),
     chunk('IEND', new Uint8Array()),
   ]);

@@ -63,7 +63,7 @@ test('katalogy en, de, ua jsou skutečně přeložené (žádný český text) a
       const value = (CATALOGS[locale] as Record<string, unknown>)[key];
       const text = typeof value === 'string' ? value : JSON.stringify(value);
       if (!SAME_IN_ALL.has(key) && !SAME_AS_CZECH.has(`${locale}:${key}`)) assert.notDeepEqual(value, (cs as Record<string, unknown>)[key], `${locale} ${key} je stejné jako česky`);
-      assert.ok(!/[ěščřůňťď]/i.test(text.replace(/VŠETICE|Všetice|e-chalupy\.cz|Čeština|IČO/g, '')), `${locale} ${key}: český text`);
+      assert.ok(!/[ěščřůňťď]/i.test(text.replace(/VŠETICE|Všetice|e-chalupy\.cz|Čeština|IČ/g, '')), `${locale} ${key}: český text`);
     }
   }
   for (const locale of LOCALES) {

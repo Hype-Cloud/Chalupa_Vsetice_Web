@@ -216,9 +216,9 @@ Projekt využívá Node.js Test Runner. Databázové testy probíhají nad loká
 | reservation-form.test.ts | 20 | Rezervační formulář: request podle kontraktu, blokace odeslání (termín, cena, kontakty; Turnstile tlačítko neblokuje), kliknutí → Invisible Turnstile → POST, selhání Turnstile bez POST, Idempotency-Key a token svázané s operací (retry = stejný klíč i token bez nové challenge, nová operace = nový token i klíč, i po price-mismatch), chybové kódy → hlášky ve všech jazycích, POST proti skutečnému handleru, `GET /api/booking-config`, Preview Invisible site key jen ve `previews`; potvrzení jen z dat serverové odpovědi (neúplná nebo nekonzistentní odpověď se nepřijme). |
 | invisible-turnstile.test.ts | 8 | Invisible Turnstile na klientu: widget připravený předem bez spuštění challenge, po kliknutí jen `execute`, nejvýš jeden token na widget a čerstvý widget na pozadí, bez automatického obnovování, ignorování pozdních callbacků, chyba / timeout / prázdný token → `turnstile-failed`, nenačtený skript → `turnstile-unavailable` s opakováním přípravy, odpojení formuláře. |
 | stay-feedback.test.ts | 5 | Vizuální odezva na pobyt kratší než `MIN_NIGHTS`: validace a stav pobytu beze změny, nový trigger s kliknutým dnem při každém pokusu, validní klik ani jiné chyby flash nespustí, flash dne bez trvalého stavu a bez pohybu, pulse hlášky jen přes `transform`, `prefers-reduced-motion` bez animace. |
-| confirmation-email.test.ts | 18 | Potvrzovací e-mail: `locale` cs/en/de/ua (jiné → 422), nová rezervace = jeden e-mail, replay ani souběžný dvojklik další neodešle, Preview → testovací schránka, produkce → host, odesílatel z business identity, business config (telefon E.164 → `tel:` a český zápis, validace), hlavička (jméno, ikona, datum vytvoření rezervace), pořadí platební sekce a QR bez popisku, telefonický kontakt a patička (`IČO` jako odkaz do rejstříku, bez viditelné URL a „ARES“), kontakty v plaintextu, renderer bez napevno zapsaných údajů provozovatele, chybějící konfigurace → skip bez upozornění, selhání providera (timeout, síť, HTTP 4xx/5xx) → 201 a jedno interní upozornění bez osobních a bankovních údajů, selhání upozornění nic dalšího nespouští, odložené odeslání, obsah HTML i textu ve 4 jazycích ze stejných dat jako API, QR příloha (cid) = SPAYD, escapování HTML, nové znění věty o e-mailu. |
+| confirmation-email.test.ts | 19 | Potvrzovací e-mail: `locale` cs/en/de/ua (jiné → 422), nová rezervace = jeden e-mail, replay ani souběžný dvojklik další neodešle, Preview → testovací schránka, produkce → host, odesílatel z business identity, business config (telefon E.164 → `tel:` a český zápis, validace), hlavička (jméno, značka, termín pobytu), kompaktní termín ve 4 jazycích, pořadí platební sekce a QR bez popisku, telefonický kontakt a patička (`IČ` jako odkaz do rejstříku, bez viditelné URL, „ARES“ a „IČO“), výchozí světlá varianta, kontakty v plaintextu, renderer bez napevno zapsaných údajů provozovatele, chybějící konfigurace → skip bez upozornění, selhání providera (timeout, síť, HTTP 4xx/5xx) → 201 a jedno interní upozornění bez osobních a bankovních údajů, selhání upozornění nic dalšího nespouští, odložené odeslání, obsah HTML i textu ve 4 jazycích ze stejných dat jako API, QR příloha (cid) = SPAYD, escapování HTML, nové znění věty o e-mailu. |
 | payment.test.ts | 9 | Platby: pražské datum → `DDMMYY`, `NN` 01–99, splatnost (konec pražského dne po 24 h, změny času, vždy 24–48 h), IBAN (kontrolní součet, odvození čísla účtu), SPAYD (serverová cena, VS = kód, zpráva `Rezervace {kód}`), QR jako PNG (pixely = matice) se SVG fallbackem, kopírování do schránky, kontrola, že repozitář neobsahuje skutečný IBAN. |
-| **Celkem** | **352** | |
+| **Celkem** | **353** | |
 
 ### Testované scénáře
 
@@ -397,22 +397,34 @@ POST /api/reservations → validace → čerstvý export e-chalup → D1 batch (
   `reservationResponse`): kód rezervace, termín, noci, hosté, splatnost, `totalCzk`
   a `PaymentInstructions` (částka, účet, IBAN, VS, SPAYD). Nic se nepočítá znovu.
 - **Jazyk:** `reservations.locale` z požadavku (`cs` | `en` | `de` | `ua`), texty z `lib/i18n`.
-- **Obsah:** HTML (tabulkový layout, inline styly, bez skriptů, externích zdrojů a webfontů)
-  i plaintext se stejnými údaji, v tomto pořadí:
-  - hlavička: tmavě zelený pruh s ikonou domu a jménem provozovatele, vpravo datum vytvoření
-    rezervace (`Přijato 10. 1. 2030`; z `created_at` na serveru, ne z veřejného API),
-  - nadpis, úvod a souhrn: kód rezervace, termín, délka pobytu, hosté, splatnost a výrazně
-    zvýrazněná celková cena,
+- **Obsah:** HTML (tabulkový layout, inline styly a `bgcolor`, bez skriptů, externích zdrojů
+  a webfontů) i plaintext se stejnými údaji, v tomto pořadí:
+  - hlavička: tmavě zelený pruh se značkou (domek) a jménem provozovatele, vpravo termín
+    pobytu kompaktně podle jazyka (`2.–4. 12. 2026`, `29. 11. – 2. 12. 2026`,
+    `30. 12. 2026 – 2. 1. 2027`; `formatDateRange` v `lib/i18n`),
+  - nadpis, úvod a souhrn: kód rezervace, termín, délka pobytu, hosté, splatnost a celková
+    cena (tučně, o stupeň větší, s výraznější linkou nad řádkem),
   - platba: „Platební údaje“, instrukce (celá částka, splatnost, variabilní symbol), QR Platba
     bez popisku (jen `alt`) a ruční údaje (částka, účet, IBAN, VS),
-  - telefonický kontakt (`tel:` odkaz s obrysovým tlačítkem) a patička: jméno, info e-mail
-    a `IČO: …` jako odkaz do veřejného rejstříku (URL ani název rejstříku se nezobrazují).
-
-  QR = PNG ze stejného SPAYD (`lib/booking/qr.ts`, sdílené s webem) jako inline příloha
-  Resend (`content_id`) a `<img src="cid:qr-platba">`; bez externí QR služby. Ikona domu
-  v hlavičce je stejný tvar jako lucide `House` na webu, rastrovaný do PNG
-  (`worker/email/brandIcon.ts`, enkodér `lib/png.ts`) a vložený také přes `cid:` – SVG
-  e-mailoví klienti spolehlivě nezobrazí. Bez obrázků zůstane čitelné jméno v hlavičce.
+  - telefonický kontakt: plné tlačítko se sluchátkem a `tel:` odkazem,
+  - patička pod kartou: jméno · info e-mail (`mailto:`) · `IČ: …` jako odkaz do veřejného
+    rejstříku (URL ani název rejstříku se nezobrazují). Patička je řádek položek; další
+    sekundární odkaz (např. budoucí ubytovací řád) se přidá jako další řádek.
+- **Layout:** karta max. 680 px (Outlook přes podmíněnou tabulku s pevnou šířkou), na mobilu
+  plynulá šířka s menšími okraji (media query). Bez horizontálního posunu od 320 px.
+- **Tmavý režim:** e-mail deklaruje `color-scheme: light dark`. Výchozí inline styly jsou
+  světlé; vložené `<style>` přidává tmavou variantu z barev webu (tmavě zelené plochy,
+  krémově zelený text a tlačítko) pro klienty s `prefers-color-scheme` (Apple Mail),
+  `[data-ogsc]`/`[data-ogsb]` pro Outlook.com a vypíná automatické modré odkazy Apple Mail
+  (`format-detection`, `x-apple-data-detectors`). Gmail (aplikace) a Outlook pro Windows
+  barvy přebarvují vlastním algoritmem; to nejde řídit, design proto nespoléhá na průhledné
+  obrázky ani na barvu okolí.
+- **Obrázky (inline přílohy `cid:`):** QR = PNG ze stejného SPAYD (`lib/booking/qr.ts`,
+  sdílené s webem) jako `<img src="cid:qr-platba">`; bez externí QR služby. Značka a sluchátko
+  jsou tahy ikon lucide `House` a `Phone` rastrované do PNG (`worker/email/icons.ts`, enkodér
+  `lib/png.ts`) – SVG e-mailoví klienti spolehlivě nezobrazí. Značka je plná dlaždice
+  s vlastními barvami (bez průhlednosti), sluchátko má světlou a tmavou variantu podle
+  barvy tlačítka. Bez obrázků zůstane čitelné jméno v hlavičce i text tlačítka.
 - **Příjemce:**
   - produkce (`BOOKING_ENV=production`): e-mail hosta (až bude produkční POST zapnutý),
   - jinde (Preview): jen secret `BOOKING_CONFIRMATION_TEST_EMAIL`; předmět má `[TEST]` a tělo
@@ -429,8 +441,8 @@ POST /api/reservations → validace → čerstvý export e-chalup → D1 batch (
   | --- | --- |
   | `BUSINESS_NAME` | hlavička, patička, jméno odesílatele |
   | `BUSINESS_PHONE` | telefon v E.164; z něj `tel:` odkaz a zobrazení (`736 125 104`, v en/de/ua `+420 736 125 104`) |
-  | `BUSINESS_ICO` | patička `IČO: …` |
-  | `BUSINESS_REGISTER_URL` | cíl odkazu `IČO: …` (URL se nezobrazuje) |
+  | `BUSINESS_ICO` | patička `IČ: …` |
+  | `BUSINESS_REGISTER_URL` | cíl odkazu `IČ: …` (URL se nezobrazuje) |
   | `BUSINESS_EMAIL_INFO` | veřejný kontakt v patičce |
   | `BUSINESS_EMAIL_RESERVATIONS` | odesílatel transakčních e-mailů |
 

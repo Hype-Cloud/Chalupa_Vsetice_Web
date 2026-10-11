@@ -1,8 +1,7 @@
 // Potvrzovací e-mail hostovi po vytvoření rezervace (Resend).
 //
 // - Data: stejný objekt jako úspěšná odpověď API (response.ts → reservationResponse) – kód,
-//   cena, splatnost, platební údaje i SPAYD se nepočítají znovu. Datum vytvoření rezervace
-//   (hlavička e-mailu) předává handler ze serveru; do veřejné odpovědi API se nepřidává.
+//   cena, splatnost, platební údaje i SPAYD se nepočítají znovu.
 // - Jazyk: locale uložené u rezervace (cs | en | de | ua), texty z lib/i18n.
 // - Identita provozovatele (jméno, telefon, e-maily, IČO, odkaz do rejstříku, odesílatel) jen
 //   z lib/business.ts – renderer žádné údaje o provozovateli nezná napevno.
@@ -17,14 +16,16 @@
 //   selhání doručení a upozornění negeneruje. Potvrzení se automaticky neopakuje.
 // - Renderer renderReservationEmail je obecný (hlavička, nadpis, úvod, souhrn, platba, kontakt,
 //   patička) – stejný půjde použít pro potvrzení platby, zrušení nebo připomínku s jinými texty.
-// - HTML pro e-mailové klienty: tabulky, inline styly, bez skriptů, webfontů a externích CSS;
-//   obrázky (ikona, QR) jako inline přílohy `cid:`.
+// - HTML pro e-mailové klienty: tabulky, inline styly a bgcolor (platí všude), bez skriptů,
+//   webfontů a externích CSS; obrázky (značka, sluchátko, QR) jako inline přílohy `cid:`.
+//   Vložené <style> je jen vylepšení: užší okraje na mobilu, tmavý režim (Apple Mail,
+//   Outlook.com) a vypnutí automatických odkazů Apple Mail. Bez něj zůstává světlá varianta.
 
 import { businessIdentity, type BusinessIdentity } from '../../lib/business.ts';
 import { bytesToBase64, qrMatrix, qrPngBytes } from '../../lib/booking/qr.ts';
 import { createI18n, type Locale } from '../../lib/i18n/index.ts';
 import type { Rgb } from '../../lib/png.ts';
-import { houseIconBase64 } from '../email/brandIcon.ts';
+import { brandMarkPng, cachedBase64, phoneIconPng } from '../email/icons.ts';
 import { MailError, RESEND_TEST_FROM, sendViaResend, type MailAttachment, type MailMessage } from '../email/resend.ts';
 import type { ReservationResponse } from './response.ts';
 
@@ -48,8 +49,10 @@ export interface ConfirmationDeps {
 
 /** Content-ID inline obrázku QR Platby. */
 export const QR_CONTENT_ID = 'qr-platba';
-/** Content-ID ikony domu v hlavičce. */
-export const BRAND_ICON_CONTENT_ID = 'znacka';
+/** Content-ID značky (domek) v hlavičce a sluchátka v tlačítku (světlá / tmavá varianta). */
+export const BRAND_MARK_CONTENT_ID = 'znacka';
+export const PHONE_ICON_CONTENT_ID = 'telefon';
+export const PHONE_ICON_DARK_CONTENT_ID = 'telefon-tmavy';
 
 export interface RenderedEmail {
   subject: string;
@@ -59,8 +62,6 @@ export interface RenderedEmail {
 }
 
 export interface EmailOptions {
-  /** Datum a čas vytvoření rezervace (ISO 8601) – hlavička e-mailu. */
-  createdAt: string;
   /** Identita provozovatele; výchozí z lib/business.ts. */
   business?: BusinessIdentity;
   /** Poznámka o skutečném příjemci (Preview). */
@@ -70,30 +71,78 @@ export interface EmailOptions {
 const escapeHtml = (value: string) =>
   value.replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]!);
 
-// Barvy webu: tmavě zelená hlavička, světlé pozadí, tlumený text. Kontrast textu v hlavičce
-// i tlačítka ≥ 4,5 : 1.
-const ACCENT = '#163d33';
-const ACCENT_RGB: Rgb = [0x16, 0x3d, 0x33];
-const ON_ACCENT = '#ffffff';
-const ON_ACCENT_RGB: Rgb = [0xff, 0xff, 0xff];
-const ON_ACCENT_MUTED = '#c8d6cf';
+// Barvy webu (app/globals.css): tmavě zelená, světle krémově zelená (tlačítka na tmavém
+// pozadí), tlumená šedozelená. Žádné jiné odstíny – ani v tmavém režimu.
+const GREEN = '#163d33';
+const GREEN_RGB: Rgb = [0x16, 0x3d, 0x33];
+const CREAM = '#dbe8bd';
+const CREAM_RGB: Rgb = [0xdb, 0xe8, 0xbd];
+const WHITE = '#ffffff';
+const WHITE_RGB: Rgb = [0xff, 0xff, 0xff];
 const MUTED = '#5c6a63';
 const BORDER = '#e2e7e0';
 const PAGE = '#f8f9f5';
+// Tmavý režim (Apple Mail, Outlook.com): tmavě zelené plochy, krémový text a akcenty.
+const DARK = { page: '#0f1915', card: '#15211c', line: '#2a3a32', text: '#e8eee0', muted: '#a8b6a9', link: '#cfddc2' };
 const SERIF = "Georgia,'Times New Roman',serif";
 const SANS = 'Arial,Helvetica,sans-serif';
-/** ☎ s výběrem textové (ne emoji) podoby. */
-const PHONE_SYMBOL = '☎︎';
+const WIDTH = 680;
+const PAD = 40;
 
 /**
- * Obecný e-mail k rezervaci: hlavička (značka, datum vytvoření), nadpis, úvod, souhrn pobytu,
+ * Vložené styly (progresivní vylepšení). Gmail při nepodporovaném selektoru zahodí celý blok,
+ * proto jsou atributové selektory (Apple, Outlook.com) ve vlastním bloku.
+ */
+const STYLES = [
+  '<style>',
+  ':root{color-scheme:light dark;supported-color-schemes:light dark}',
+  '@media only screen and (max-width:620px){',
+  '.e-outer{padding:12px 8px 24px!important}',
+  '.e-px{padding-left:18px!important;padding-right:18px!important}',
+  '.e-h1{font-size:24px!important;line-height:30px!important}',
+  '.e-val{padding-left:12px!important;font-size:14px!important}',
+  '.e-brand{font-size:14px!important;letter-spacing:.5px!important}',
+  '.e-stay{font-size:12px!important;white-space:normal!important}',
+  '.e-btn a{white-space:normal!important;padding:12px 20px!important}',
+  '.e-sep{display:none!important}',
+  '.e-item{display:block!important}',
+  '}',
+  // IBAN se láme jen na velmi úzkém displeji (jinak se zalomí popisky).
+  '@media only screen and (max-width:360px){.e-nowrap{white-space:normal!important;overflow-wrap:anywhere!important;word-break:break-all!important}}',
+  '@media (prefers-color-scheme:dark){',
+  `.e-page{background-color:${DARK.page}!important}`,
+  `.e-card{background-color:${DARK.card}!important;border-color:${DARK.line}!important}`,
+  `.e-text{color:${DARK.text}!important}`,
+  `.e-muted{color:${DARK.muted}!important}`,
+  `.e-line{border-color:${DARK.line}!important}`,
+  `.e-total{border-color:${CREAM}!important}`,
+  `.e-btn{background-color:${CREAM}!important}`,
+  `.e-btn a,.e-btn span{color:${GREEN}!important}`,
+  '.e-ico{display:none!important}',
+  '.e-ico-dark{display:inline-block!important;width:18px!important;height:18px!important;max-height:none!important}',
+  `.e-foot a{color:${DARK.link}!important}`,
+  '.e-note{background-color:#2c2a22!important;color:#e9dcc4!important}',
+  '}',
+  '</style>',
+  '<style>',
+  // Apple Mail jinak barví rozpoznaná data, čísla a adresy systémovou modrou.
+  'a[x-apple-data-detectors]{color:inherit!important;text-decoration:none!important;font-size:inherit!important;font-family:inherit!important;font-weight:inherit!important;line-height:inherit!important}',
+  // Outlook.com v tmavém režimu: zachovat značkové barvy hlavičky a tlačítka.
+  `[data-ogsb] .e-header,[data-ogsb] .e-btn{background-color:${GREEN}!important}`,
+  `[data-ogsc] .e-header,[data-ogsc] .e-btn a,[data-ogsc] .e-btn span{color:${WHITE}!important}`,
+  `[data-ogsc] .e-stay{color:${CREAM}!important}`,
+  '</style>',
+].join('');
+
+/**
+ * Obecný e-mail k rezervaci: hlavička (značka, termín pobytu), nadpis, úvod, souhrn pobytu,
  * platba (instrukce, QR Platba, ruční údaje), telefonický kontakt a patička provozovatele.
  */
 export function renderReservationEmail(
   data: ReservationResponse,
   locale: Locale,
   texts: { subject: string; heading: string; intro: string },
-  options: EmailOptions,
+  options: EmailOptions = {},
 ): RenderedEmail {
   const i18n = createI18n(locale);
   const business = options.business ?? businessIdentity();
@@ -112,7 +161,7 @@ export function renderReservationEmail(
     [i18n.t('reservation.payment.iban'), p.iban],
     [i18n.t('reservation.payment.variableSymbol'), p.variableSymbol],
   ];
-  const received = i18n.t('email.header.received', { date: i18n.formatDeadlineDate(options.createdAt) });
+  const stay = i18n.formatDateRange(r.arrival, r.departure);
   const paymentHeading = i18n.t('reservation.payment.details');
   const paymentNote = i18n.t('email.paymentNote', { date: i18n.formatDeadlineDate(p.dueAt), vs: p.variableSymbol });
   const thanks = i18n.t('reservation.success.thanks');
@@ -124,7 +173,9 @@ export function renderReservationEmail(
   // QR ze stejného SPAYD jako API a web; když ho nejde vytvořit, e-mail jde bez QR (ruční údaje stačí).
   const matrix = qrMatrix(p.spayd);
   const attachments: MailAttachment[] = [
-    { filename: 'znacka.png', content: houseIconBase64(ACCENT_RGB, ON_ACCENT_RGB), contentId: BRAND_ICON_CONTENT_ID },
+    { filename: 'znacka.png', content: cachedBase64('brand', () => brandMarkPng(CREAM_RGB, GREEN_RGB)), contentId: BRAND_MARK_CONTENT_ID },
+    { filename: 'telefon.png', content: cachedBase64('phone-light', () => phoneIconPng(WHITE_RGB)), contentId: PHONE_ICON_CONTENT_ID },
+    { filename: 'telefon-tmavy.png', content: cachedBase64('phone-dark', () => phoneIconPng(GREEN_RGB)), contentId: PHONE_ICON_DARK_CONTENT_ID },
     ...(matrix ? [{ filename: 'qr-platba.png', content: bytesToBase64(qrPngBytes(matrix, 6)), contentId: QR_CONTENT_ID }] : []),
   ];
 
@@ -132,85 +183,110 @@ export function renderReservationEmail(
     ? `TEST (Preview): v produkci by tento e-mail šel na adresu ${options.test.originalRecipient}.`
     : null;
 
-  const row = ([label, value]: [string, string], first: boolean) =>
-    `<tr><td style="padding:11px 0;${first ? '' : `border-top:1px solid ${BORDER};`}color:${MUTED};font-size:14px;line-height:20px;">${escapeHtml(label)}</td>` +
-    `<td align="right" style="padding:11px 0 11px 16px;${first ? '' : `border-top:1px solid ${BORDER};`}color:${ACCENT};font-size:15px;line-height:20px;text-align:right;">${escapeHtml(value)}</td></tr>`;
-  const table = (content: string, margin = '0') =>
-    `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="margin:${margin};border-collapse:collapse;">${content}</table>`;
-  const link = (href: string, label: string, color: string) =>
-    `<a href="${escapeHtml(href)}" style="color:${color};text-decoration:underline;">${escapeHtml(label)}</a>`;
+  const table = (content: string, attrs = 'width="100%"', style = '') =>
+    `<table role="presentation" ${attrs} cellpadding="0" cellspacing="0" border="0" style="border-collapse:collapse;${style}">${content}</table>`;
+  const row = ([label, value]: [string, string], first: boolean, nowrap = false) => {
+    const line = first ? '' : `border-top:1px solid ${BORDER};`;
+    return (
+      `<tr><td class="e-muted${first ? '' : ' e-line'}" style="padding:12px 0;${line}color:${MUTED};font-size:14px;line-height:21px;">${escapeHtml(label)}</td>` +
+      `<td class="e-text e-val${first ? '' : ' e-line'}${nowrap ? ' e-nowrap' : ''}" align="right" style="padding:12px 0 12px 24px;${line}color:${GREEN};font-size:15px;line-height:21px;text-align:right;${nowrap ? 'white-space:nowrap;' : ''}">${escapeHtml(value)}</td></tr>`
+    );
+  };
+  const link = (href: string, label: string) => `<a href="${escapeHtml(href)}" style="color:${MUTED};text-decoration:underline;">${escapeHtml(label)}</a>`;
 
+  // Značka jako na webu: první slovo tučně, zbytek normálně, verzálky s prostrkáním.
+  const [firstWord, ...restWords] = business.name.split(' ');
+  const brandName = `<b style="font-weight:bold;">${escapeHtml(firstWord)}</b>${restWords.length ? ` <span style="font-weight:normal;">${escapeHtml(restWords.join(' '))}</span>` : ''}`;
   const header =
-    `<tr><td bgcolor="${ACCENT}" style="background-color:${ACCENT};padding:16px 28px;">` +
+    `<tr><td class="e-header e-px" bgcolor="${GREEN}" style="background-color:${GREEN};padding:14px ${PAD}px;color:${WHITE};">` +
     table(
       '<tr>' +
-        `<td valign="middle" style="color:${ON_ACCENT};font-family:${SANS};font-size:15px;line-height:24px;font-weight:bold;letter-spacing:1px;text-transform:uppercase;">` +
-        `<img src="cid:${BRAND_ICON_CONTENT_ID}" width="24" height="24" alt="" style="display:inline-block;width:24px;height:24px;border:0;vertical-align:middle;margin:0 10px 0 0;">` +
-        `<span style="vertical-align:middle;">${escapeHtml(business.name)}</span></td>` +
-        `<td align="right" valign="middle" style="color:${ON_ACCENT_MUTED};font-family:${SANS};font-size:12px;line-height:24px;text-align:right;white-space:nowrap;">${escapeHtml(received)}</td>` +
+        `<td valign="middle" style="padding:0;">` +
+        table(
+          `<tr><td width="28" valign="middle" style="width:28px;padding:0;"><img src="cid:${BRAND_MARK_CONTENT_ID}" width="28" height="28" alt="" style="display:block;width:28px;height:28px;border:0;"></td>` +
+            `<td valign="middle" class="e-brand" style="padding:0 0 0 12px;color:${WHITE};font-family:${SANS};font-size:15px;line-height:20px;letter-spacing:1px;text-transform:uppercase;white-space:nowrap;">${brandName}</td></tr>`,
+          '',
+        ) +
+        '</td>' +
+        `<td class="e-stay" align="right" valign="middle" style="padding:0 0 0 16px;color:${CREAM};font-family:${SANS};font-size:13px;line-height:20px;text-align:right;white-space:nowrap;">${escapeHtml(stay)}</td>` +
         '</tr>',
     ) +
     '</td></tr>';
 
   const body = [
-    `<tr><td style="padding:32px 28px 8px;">`,
-    testNote ? `<p style="margin:0 0 20px;padding:10px 12px;background-color:#f6efe6;color:#784b37;font-size:13px;line-height:18px;">${escapeHtml(testNote)}</p>` : '',
-    `<h1 style="margin:0 0 10px;font-family:${SERIF};font-weight:normal;font-size:28px;line-height:34px;color:${ACCENT};">${escapeHtml(texts.heading)}</h1>`,
-    `<p style="margin:0 0 24px;font-size:15px;line-height:23px;color:${MUTED};">${escapeHtml(texts.intro)}</p>`,
-    // Souhrn; celková cena oddělená výraznější linkou a větším písmem.
+    `<tr><td class="e-px" style="padding:36px ${PAD}px 8px;">`,
+    testNote ? `<p class="e-note" style="margin:0 0 24px;padding:10px 12px;background-color:#f6efe6;color:#784b37;font-size:13px;line-height:18px;">${escapeHtml(testNote)}</p>` : '',
+    `<h1 class="e-text e-h1" style="margin:0 0 10px;font-family:${SERIF};font-weight:normal;font-size:28px;line-height:34px;color:${GREEN};">${escapeHtml(texts.heading)}</h1>`,
+    `<p class="e-muted" style="margin:0 0 28px;font-size:15px;line-height:23px;color:${MUTED};">${escapeHtml(texts.intro)}</p>`,
+    // Souhrn; celková cena jen tučněji, o stupeň větší a s výraznější linkou nad sebou.
     table(
       summary.map((item, i) => row(item, i === 0)).join('') +
-        `<tr><td style="padding:14px 0 4px;border-top:2px solid ${ACCENT};color:${ACCENT};font-size:15px;line-height:24px;font-weight:bold;">${escapeHtml(total[0])}</td>` +
-        `<td align="right" style="padding:14px 0 4px 16px;border-top:2px solid ${ACCENT};color:${ACCENT};font-family:${SERIF};font-size:24px;line-height:30px;font-weight:bold;text-align:right;white-space:nowrap;">${escapeHtml(total[1])}</td></tr>`,
+        `<tr><td class="e-text e-total" style="padding:14px 0 0;border-top:1px solid ${GREEN};color:${GREEN};font-size:16px;line-height:22px;font-weight:bold;">${escapeHtml(total[0])}</td>` +
+        `<td class="e-text e-total" align="right" style="padding:14px 0 0 24px;border-top:1px solid ${GREEN};color:${GREEN};font-size:16px;line-height:22px;font-weight:bold;text-align:right;white-space:nowrap;">${escapeHtml(total[1])}</td></tr>`,
     ),
     // Platba jako jeden celek: nadpis → instrukce → QR → ruční údaje.
-    `<h2 style="margin:40px 0 8px;font-family:${SERIF};font-weight:normal;font-size:21px;line-height:28px;color:${ACCENT};">${escapeHtml(paymentHeading)}</h2>`,
-    `<p style="margin:0 0 20px;font-size:15px;line-height:23px;color:${ACCENT};">${escapeHtml(paymentNote)}</p>`,
+    `<h2 class="e-text" style="margin:44px 0 8px;font-family:${SERIF};font-weight:normal;font-size:21px;line-height:28px;color:${GREEN};">${escapeHtml(paymentHeading)}</h2>`,
+    `<p class="e-text" style="margin:0 0 22px;font-size:15px;line-height:23px;color:${GREEN};">${escapeHtml(paymentNote)}</p>`,
     matrix
-      ? `<p style="margin:0 0 20px;text-align:center;"><img src="cid:${QR_CONTENT_ID}" width="180" height="180" alt="${escapeHtml(i18n.t('email.qrAlt'))}" style="display:inline-block;width:180px;height:180px;border:0;"></p>`
+      ? `<p style="margin:0 0 22px;text-align:center;"><img src="cid:${QR_CONTENT_ID}" width="180" height="180" alt="${escapeHtml(i18n.t('email.qrAlt'))}" style="display:inline-block;width:180px;height:180px;border:0;"></p>`
       : '',
-    table(payment.map((item, i) => row(item, i === 0)).join('')),
-    `<p style="margin:36px 0 0;font-family:${SERIF};font-size:18px;line-height:26px;color:${ACCENT};text-align:center;">${escapeHtml(thanks)}</p>`,
+    // Účet a IBAN v jednom kuse (opisují se), popisky se případně zalomí.
+    table(payment.map((item, i) => row(item, i === 0, i === 1 || i === 2)).join('')),
+    `<p class="e-text" style="margin:40px 0 0;font-family:${SERIF};font-size:18px;line-height:26px;color:${GREEN};text-align:center;">${escapeHtml(thanks)}</p>`,
     '</td></tr>',
-    // Telefonický kontakt: tlačítko jen s obrysem, aby nepřebilo platební údaje.
-    `<tr><td align="center" style="padding:28px 28px 32px;text-align:center;">`,
-    `<div style="border-top:1px solid ${BORDER};padding-top:28px;">`,
-    `<p style="margin:0 0 4px;font-family:${SERIF};font-size:17px;line-height:24px;color:${ACCENT};">${escapeHtml(cta.heading)}</p>`,
-    `<p style="margin:0 0 16px;font-size:14px;line-height:21px;color:${MUTED};">${escapeHtml(cta.text)}</p>`,
-    `<table role="presentation" align="center" cellpadding="0" cellspacing="0" border="0" style="margin:0 auto;border-collapse:collapse;"><tr>`,
-    `<td align="center" style="border:1px solid ${ACCENT};padding:10px 20px;">`,
-    `<a href="${escapeHtml(business.phone.href)}" style="color:${ACCENT};font-size:15px;line-height:20px;font-weight:bold;text-decoration:none;white-space:nowrap;">`,
-    `<span aria-hidden="true">${PHONE_SYMBOL}</span>&nbsp; ${escapeHtml(cta.call)}</a>`,
-    '</td></tr></table>',
+    // Telefonický kontakt: plné tlačítko se sluchátkem. Světlá ikona je výchozí; tmavá se
+    // zobrazí jen tam, kde klient použije tmavý režim z <style> (tlačítko pak krémové).
+    `<tr><td class="e-px" align="center" style="padding:32px ${PAD}px 36px;text-align:center;">`,
+    `<div class="e-line" style="border-top:1px solid ${BORDER};padding-top:32px;">`,
+    `<p class="e-text" style="margin:0 0 4px;font-family:${SERIF};font-size:18px;line-height:25px;color:${GREEN};">${escapeHtml(cta.heading)}</p>`,
+    `<p class="e-muted" style="margin:0 0 18px;font-size:14px;line-height:21px;color:${MUTED};">${escapeHtml(cta.text)}</p>`,
+    table(
+      `<tr><td class="e-btn" align="center" bgcolor="${GREEN}" style="background-color:${GREEN};border-radius:6px;">` +
+        `<a href="${escapeHtml(business.phone.href)}" style="display:inline-block;padding:13px 26px;border-radius:6px;color:${WHITE};font-family:${SANS};font-size:15px;line-height:20px;font-weight:bold;text-decoration:none;white-space:nowrap;">` +
+        `<img class="e-ico" src="cid:${PHONE_ICON_CONTENT_ID}" width="18" height="18" alt="" style="display:inline-block;width:18px;height:18px;border:0;vertical-align:middle;">` +
+        `<img class="e-ico-dark" src="cid:${PHONE_ICON_DARK_CONTENT_ID}" width="18" height="18" alt="" style="display:none;width:0;height:0;max-height:0;border:0;vertical-align:middle;mso-hide:all;">` +
+        `<span style="color:${WHITE};vertical-align:middle;padding-left:10px;">${escapeHtml(cta.call)}</span></a></td></tr>`,
+      'align="center"',
+      'margin:0 auto;',
+    ),
     '</div>',
     '</td></tr>',
   ].join('');
 
+  // Patička: řádky položek oddělených tečkou (na mobilu pod sebou). Další řádek (např. odkaz na ubytovací řád) se
+  // přidá jako další pole položek – bez změny layoutu.
+  const footerRows: string[][] = [[escapeHtml(business.name), link(`mailto:${business.emailInfo}`, business.emailInfo), link(business.registerUrl, ico)]];
   const footer =
-    `<tr><td align="center" style="padding:20px 12px 0;font-size:12px;line-height:20px;color:${MUTED};text-align:center;">` +
-    `<span style="color:${ACCENT};">${escapeHtml(business.name)}</span>` +
-    ` &nbsp;·&nbsp; ${link(`mailto:${business.emailInfo}`, business.emailInfo, MUTED)}` +
-    ` &nbsp;·&nbsp; ${link(business.registerUrl, ico, MUTED)}` +
+    `<tr><td class="e-foot e-muted" align="center" style="padding:28px 16px 0;color:${MUTED};font-family:${SANS};font-size:13px;line-height:22px;text-align:center;">` +
+    footerRows
+      .map((items) => `<p style="margin:0;">${items.map((item) => `<span class="e-item" style="white-space:nowrap;">${item}</span>`).join(' <span class="e-sep" aria-hidden="true" style="padding:0 6px;">·</span> ')}</p>`)
+      .join('') +
     '</td></tr>';
 
   const html = [
     '<!doctype html>',
-    `<html lang="${locale === 'ua' ? 'uk' : locale}"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>${escapeHtml(texts.subject)}</title></head>`,
-    `<body style="margin:0;padding:0;background-color:${PAGE};font-family:${SANS};color:${ACCENT};">`,
-    `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" bgcolor="${PAGE}" style="background-color:${PAGE};"><tr><td align="center" style="padding:24px 12px 32px;">`,
-    `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="max-width:560px;font-family:${SANS};">`,
-    `<tr><td bgcolor="#ffffff" style="background-color:#ffffff;border:1px solid ${BORDER};">`,
+    `<html lang="${locale === 'ua' ? 'uk' : locale}"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">`,
+    '<meta name="color-scheme" content="light dark"><meta name="supported-color-schemes" content="light dark">',
+    '<meta name="format-detection" content="telephone=no, date=no, address=no, email=no">',
+    `<title>${escapeHtml(texts.subject)}</title>${STYLES}</head>`,
+    `<body class="e-page" style="margin:0;padding:0;background-color:${PAGE};font-family:${SANS};color:${GREEN};">`,
+    `<table class="e-page" role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" bgcolor="${PAGE}" style="background-color:${PAGE};"><tr><td class="e-outer" align="center" style="padding:32px 16px 40px;">`,
+    // Outlook (Windows) nezná max-width: pevná šířka přes podmíněnou tabulku.
+    `<!--[if mso]><table role="presentation" width="${WIDTH}" align="center" cellpadding="0" cellspacing="0" border="0"><tr><td><![endif]-->`,
+    `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="width:100%;max-width:${WIDTH}px;font-family:${SANS};">`,
+    `<tr><td class="e-card" bgcolor="${WHITE}" style="background-color:${WHITE};border:1px solid ${BORDER};">`,
     table(header + body),
     '</td></tr>',
     footer,
     '</table>',
+    '<!--[if mso]></td></tr></table><![endif]-->',
     '</td></tr></table>',
     '</body></html>',
   ].join('');
 
   const textLines = [
     ...(testNote ? [testNote, ''] : []),
-    `${business.name} · ${received}`,
+    `${business.name} · ${stay}`,
     '',
     texts.heading,
     '',
@@ -229,16 +305,14 @@ export function renderReservationEmail(
     cta.call,
     '',
     '--',
-    business.name,
-    business.emailInfo,
-    ico,
+    ...[[business.name, business.emailInfo, ico]].map((items) => items.join(' · ')),
   ];
 
   return { subject: texts.subject, html, text: textLines.join('\n'), attachments };
 }
 
 /** Potvrzení přijetí rezervace (texty v jazyce hosta). */
-export function renderConfirmationEmail(data: ReservationResponse, locale: Locale, options: EmailOptions): RenderedEmail {
+export function renderConfirmationEmail(data: ReservationResponse, locale: Locale, options: EmailOptions = {}): RenderedEmail {
   const i18n = createI18n(locale);
   const subject = `${options.test ? '[TEST] ' : ''}${i18n.t('email.confirmation.subject', { code: data.reservation.reservationCode })}`;
   return renderReservationEmail(data, locale, { subject, heading: i18n.t('reservation.success.title'), intro: i18n.t('email.confirmation.intro') }, options);
@@ -303,7 +377,7 @@ async function sendConfirmationFailureAlert(env: ConfirmationEnv, apiKey: string
 export async function sendReservationConfirmation(
   env: ConfirmationEnv,
   data: ReservationResponse,
-  context: { guestEmail: string; locale: Locale; createdAt: string },
+  context: { guestEmail: string; locale: Locale },
   deps: ConfirmationDeps & { now: () => Date },
 ): Promise<'sent' | 'skipped' | 'failed'> {
   const apiKey = env.RESEND_API_KEY?.trim();
@@ -319,7 +393,6 @@ export async function sendReservationConfirmation(
     }
     const business = businessIdentity();
     const email = renderConfirmationEmail(data, context.locale, {
-      createdAt: context.createdAt,
       business,
       ...(recipient.test ? { test: { originalRecipient: context.guestEmail } } : {}),
     });

@@ -6,7 +6,7 @@ import { inflateSync } from 'node:zlib';
 import { qrMatrix, QR_QUIET_MODULES } from '../lib/booking/qr.ts';
 import { createI18n, LOCALES, type Locale } from '../lib/i18n/index.ts';
 import { BUSINESS, businessIdentity, phoneNumber } from '../lib/business.ts';
-import { BRAND_ICON_CONTENT_ID, confirmationRecipient, confirmationSender, QR_CONTENT_ID, renderConfirmationEmail } from '../worker/booking/confirmation.ts';
+import { BRAND_MARK_CONTENT_ID, confirmationRecipient, PHONE_ICON_CONTENT_ID, PHONE_ICON_DARK_CONTENT_ID, confirmationSender, QR_CONTENT_ID, renderConfirmationEmail } from '../worker/booking/confirmation.ts';
 import { handleCreateReservation, type BookingDeps, type BookingEnv } from '../worker/booking/handler.ts';
 import type { ReservationResponse } from '../worker/booking/response.ts';
 import { SITEVERIFY_URL } from '../worker/booking/turnstile.ts';
@@ -296,7 +296,7 @@ test('obsah e-mailu: stejná data jako odpověď API (kód, cena, VS, splatnost,
   }
   for (const locale of LOCALES) {
     const i18n = createI18n(locale as Locale);
-    const email = renderConfirmationEmail(api, locale, { createdAt: NOW.toISOString() });
+    const email = renderConfirmationEmail(api, locale);
     const expected = [
       i18n.t('reservation.success.title'),
       i18n.t('email.confirmation.intro'),
@@ -319,10 +319,10 @@ test('obsah e-mailu: stejná data jako odpověď API (kód, cena, VS, splatnost,
       assert.ok(email.html.includes(escape(value)), `${locale} html: ${value}`);
     }
     assert.equal(email.subject, i18n.t('email.confirmation.subject', { code: api.reservation.reservationCode }));
-    // Bez skriptů, externích zdrojů a webfontů; jen inline styly. Obrázky jen cid:, odkazy jen
-    // tel:, mailto: a rejstřík provozovatele.
-    assert.doesNotMatch(email.html, /<script|<link|@import|<style|url\(/i);
-    assert.deepEqual([...email.html.matchAll(/src="([^"]*)"/g)].map((m) => m[1]), [`cid:${BRAND_ICON_CONTENT_ID}`, `cid:${QR_CONTENT_ID}`]);
+    // Bez skriptů, externích zdrojů a webfontů; vložené <style> jen jako vylepšení. Obrázky
+    // jen cid:, odkazy jen tel:, mailto: a rejstřík provozovatele.
+    assert.doesNotMatch(email.html, /<script|<link|@import|@font-face|url\(/i);
+    assert.deepEqual([...email.html.matchAll(/src="([^"]*)"/g)].map((m) => m[1]), [BRAND_MARK_CONTENT_ID, QR_CONTENT_ID, PHONE_ICON_CONTENT_ID, PHONE_ICON_DARK_CONTENT_ID].map((id) => `cid:${id}`));
     assert.deepEqual([...email.html.matchAll(/href="([^"]*)"/g)].map((m) => m[1]), ['tel:+420736125104', 'mailto:info@chalupavsetice.cz', BUSINESS.BUSINESS_REGISTER_URL]);
   }
   assert.ok(!mail.text.includes('<'), 'plaintext bez HTML');
@@ -343,9 +343,9 @@ test('HTML e-mailu escapuje hodnoty (adresa hosta v Preview poznámce)', () => {
     reservation: { reservationCode: '10013001', arrival: '2030-02-01', departure: '2030-02-04', nights: 3, guests: 2, totalCzk: 8970, status: 'pending_payment', paymentDueAt: '2030-01-11T22:59:59.000Z' },
     payment: { amountCzk: 8970, currency: 'CZK', accountNumber: FAKE_ACCOUNT_NUMBER, iban: FAKE_PAYMENT_IBAN, variableSymbol: '10013001', message: 'Rezervace 10013001', dueAt: '2030-01-11T22:59:59.000Z', spayd: `SPD*1.0*ACC:${FAKE_PAYMENT_IBAN}*AM:8970.00*CC:CZK*MSG:Rezervace 10013001*X-VS:10013001` },
   };
-  const email = renderConfirmationEmail(api, 'cs', { createdAt: NOW.toISOString(), test: { originalRecipient: '"<b>x</b>"@example.invalid' } });
+  const email = renderConfirmationEmail(api, 'cs', { test: { originalRecipient: '"<b>x</b>"@example.invalid' } });
   assert.ok(!email.html.includes('<b>x</b>') && email.html.includes('&lt;b&gt;x&lt;/b&gt;'));
-  assert.deepEqual(email.attachments.map((a) => a.contentId), [BRAND_ICON_CONTENT_ID, QR_CONTENT_ID]);
+  assert.deepEqual(email.attachments.map((a) => a.contentId), [BRAND_MARK_CONTENT_ID, PHONE_ICON_CONTENT_ID, PHONE_ICON_DARK_CONTENT_ID, QR_CONTENT_ID]);
 });
 
 /** Viditelný text HTML (bez značek, hodnot atributů a entit). */
@@ -357,51 +357,66 @@ const SAMPLE: ReservationResponse = {
   payment: { amountCzk: 8970, currency: 'CZK', accountNumber: FAKE_ACCOUNT_NUMBER, iban: FAKE_PAYMENT_IBAN, variableSymbol: '10013001', message: 'Rezervace 10013001', dueAt: '2030-01-11T22:59:59.000Z', spayd: `SPD*1.0*ACC:${FAKE_PAYMENT_IBAN}*AM:8970.00*CC:CZK*MSG:Rezervace 10013001*X-VS:10013001` },
 };
 
-test('hlavička: BUSINESS_NAME, ikona (cid) a datum vytvoření rezervace (ne termín pobytu) ve 4 jazycích', () => {
-  // Vytvořeno 10. 1. 2030 23:30 UTC = 11. 1. 2030 v Praze.
-  const createdAt = '2030-01-10T23:30:00.000Z';
+test('hlavička: BUSINESS_NAME, značka (cid) a termín pobytu (ne datum vytvoření) ve 4 jazycích', () => {
   for (const locale of LOCALES) {
     const i18n = createI18n(locale);
-    const email = renderConfirmationEmail(SAMPLE, locale, { createdAt });
-    const header = email.html.slice(0, email.html.indexOf('<h1'));
-    const received = i18n.t('email.header.received', { date: i18n.formatDeadlineDate(createdAt) });
-    assert.ok(header.includes(BUSINESS.BUSINESS_NAME), locale);
-    assert.ok(header.includes(`src="cid:${BRAND_ICON_CONTENT_ID}"`), locale);
-    assert.ok(header.includes(received) && received.includes(i18n.formatDeadlineDate('2030-01-11T12:00:00Z')), `${locale}: ${received}`);
-    assert.ok(email.text.includes(`${BUSINESS.BUSINESS_NAME} · ${received}`), locale);
+    const email = renderConfirmationEmail(SAMPLE, locale);
+    const header = email.html.slice(email.html.indexOf('<body'), email.html.indexOf('<h1'));
+    const stay = i18n.formatDateRange(SAMPLE.reservation.arrival, SAMPLE.reservation.departure);
+    const name = visibleText(header);
+    assert.ok(name.includes('Chalupa') && name.includes('Všetice'), locale);
+    assert.ok(header.includes(`src="cid:${BRAND_MARK_CONTENT_ID}"`), locale);
+    assert.ok(header.includes(stay), `${locale}: ${stay}`);
+    // Splatnost (11. 1. 2030) ani žádné jiné datum než termín v hlavičce není.
+    assert.ok(!header.includes(i18n.formatDeadlineDate(SAMPLE.reservation.paymentDueAt)), locale);
+    assert.ok(email.text.includes(`${BUSINESS.BUSINESS_NAME} · ${stay}`), locale);
   }
-  const icon = renderConfirmationEmail(SAMPLE, 'cs', { createdAt }).attachments.find((a) => a.contentId === BRAND_ICON_CONTENT_ID)!;
-  const png = Buffer.from(icon.content, 'base64');
-  assert.equal(png.subarray(1, 4).toString(), 'PNG');
-  assert.deepEqual([png.readUInt32BE(16), png.readUInt32BE(20)], [72, 72]);
+  // Značka: plná dlaždice bez průhlednosti (paleta bez tRNS).
+  const mark = Buffer.from(renderConfirmationEmail(SAMPLE, 'cs').attachments.find((a) => a.contentId === BRAND_MARK_CONTENT_ID)!.content, 'base64');
+  assert.equal(mark.subarray(1, 4).toString(), 'PNG');
+  assert.equal(mark.readUInt32BE(16), mark.readUInt32BE(20));
+  assert.equal(mark.indexOf('tRNS'), -1);
+});
+
+test('termín pobytu v hlavičce: kompaktně, den → měsíc → rok, jednoznačně přes měsíc i rok', () => {
+  const ranges = (from: string, to: string) => Object.fromEntries(LOCALES.map((l) => [l, createI18n(l).formatDateRange(from, to)]));
+  assert.deepEqual(ranges('2026-12-02', '2026-12-04'), { cs: '2.–4. 12. 2026', en: '2–4 Dec 2026', de: '2.–4.12.2026', ua: '02.–04.12.2026' });
+  assert.deepEqual(ranges('2026-11-29', '2026-12-02'), { cs: '29. 11. – 2. 12. 2026', en: '29 Nov – 2 Dec 2026', de: '29.11. – 2.12.2026', ua: '29.11. – 02.12.2026' });
+  assert.deepEqual(ranges('2026-12-30', '2027-01-02'), { cs: '30. 12. 2026 – 2. 1. 2027', en: '30 Dec 2026 – 2 Jan 2027', de: '30.12.2026 – 2.1.2027', ua: '30.12.2026 – 02.01.2027' });
 });
 
 test('platba: nadpis → instrukce (splatnost, celá částka, VS) → QR bez popisku → ruční údaje; telefonický kontakt a patička', () => {
-  const email = renderConfirmationEmail(SAMPLE, 'cs', { createdAt: NOW.toISOString() });
-  const order = ['Rezervace přijata', 'Celková cena', 'Platební údaje', 'Prosíme o úhradu celé částky do 11. 1. 2030. Pro platbu použijte variabilní symbol 10013001.', `cid:${QR_CONTENT_ID}`, 'Číslo účtu', 'Potřebujete se na něčem domluvit?', 'Rádi vám poradíme po telefonu.', 'Zavolat 736 125 104', 'info@chalupavsetice.cz', 'IČO: 23380811'];
+  const email = renderConfirmationEmail(SAMPLE, 'cs');
+  const order = ['Rezervace přijata', 'Celková cena', 'Platební údaje', 'Prosíme o úhradu celé částky do 11. 1. 2030. Pro platbu použijte variabilní symbol 10013001.', `cid:${QR_CONTENT_ID}`, 'Číslo účtu', 'Potřebujete se na něčem domluvit?', 'Rádi vám poradíme po telefonu.', 'Zavolat 736 125 104', 'info@chalupavsetice.cz', 'IČ: 23380811'];
   const positions = order.map((value) => email.html.indexOf(value));
   assert.ok(positions.every((p) => p >= 0), JSON.stringify(Object.fromEntries(order.map((v, i) => [v, positions[i]]))));
   assert.deepEqual([...positions].sort((a, b) => a - b), positions, 'pořadí sekcí');
   assert.ok(email.html.includes('alt="Platební QR kód"'));
   assert.ok(!email.html.includes('naskenujte') && !email.text.includes('QR Platba'), 'bez popisku „QR Platba – naskenujte…“');
   // CTA: kanonický tel: odkaz a zobrazení z konfigurace.
-  assert.match(email.html, /<a href="tel:\+420736125104"[^>]*>.*Zavolat 736 125 104<\/a>/);
-  // Patička: celé „IČO: …“ je odkaz přesně na BUSINESS_REGISTER_URL; žádné ARES ani viditelná URL.
-  assert.ok(email.html.includes(`<a href="${BUSINESS.BUSINESS_REGISTER_URL}" style="color:#5c6a63;text-decoration:underline;">IČO: ${BUSINESS.BUSINESS_ICO}</a>`));
+  assert.match(email.html, /<a href="tel:\+420736125104"[^>]*>(?:(?!<\/a>).)*Zavolat 736 125 104<\/span><\/a>/);
+  // Patička: celé „IČ: …“ je odkaz přesně na BUSINESS_REGISTER_URL; žádné ARES, „IČO“ ani viditelná URL.
+  assert.match(email.html, new RegExp(`<a href="${BUSINESS.BUSINESS_REGISTER_URL.replace(/[.]/g, '\\.')}"[^>]*>IČ: ${BUSINESS.BUSINESS_ICO}</a>`));
+  assert.ok(!email.html.includes('IČO') && !email.text.includes('IČO'));
+  // Tmavý režim jen jako vylepšení: e-mail ho deklaruje, výchozí (inline) stav je světlý
+  // a tmavá varianta ikony je bez podpory <style> skrytá.
+  assert.ok(email.html.includes('<meta name="color-scheme" content="light dark">'));
+  assert.match(email.html, /<img class="e-ico-dark" src="cid:telefon-tmavy"[^>]*style="display:none;/);
   assert.ok(email.html.includes(`href="mailto:${BUSINESS.BUSINESS_EMAIL_INFO}"`));
   const visible = visibleText(email.html);
-  assert.doesNotMatch(visible, /ARES|rejstřík|https?:\/\/|ares\.gov/i);
+  assert.doesNotMatch(visible, /ARES|rejstřík|ověřit|https?:\/\/|ares\.gov/i);
+  assert.ok(!visible.includes(BUSINESS.BUSINESS_EMAIL_RESERVATIONS), 'odesílatel rezervací se v patičce nezobrazuje');
   assert.doesNotMatch(email.text, /ARES|https?:\/\//i);
 });
 
-test('CTA, patička a plaintext ve 4 jazycích: kontakty z konfigurace (telefon, info e-mail, IČO)', () => {
+test('CTA, patička a plaintext ve 4 jazycích: kontakty z konfigurace (telefon, info e-mail, IČ)', () => {
   const business = businessIdentity();
   for (const locale of LOCALES) {
     const i18n = createI18n(locale);
-    const email = renderConfirmationEmail(SAMPLE, locale, { createdAt: NOW.toISOString() });
+    const email = renderConfirmationEmail(SAMPLE, locale);
     const phone = locale === 'cs' ? '736 125 104' : '+420 736 125 104';
     const call = i18n.t('email.cta.call', { phone });
-    for (const value of [i18n.t('email.cta.heading'), i18n.t('email.cta.text'), call, business.emailInfo, `IČO: ${business.ico}`, i18n.t('email.paymentNote', { date: i18n.formatDeadlineDate(SAMPLE.payment.dueAt), vs: '10013001' })]) {
+    for (const value of [i18n.t('email.cta.heading'), i18n.t('email.cta.text'), call, business.emailInfo, `IČ: ${business.ico}`, i18n.t('email.paymentNote', { date: i18n.formatDeadlineDate(SAMPLE.payment.dueAt), vs: '10013001' })]) {
       assert.ok(email.text.includes(value), `${locale} text: ${value}`);
       assert.ok(visibleText(email.html).includes(value), `${locale} html: ${value}`);
     }
@@ -411,7 +426,7 @@ test('CTA, patička a plaintext ve 4 jazycích: kontakty z konfigurace (telefon,
 });
 
 test('renderer nemá napevno údaje provozovatele: jiná konfigurace se propíše všude', () => {
-  for (const file of ['worker/booking/confirmation.ts', 'worker/email/brandIcon.ts']) {
+  for (const file of ['worker/booking/confirmation.ts', 'worker/email/icons.ts']) {
     const source = readFileSync(join(import.meta.dirname, '..', file), 'utf8');
     for (const value of ['Chalupa Všetice', 'chalupavsetice.cz', '736', '23380811', 'ares.gov.cz']) assert.ok(!source.includes(value), `${file}: ${value}`);
   }
@@ -419,7 +434,7 @@ test('renderer nemá napevno údaje provozovatele: jiná konfigurace se propíš
     BUSINESS_NAME: 'Testovací Roubenka', BUSINESS_PHONE: '+420000111222', BUSINESS_ICO: '00000019',
     BUSINESS_REGISTER_URL: 'https://rejstrik.invalid/00000019', BUSINESS_EMAIL_INFO: 'info@roubenka.invalid', BUSINESS_EMAIL_RESERVATIONS: 'rezervace@roubenka.invalid',
   });
-  const email = renderConfirmationEmail(SAMPLE, 'cs', { createdAt: NOW.toISOString(), business: other });
-  for (const value of ['Testovací Roubenka', 'tel:+420000111222', 'Zavolat 000 111 222', 'mailto:info@roubenka.invalid', 'href="https://rejstrik.invalid/00000019"', 'IČO: 00000019']) assert.ok(email.html.includes(value), value);
+  const email = renderConfirmationEmail(SAMPLE, 'cs', { business: other });
+  for (const value of ['Testovací Roubenka', 'tel:+420000111222', 'Zavolat 000 111 222', 'mailto:info@roubenka.invalid', 'href="https://rejstrik.invalid/00000019"', 'IČ: 00000019']) assert.ok(email.html.includes(value), value);
   for (const value of ['Chalupa Všetice', 'chalupavsetice', '736 125 104', '23380811']) assert.ok(!email.html.includes(value) && !email.text.includes(value), value);
 });

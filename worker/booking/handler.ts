@@ -152,7 +152,6 @@ async function createReservation(request: Request, env: BookingEnv, deps: Bookin
   if (idempotencyKey !== null && !IDEMPOTENCY_KEY.test(idempotencyKey)) return failure(400, 'invalid-idempotency-key');
 
   const now = deps.now();
-  const createdAt = now.toISOString();
   const today = todayInPrague(now);
   const validation = validateBooking(body, today);
   if (!validation.ok) return failure(422, 'invalid-request', { fields: validation.fields });
@@ -226,14 +225,14 @@ async function createReservation(request: Request, env: BookingEnv, deps: Bookin
           priceCzk: quote.totalCzk,
           idempotencyKey,
           requestHash: hash,
-          createdAt,
+          createdAt: now.toISOString(),
           locale: booking.locale,
         });
         deps.log('reservations: created');
         const body = reservationResponse(reservation, account);
         // Potvrzovací e-mail jen tady – po skutečně novém zápisu. Replay (níže i před Turnstile)
         // e-mail neposílá. Best-effort: nikdy nevyhazuje, odpověď 201 nemění.
-        const confirmation = sendReservationConfirmation(env, body, { guestEmail: booking.email, locale: booking.locale, createdAt }, deps);
+        const confirmation = sendReservationConfirmation(env, body, { guestEmail: booking.email, locale: booking.locale }, deps);
         if (deps.defer) deps.defer(confirmation);
         else await confirmation;
         return created(body);
