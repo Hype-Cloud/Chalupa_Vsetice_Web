@@ -158,7 +158,7 @@ test('ICS endpoint: platný token pending i paid → událost se správnými hla
     assert.equal(response.headers.get('content-type'), 'text/calendar; charset=utf-8');
     assert.equal(response.headers.get('cache-control'), 'private, no-store');
     assert.equal(response.headers.get('x-robots-tag'), 'noindex, nofollow');
-    assert.equal(response.headers.get('content-disposition'), 'attachment; filename="pobyt.ics"');
+    assert.equal(response.headers.get('content-disposition'), 'inline; filename="pobyt.ics"');
     assert.match(await response.text(), /^BEGIN:VCALENDAR\r\n/);
   }
   const head = await s.calendar(path, 'HEAD');

@@ -11,6 +11,8 @@
 // - Neplatný formát tokenu → 404 bez dotazu do D1. Neznámý token i zrušená rezervace → 404
 //   (zrušení se navenek neliší od neexistujícího odkazu). pending_payment i paid → událost.
 // - Žádné úložiště souborů: ICS se generuje při každém požadavku.
+// - Content-Disposition: inline (Safari na iOS nabídne přidání události přímo, ostatní prohlížeče
+//   soubor stáhnou); filename zůstává, aby se stažený soubor nejmenoval podle tokenu.
 
 import { zonedDateTime, type IsoDate } from '../../lib/availability/dates.ts';
 import { STAY_TIMES } from '../../lib/booking/rules.ts';
@@ -113,7 +115,7 @@ export async function handleCalendar(request: Request, env: CalendarEnv, deps: {
     if (!row || (row.status !== 'pending_payment' && row.status !== 'paid')) return notFound();
     const body = await buildStayCalendar(row, token, deps.now());
     return new Response(request.method === 'HEAD' ? null : body, {
-      headers: { 'content-type': 'text/calendar; charset=utf-8', 'content-disposition': 'attachment; filename="pobyt.ics"', ...HEADERS },
+      headers: { 'content-type': 'text/calendar; charset=utf-8', 'content-disposition': 'inline; filename="pobyt.ics"', ...HEADERS },
     });
   } catch {
     // Do logu jen druh chyby – nikdy token ani URL.

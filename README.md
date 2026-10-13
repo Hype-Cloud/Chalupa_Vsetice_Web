@@ -531,11 +531,16 @@ při každém požadavku.
 - **Obsah bez citlivých údajů:** žádné jméno, e-mail, telefon, poznámka, cena, účet, IBAN, SPAYD,
   VS, kód rezervace ani interní id.
 - **HTTP:** `GET`/`HEAD`; `Content-Type: text/calendar; charset=utf-8`,
-  `Content-Disposition: attachment; filename="pobyt.ics"`, `Cache-Control: private, no-store`,
+  `Content-Disposition: inline; filename="pobyt.ics"`, `Cache-Control: private, no-store`,
   `X-Robots-Tag: noindex, nofollow`. Neplatný tvar tokenu → 404 bez dotazu do D1; neznámý token
   i **zrušená rezervace → 404** (zrušení se navenek neliší od neexistujícího odkazu, nic
   neprozrazuje); `pending_payment` i `paid` → událost; bez D1 → 503. Worker cestu obsluhuje díky
   `assets.run_worker_first` (`/api/*`, `/calendar/*`).
+- **`inline`, ne `attachment`:** prohlížeč s nativní obsluhou `text/calendar` (Safari na iOS/iPadOS)
+  může nabídnout přidání události přímo; ostatní (Chrome na všech platformách, obvykle i Safari
+  na macOS) soubor stáhnou a událost se přidá otevřením staženého souboru. Automatické otevření
+  kalendáře hlavička nezaručuje. `filename` zůstává, aby se stažený soubor nejmenoval podle
+  tokenu. Jde o jednorázový import (`https://`), ne o odběr kalendáře (`webcal://`).
 - **Capability URL:** kdokoli s odkazem stáhne událost – proto náhodný token a minimální obsah.
   Kód tokenu ani URL neloguje. Pozor: Workers Logs (`invocation_logs`) ukládají URL požadavku
   včetně cesty; `redact_query_string` cestu neskrývá. Logy jsou přístupné jen v účtu Cloudflare.
