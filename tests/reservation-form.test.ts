@@ -20,6 +20,7 @@ import {
 } from '../components/booking/reservation.ts';
 import { BOOKING_DISABLED, fetchBookingConfig } from '../components/booking/bookingConfig.ts';
 import { bookingConfig, handleBookingConfig } from '../worker/booking/config.ts';
+import { BOOKING_HORIZON_DAYS, CAPACITY, MAX_NIGHTS, MIN_NIGHTS, PRICE_PER_NIGHT } from '../lib/booking/rules.ts';
 import { handleCreateReservation, type BookingEnv } from '../worker/booking/handler.ts';
 import { SITEVERIFY_URL } from '../worker/booking/turnstile.ts';
 import { TurnstileError } from '../components/booking/invisibleTurnstile.ts';
@@ -400,20 +401,53 @@ test('POST: 422 s poli, neplatný Turnstile a vypnutý endpoint → mapované st
 
 // --- GET /api/booking-config ---
 
-test('booking-config: jen bookingEnabled a veřejný site key; produkce vypnutá', async () => {
-  assert.deepEqual(bookingConfig({}), { bookingEnabled: false, turnstileSiteKey: null });
-  assert.deepEqual(bookingConfig({ TURNSTILE_SITE_KEY: '1x00000000000000000000BB' }), { bookingEnabled: false, turnstileSiteKey: null }, 'bez zapnuté rezervace žádný klíč');
-  assert.deepEqual(bookingConfig({ BOOKING_API_ENABLED: 'TRUE', TURNSTILE_SITE_KEY: 'x' }), { bookingEnabled: false, turnstileSiteKey: null });
-  assert.deepEqual(bookingConfig({ BOOKING_API_ENABLED: 'true', TURNSTILE_SITE_KEY: '1x00000000000000000000BB' }), { bookingEnabled: true, turnstileSiteKey: '1x00000000000000000000BB' });
-  assert.deepEqual(bookingConfig({ BOOKING_API_ENABLED: 'true' }), { bookingEnabled: true, turnstileSiteKey: null });
+test('booking-config: bookingEnabled a veřejný site key beze změny; produkce vypnutá', async () => {
+  // Původní pole – stejné chování jako před přidáním rules.
+  const access = (env: Parameters<typeof bookingConfig>[0]) => {
+    const { rules: _rules, ...rest } = bookingConfig(env);
+    return rest;
+  };
+  assert.deepEqual(access({}), { bookingEnabled: false, turnstileSiteKey: null });
+  assert.deepEqual(access({ TURNSTILE_SITE_KEY: '1x00000000000000000000BB' }), { bookingEnabled: false, turnstileSiteKey: null }, 'bez zapnuté rezervace žádný klíč');
+  assert.deepEqual(access({ BOOKING_API_ENABLED: 'TRUE', TURNSTILE_SITE_KEY: 'x' }), { bookingEnabled: false, turnstileSiteKey: null });
+  assert.deepEqual(access({ BOOKING_API_ENABLED: 'true', TURNSTILE_SITE_KEY: '1x00000000000000000000BB' }), { bookingEnabled: true, turnstileSiteKey: '1x00000000000000000000BB' });
+  assert.deepEqual(access({ BOOKING_API_ENABLED: 'true' }), { bookingEnabled: true, turnstileSiteKey: null });
 
   const response = handleBookingConfig(new Request('https://x.invalid/api/booking-config'), { BOOKING_API_ENABLED: 'true', TURNSTILE_SITE_KEY: '1x00000000000000000000BB', ...({ TURNSTILE_SECRET_KEY: 'TAJNE' } as object) });
   assert.equal(response.status, 200);
   assert.equal(response.headers.get('cache-control'), 'no-store');
   const body = (await response.json()) as Record<string, unknown>;
-  assert.deepEqual(Object.keys(body).sort(), ['bookingEnabled', 'turnstileSiteKey'], 'žádné další interní nastavení');
+  assert.deepEqual(Object.keys(body).sort(), ['bookingEnabled', 'rules', 'turnstileSiteKey'], 'žádné další interní nastavení');
   assert.ok(!JSON.stringify(body).includes('TAJNE'));
   assert.equal(handleBookingConfig(new Request('https://x.invalid/api/booking-config', { method: 'POST' }), {}).status, 405);
+});
+
+test('booking-config: veřejná pravidla (rules) = konstanty lib/booking/rules.ts, i při vypnuté rezervaci', async () => {
+  const expected = { capacity: CAPACITY, minNights: MIN_NIGHTS, maxNights: MAX_NIGHTS, bookingHorizonDays: BOOKING_HORIZON_DAYS, basePricePerNightCzk: PRICE_PER_NIGHT };
+  for (const env of [{}, { BOOKING_API_ENABLED: 'true', TURNSTILE_SITE_KEY: '1x00000000000000000000BB' }, { BOOKING_API_ENABLED: 'false' }]) {
+    assert.deepEqual(bookingConfig(env).rules, expected, JSON.stringify(env));
+    const response = handleBookingConfig(new Request('https://x.invalid/api/booking-config'), env);
+    assert.equal(response.status, 200);
+    assert.equal(response.headers.get('cache-control'), 'no-store');
+    assert.deepEqual(((await response.json()) as { rules: unknown }).rules, expected);
+  }
+  // HEAD a 405 beze změny.
+  assert.equal(handleBookingConfig(new Request('https://x.invalid/api/booking-config', { method: 'HEAD' }), {}).status, 200);
+  assert.equal(handleBookingConfig(new Request('https://x.invalid/api/booking-config', { method: 'PUT' }), {}).headers.get('allow'), 'GET, HEAD');
+  // Celá čísla, konzistentní rozsah.
+  for (const value of Object.values(expected)) assert.ok(Number.isInteger(value) && value > 0);
+  assert.ok(expected.minNights <= expected.maxNights);
+  // Hodnoty nemovitosti se v endpointu neopakují jako nové literály – jen import z rules.ts.
+  const code = readFileSync(new URL('../worker/booking/config.ts', import.meta.url), 'utf8').replace(/\/\*[\s\S]*?\*\/|\/\/.*$/gm, '');
+  for (const value of new Set(Object.values(expected))) assert.doesNotMatch(code, new RegExp(`(?<![\\w.])${value}(?![\\w.])`), `literál ${value} v config.ts`);
+  assert.match(code, /from '\.\.\/\.\.\/lib\/booking\/rules\.ts'/);
+});
+
+test('booking-config ve frontendu: nová odpověď s rules dává stejný výsledek jako dosud (klient pole rules ignoruje)', async () => {
+  const respond = (body: unknown) => (async () => new Response(JSON.stringify(body), { status: 200 })) as unknown as typeof fetch;
+  const enabled = bookingConfig({ BOOKING_API_ENABLED: 'true', TURNSTILE_SITE_KEY: 'site' });
+  assert.deepEqual(await fetchBookingConfig(respond(enabled)), { bookingEnabled: true, turnstileSiteKey: 'site' });
+  assert.deepEqual(await fetchBookingConfig(respond(bookingConfig({}))), BOOKING_DISABLED);
 });
 
 test('booking-config ve frontendu: chyba nebo neúplná odpověď = formulář vypnutý (fallback na e-chalupy)', async () => {

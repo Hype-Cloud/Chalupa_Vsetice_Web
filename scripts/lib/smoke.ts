@@ -117,10 +117,17 @@ export async function runSmoke(baseUrl: URL, env: SmokeEnv, fetchFn: typeof fetc
   await check(env === 'production' ? 'GET /api/booking-config – formulář v produkci vypnutý' : 'GET /api/booking-config – formulář zapnutý s veřejným site key', async () => {
     const response = await request('/api/booking-config');
     const { body } = await jsonOf(response);
-    const config = body as { bookingEnabled?: unknown; turnstileSiteKey?: unknown } | undefined;
+    const config = body as { bookingEnabled?: unknown; turnstileSiteKey?: unknown; rules?: unknown } | undefined;
     if (response.status !== 200 || !apiHeaders(response) || !config) return { ok: false, detail: `HTTP ${response.status}` };
     const keys = Object.keys(config).sort().join(',');
-    if (keys !== 'bookingEnabled,turnstileSiteKey') return { ok: false, detail: 'neočekávaná pole v odpovědi' };
+    if (keys !== 'bookingEnabled,rules,turnstileSiteKey') return { ok: false, detail: 'neočekávaná pole v odpovědi' };
+    // Veřejná pravidla nemovitosti (bez konkrétních hodnot – ty patří konfiguraci, ne smoke testu).
+    const rules = config.rules as Record<string, unknown> | null;
+    const ruleKeys = ['basePricePerNightCzk', 'bookingHorizonDays', 'capacity', 'maxNights', 'minNights'];
+    const positive = (value: unknown): value is number => typeof value === 'number' && Number.isInteger(value) && value > 0;
+    if (!rules || typeof rules !== 'object' || Object.keys(rules).sort().join(',') !== ruleKeys.join(',') || !ruleKeys.every((k) => positive(rules[k])) || (rules.minNights as number) > (rules.maxNights as number)) {
+      return { ok: false, detail: 'neplatná pravidla (rules)' };
+    }
     if (env === 'production') {
       const ok = config.bookingEnabled === false && config.turnstileSiteKey === null;
       return { ok, detail: ok ? 'bookingEnabled false' : 'formulář je v produkci zapnutý!' };
