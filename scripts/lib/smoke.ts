@@ -142,6 +142,15 @@ export async function runSmoke(baseUrl: URL, env: SmokeEnv, fetchFn: typeof fetc
     return { ok: response.status === 404 && !text.includes('BEGIN:VCALENDAR'), detail: `HTTP ${response.status}` };
   });
 
+  // Odkaz do kalendáře obsluhuje Worker (run_worker_first), ne statický 404: neznámý token v
+  // platném tvaru → 404 s hlavičkami Workeru (noindex, no-store).
+  await check('GET /calendar/<neznámý token>.ics → 404 z Workeru', async () => {
+    const response = await request(`/calendar/${'0'.repeat(43)}.ics`);
+    const text = await response.text();
+    const ok = response.status === 404 && response.headers.get('x-robots-tag') === 'noindex, nofollow' && response.headers.get('cache-control') === 'private, no-store' && !text.includes('BEGIN:VCALENDAR');
+    return { ok, detail: `HTTP ${response.status}` };
+  });
+
   await check('GET /api/neexistuje → 404 JSON', async () => {
     const response = await request('/api/neexistuje');
     const { body } = await jsonOf(response);

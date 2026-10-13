@@ -18,6 +18,7 @@ import { json } from '../http.ts';
 import { secretEquals, sha256 } from '../secrets.ts';
 import { databaseEnvironment, DuplicateError, findByIdempotencyKey, insertReservation, NightsTakenError, ReservationCodesExhaustedError, type ReservationSummary, type StoredContact } from './db.ts';
 import { sendReservationConfirmation, type ConfirmationEnv, type ConfirmationTarget } from './confirmation.ts';
+import { calendarOrigin, newCalendarToken } from './calendar.ts';
 import { checkExternalAvailability } from './external.ts';
 import { reservationResponse, type ReservationResponse } from './response.ts';
 import { PricingDataError, quoteStay, type Quote } from './pricing.ts';
@@ -152,6 +153,8 @@ async function createReservation(request: Request, env: BookingEnv, deps: Bookin
   if (idempotencyKey !== null && !IDEMPOTENCY_KEY.test(idempotencyKey)) return failure(400, 'invalid-idempotency-key');
 
   const now = deps.now();
+  // Origin odkazu do kalendáře: produkce vždy hlavní web, Preview origin požadavku.
+  const calendarBase = calendarOrigin(env.BOOKING_ENV, request.url);
   const today = todayInPrague(now);
   const validation = validateBooking(body, today);
   if (!validation.ok) return failure(422, 'invalid-request', { fields: validation.fields });
@@ -174,7 +177,7 @@ async function createReservation(request: Request, env: BookingEnv, deps: Bookin
     // ještě před Turnstile, protože token je jednorázový.
     if (idempotencyKey) {
       const existing = await findByIdempotencyKey(db, idempotencyKey);
-      if (existing) return replay(existing, hash, account, env, deps);
+      if (existing) return replay(existing, hash, account, calendarBase, env, deps);
     }
 
     const human = await verifyTurnstile(turnstileSecret, turnstileToken, { remoteIp, idempotencyKey }, deps.fetch);
@@ -210,6 +213,8 @@ async function createReservation(request: Request, env: BookingEnv, deps: Bookin
 
     for (let attempt = 1; ; attempt++) {
       const id = deps.randomUUID();
+      // Neveřejný token odkazu do kalendáře – oddělený od interního id (calendar.ts).
+      const calendarToken = newCalendarToken();
       try {
         const reservation = await insertReservation(db, {
           id,
@@ -227,9 +232,10 @@ async function createReservation(request: Request, env: BookingEnv, deps: Bookin
           requestHash: hash,
           createdAt: now.toISOString(),
           locale: booking.locale,
+          calendarToken,
         });
         deps.log('reservations: created');
-        const body = reservationResponse(reservation, account);
+        const body = reservationResponse(reservation, account, calendarBase);
         // Potvrzovací e-mail až po skutečném zápisu; best-effort, odpověď 201 nemění.
         await scheduleConfirmation(env, deps, body, { reservationId: id, guestEmail: booking.email, locale: booking.locale });
         return created(body);
@@ -246,9 +252,9 @@ async function createReservation(request: Request, env: BookingEnv, deps: Bookin
         if (error instanceof DuplicateError && error.column === 'idempotency_key' && idempotencyKey) {
           // Souběžný požadavek se stejným klíčem byl rychlejší.
           const existing = await findByIdempotencyKey(db, idempotencyKey);
-          if (existing) return replay(existing, hash, account, env, deps);
+          if (existing) return replay(existing, hash, account, calendarBase, env, deps);
         }
-        if (error instanceof DuplicateError && (error.column === 'id' || error.column === 'ical_uid') && attempt < ID_ATTEMPTS) continue;
+        if (error instanceof DuplicateError && (error.column === 'id' || error.column === 'ical_uid' || error.column === 'calendar_token') && attempt < ID_ATTEMPTS) continue;
         throw error;
       }
     }
@@ -281,12 +287,13 @@ async function replay(
   existing: ReservationSummary & { requestHash: string | null; stored: StoredContact },
   hash: string,
   account: PaymentAccount,
+  calendarBase: string,
   env: BookingEnv,
   deps: BookingDeps,
 ): Promise<Response> {
   if (existing.requestHash !== hash) return failure(422, 'idempotency-key-reused');
   const { requestHash: _, stored, ...reservation } = existing;
-  const body = reservationResponse(reservation, account);
+  const body = reservationResponse(reservation, account, calendarBase);
   if (reservation.status === 'pending_payment' && stored.locale) {
     await scheduleConfirmation(env, deps, body, { reservationId: stored.reservationId, guestEmail: stored.email, locale: stored.locale });
   }

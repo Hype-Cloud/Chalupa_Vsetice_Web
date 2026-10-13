@@ -70,7 +70,7 @@ test('produkce: všechny kontroly projdou, rezervační POST je vypnutý (404)',
   const { fetchFn } = workerFetch(PRODUCTION);
   const checks = await runSmoke(BASE, 'production', fetchFn);
   assert.deepEqual(checks.filter((c) => !c.ok), [], formatSmoke(checks).text);
-  assert.equal(checks.length, 9);
+  assert.equal(checks.length, 10);
   assert.equal(byName(checks, '/api/booking-config').detail, 'bookingEnabled false');
   assert.equal(byName(checks, 'POST /api/reservations').detail, 'vypnutý');
   assert.match(byName(checks, 'POST /api/quote – cenová').detail!, /: 5980 Kč \(nightly\)$/);

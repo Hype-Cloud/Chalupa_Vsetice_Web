@@ -34,6 +34,8 @@ export interface NewReservation {
   createdAt: string;
   /** Jazyk webu při rezervaci (jazyk e-mailů); u starších volání/rezervací chybí. */
   locale?: Locale | null;
+  /** Neveřejný token odkazu do kalendáře (calendar.ts); u starších volání chybí. */
+  calendarToken?: string | null;
 }
 
 /** Veřejně bezpečný souhrn rezervace (bez interního ID, jména, kontaktů a poznámky). */
@@ -49,6 +51,11 @@ export interface ReservationSummary {
   status: ReservationStatus;
   /** Splatnost platby (ISO 8601, UTC). */
   paymentDueAt: string;
+  /**
+   * Token odkazu do kalendáře – jen pro složení calendarUrl na serveru (response.ts), nikdy
+   * samostatně do API ani logu. Rezervace před migrací 0010 ho nemají (null).
+   */
+  calendarToken: string | null;
 }
 
 /** Některá z nocí už patří jiné rezervaci. */
@@ -69,7 +76,7 @@ export class ReservationCodesExhaustedError extends Error {
 
 /** Porušení UNIQUE u jiného sloupce (kolize ID, souběžný požadavek se stejným klíčem). */
 export class DuplicateError extends Error {
-  readonly column: 'public_code' | 'idempotency_key' | 'ical_uid' | 'id' | 'variable_symbol';
+  readonly column: 'public_code' | 'idempotency_key' | 'ical_uid' | 'id' | 'variable_symbol' | 'calendar_token';
   constructor(column: DuplicateError['column']) {
     super(`duplicate-${column}`);
     this.name = 'DuplicateError';
@@ -89,7 +96,7 @@ function translateError(error: unknown): unknown {
   if (message.includes('CHECK constraint failed') && message.includes('reservation_code_limit')) return new ReservationCodesExhaustedError();
   if (!message.includes('UNIQUE constraint failed')) return error;
   if (message.includes('reserved_nights.night')) return new NightsTakenError();
-  for (const column of ['public_code', 'idempotency_key', 'ical_uid', 'variable_symbol', 'id'] as const) {
+  for (const column of ['public_code', 'idempotency_key', 'ical_uid', 'variable_symbol', 'calendar_token', 'id'] as const) {
     if (message.includes(`reservations.${column}`)) return new DuplicateError(column);
   }
   return error;
@@ -115,11 +122,11 @@ export async function insertReservation(db: D1Database, r: NewReservation): Prom
     db
       .prepare(
         `INSERT INTO reservations (id, public_code, arrival, departure, guests, first_name, last_name, phone, email, price_czk,
-           variable_symbol, status, ical_uid, idempotency_key, request_hash, created_at, updated_at, note, payment_due_at, locale)
+           variable_symbol, status, ical_uid, idempotency_key, request_hash, created_at, updated_at, note, payment_due_at, locale, calendar_token)
          VALUES (?1, ${code}, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9,
-           ${code}, 'pending_payment', ?10, ?11, ?12, ?13, ?13, ?14, ?15, ?16)`,
+           ${code}, 'pending_payment', ?10, ?11, ?12, ?13, ?13, ?14, ?15, ?16, ?19)`,
       )
-      .bind(r.id, r.arrival, r.departure, r.guests, r.firstName, r.lastName, r.phone, r.email, r.priceCzk, r.icalUid, r.idempotencyKey, r.requestHash, r.createdAt, r.note ?? null, dueAt, r.locale ?? null, reservationCodePrefix(day), day),
+      .bind(r.id, r.arrival, r.departure, r.guests, r.firstName, r.lastName, r.phone, r.email, r.priceCzk, r.icalUid, r.idempotencyKey, r.requestHash, r.createdAt, r.note ?? null, dueAt, r.locale ?? null, reservationCodePrefix(day), day, r.calendarToken ?? null),
     // Jeden řádek na noc; PRIMARY KEY (night) odmítne noc, kterou už má jiná rezervace.
     ...nights.map((night) => db.prepare('INSERT INTO reserved_nights (night, reservation_id) VALUES (?1, ?2)').bind(night, r.id)),
     db.prepare(`SELECT public_code, variable_symbol FROM reservations WHERE id = ?1`).bind(r.id),
@@ -132,7 +139,7 @@ export async function insertReservation(db: D1Database, r: NewReservation): Prom
   }
   const row = results[results.length - 1].results[0] as { public_code: string; variable_symbol: string } | undefined;
   if (!row) throw new Error('reservation-not-readable');
-  return { code: row.public_code, arrival: r.arrival, departure: r.departure, guests: r.guests, priceCzk: r.priceCzk, variableSymbol: row.variable_symbol, status: 'pending_payment', paymentDueAt: dueAt };
+  return { code: row.public_code, arrival: r.arrival, departure: r.departure, guests: r.guests, priceCzk: r.priceCzk, variableSymbol: row.variable_symbol, status: 'pending_payment', paymentDueAt: dueAt, calendarToken: r.calendarToken ?? null };
 }
 
 /** Údaje existující rezervace jen pro server (replay potvrzovacího e-mailu); nikdy do API ani logu. */
@@ -149,11 +156,11 @@ export async function findByIdempotencyKey(
 ): Promise<(ReservationSummary & { requestHash: string | null; stored: StoredContact }) | null> {
   const row = await db
     .prepare(
-      `SELECT id, email, locale, public_code, arrival, departure, guests, price_czk, variable_symbol, status, request_hash, created_at, payment_due_at
+      `SELECT id, email, locale, public_code, arrival, departure, guests, price_czk, variable_symbol, status, request_hash, created_at, payment_due_at, calendar_token
        FROM reservations WHERE idempotency_key = ?1`,
     )
     .bind(key)
-    .first<{ id: string; email: string; locale: string | null; public_code: string; arrival: string; departure: string; guests: number; price_czk: number; variable_symbol: string; status: ReservationStatus; request_hash: string | null; created_at: string; payment_due_at: string | null }>();
+    .first<{ id: string; email: string; locale: string | null; public_code: string; arrival: string; departure: string; guests: number; price_czk: number; variable_symbol: string; status: ReservationStatus; request_hash: string | null; created_at: string; payment_due_at: string | null; calendar_token: string | null }>();
   if (!row) return null;
   return {
     stored: { reservationId: row.id, email: row.email, locale: isLocale(row.locale) ? row.locale : null },
@@ -166,6 +173,7 @@ export async function findByIdempotencyKey(
     status: row.status,
     // Rezervace z doby před migrací 0008 splatnost uloženou nemají – stejné pravidlo z created_at.
     paymentDueAt: row.payment_due_at ?? paymentDueAt(row.created_at),
+    calendarToken: row.calendar_token,
     requestHash: row.request_hash,
   };
 }

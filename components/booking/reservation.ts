@@ -71,7 +71,20 @@ export interface ReservationConfirmation {
   totalCzk: number;
   /** Splatnost (ISO 8601, UTC). */
   paymentDueAt: string;
+  /** Odkaz „přidat do kalendáře“ ze serveru (frontend ho nikdy neskládá); jinak null. */
+  calendarUrl: string | null;
   payment: PaymentInstructions;
+}
+
+/** Jen serverová URL tvaru http(s)://…/calendar/<token>.ics; cokoli jiného = bez odkazu. */
+function calendarHref(value: unknown): string | null {
+  if (typeof value !== 'string') return null;
+  try {
+    const url = new URL(value);
+    return (url.protocol === 'https:' || url.protocol === 'http:') && /^\/calendar\/[A-Za-z0-9_-]{43}\.ics$/.test(url.pathname) && !url.search && !url.hash ? url.href : null;
+  } catch {
+    return null;
+  }
 }
 
 export type SubmitResult =
@@ -157,6 +170,8 @@ export function parseConfirmation(value: unknown): ReservationConfirmation | nul
     guests: r.guests as number,
     totalCzk: r.totalCzk as number,
     paymentDueAt: r.paymentDueAt,
+    // Starší rezervace (bez tokenu) nebo starší server: calendarUrl chybí/null → termín bez odkazu.
+    calendarUrl: calendarHref(r.calendarUrl),
     payment: {
       amountCzk: p.amountCzk as number,
       currency: 'CZK',

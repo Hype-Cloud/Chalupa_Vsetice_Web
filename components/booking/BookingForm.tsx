@@ -148,7 +148,10 @@ export function BookingSuccess({ reservation }: { reservation: ReservationConfir
       <p className="price booking-success-title" tabIndex={-1} ref={heading}>{t('reservation.success.title')}</p>
       <p className="booking-success-email">{t('reservation.success.emailInfo')}</p>
       <dl className="estimate">
-        <div><dt>{t('reservation.success.stay')}</dt><dd>{formatDate(reservation.arrival)} – {formatDate(reservation.departure)}</dd></div>
+        {/* Termín = odkaz do kalendáře ze serverové calendarUrl (stejná jako v e-mailu); splatnost bez odkazu. */}
+        <div><dt>{t('reservation.success.stay')}</dt><dd>{reservation.calendarUrl
+          ? <a className="booking-success-calendar" href={reservation.calendarUrl}>{formatDate(reservation.arrival)} – {formatDate(reservation.departure)}</a>
+          : <>{formatDate(reservation.arrival)} – {formatDate(reservation.departure)}</>}</dd></div>
         <div><dt>{t('reservation.success.nights')}</dt><dd>{plural('booking.nights', reservation.nights)}</dd></div>
         <div><dt>{t('reservation.success.guests')}</dt><dd>{plural('booking.guests', reservation.guests)}</dd></div>
         <div><dt>{t('reservation.payment.due')}</dt><dd>{formatDeadlineDate(reservation.paymentDueAt)}</dd></div>
