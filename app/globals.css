@@ -233,6 +233,7 @@ header nav a, .nav-cta { white-space:nowrap; }
 @media (prefers-reduced-motion: reduce) { .booking-success { animation:none; } }
 .booking-success-title { margin:0 0 4px; font-size:30px; line-height:1.25; text-align:center; text-wrap:balance; outline:none; }
 .booking-success .estimate { margin-top:0; padding:14px 0; gap:8px; border-bottom:1px solid rgba(219,232,189,.2); }
+.booking-success-calendar { text-decoration:underline; text-underline-offset:3px; text-decoration-thickness:1px; }
 .booking-success-note { margin:20px 0 0; font-size:13px; line-height:1.6; color:#b9c9be; text-align:center; }
 .booking-success-email { margin:0 0 14px; font-size:13px; line-height:1.5; color:#b9c9be; text-align:center; text-wrap:balance; }
 .booking-payment { margin-top:18px; }

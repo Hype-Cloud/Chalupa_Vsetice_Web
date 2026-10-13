@@ -66,11 +66,15 @@ test('úspěšná rezervace: 201, kód DDMMYYNN = VS, cena ze serveru, splatnost
   assert.equal(response.status, 201);
   assert.equal(response.headers.get('cache-control'), 'no-store');
   const body = await read(response);
+  // Odkaz do kalendáře z neveřejného tokenu (ne z kódu, VS ani interního id).
+  const token = (await t.db.prepare('SELECT calendar_token FROM reservations').first<{ calendar_token: string }>())!.calendar_token;
+  assert.match(token, /^[A-Za-z0-9_-]{43}$/);
   // NOW = 2030-01-10T10:00Z → 10. 1. 2030 v Praze, první rezervace dne.
   assert.deepEqual(body, {
     reservation: {
       reservationCode: '10013001', arrival: '2030-02-01', departure: '2030-02-04', nights: 3, guests: 2, totalCzk: 8970,
       status: 'pending_payment', paymentDueAt: '2030-01-11T22:59:59.000Z',
+      calendarUrl: `https://preview.test.invalid/calendar/${token}.ics`,
     },
     payment: {
       amountCzk: 8970, currency: 'CZK', accountNumber: FAKE_ACCOUNT_NUMBER, iban: FAKE_PAYMENT_IBAN, variableSymbol: '10013001',

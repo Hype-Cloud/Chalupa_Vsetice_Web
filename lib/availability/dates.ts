@@ -58,3 +58,25 @@ export function daysInMonth(monthStart: IsoDate): number {
   const [year, month] = monthStart.split('-').map(Number);
   return new Date(Date.UTC(year, month, 0)).getUTCDate();
 }
+
+/** Posun pásma `timeZone` proti UTC (ms) v okamžiku `instant`. */
+function zoneOffsetMs(instant: number, timeZone: string): number {
+  const parts = Object.fromEntries(
+    new Intl.DateTimeFormat('en-US', { timeZone, hourCycle: 'h23', year: 'numeric', month: 'numeric', day: 'numeric', hour: 'numeric', minute: 'numeric', second: 'numeric' })
+      .formatToParts(new Date(instant))
+      .map((part) => [part.type, Number(part.value)]),
+  );
+  return Date.UTC(parts.year, parts.month - 1, parts.day, parts.hour, parts.minute, parts.second) - Math.floor(instant / 1000) * 1000;
+}
+
+/**
+ * Místní čas `time` (HH:MM) dne `day` v pásmu `timeZone` → okamžik (UTC). Respektuje letní
+ * i zimní čas (posun se určí pro výsledný okamžik, ne pro půlnoc).
+ */
+export function zonedDateTime(day: IsoDate, time: string, timeZone: string = TIME_ZONE): Date {
+  const [hour, minute] = time.split(':').map(Number);
+  const wall = Date.UTC(Number(day.slice(0, 4)), Number(day.slice(5, 7)) - 1, Number(day.slice(8, 10)), hour, minute);
+  let instant = wall - zoneOffsetMs(wall, timeZone);
+  instant = wall - zoneOffsetMs(instant, timeZone);
+  return new Date(instant);
+}

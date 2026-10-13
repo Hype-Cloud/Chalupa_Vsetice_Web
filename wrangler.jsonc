@@ -1,6 +1,7 @@
 {
   "name": "chalupa-vsetice-web",
-  // Worker obsluhuje jen /api/* (/api/availability, /api/reservations, /api/reservations.ics);
+  // Worker obsluhuje jen /api/* (/api/availability, /api/reservations, /api/reservations.ics)
+  // a /calendar/<token>.ics;
   // vše ostatní jsou statické assety.
   "main": "./worker/index.ts",
   "compatibility_date": "2026-09-28",
@@ -9,7 +10,8 @@
     "directory": "./dist/client",
     "binding": "ASSETS",
     "not_found_handling": "404-page",
-    "run_worker_first": ["/api/*"]
+    // /calendar/<token>.ics generuje Worker (worker/booking/calendar.ts), ne statický asset.
+    "run_worker_first": ["/api/*", "/calendar/*"]
   },
   // Secret ECHALUPY_ICAL_URL se nastavuje v Cloudflare (wrangler secret put), nikdy v repozitáři.
   // Produkce: rezervační POST zůstává vypnutý.

@@ -127,7 +127,7 @@ function controller(results: SubmitResult[], tokens: TokenOutcome[] = []) {
 const SUCCESS: SubmitResult = {
   kind: 'success',
   reservation: {
-    reservationCode: '10013001', arrival: '2030-02-01', departure: '2030-02-04', guests: 2, totalCzk: 8970, nights: 3, paymentDueAt: '2030-01-11T22:59:59.000Z',
+    reservationCode: '10013001', arrival: '2030-02-01', departure: '2030-02-04', guests: 2, totalCzk: 8970, nights: 3, paymentDueAt: '2030-01-11T22:59:59.000Z', calendarUrl: null,
     payment: {
       amountCzk: 8970, currency: 'CZK', accountNumber: FAKE_ACCOUNT_NUMBER, iban: FAKE_PAYMENT_IBAN, variableSymbol: '10013001', message: 'Rezervace 10013001',
       dueAt: '2030-01-11T22:59:59.000Z', spayd: `SPD*1.0*ACC:${FAKE_PAYMENT_IBAN}*AM:8970.00*CC:CZK*MSG:Rezervace 10013001*X-VS:10013001`,
@@ -340,8 +340,11 @@ test('POST: správný request (JSON, Idempotency-Key, turnstileToken, expectedPr
   const b = backend();
   const key = crypto.randomUUID();
   const result = await postReservation(payload({ contact: { ...CONTACT, note: 'Přijedeme večer.' } }), TOKEN, key, b.fetchFn);
-  // Potvrzení nese jen data ze serverové odpovědi: kód z D1, cena z /api/quote výpočtu, splatnost a SPAYD.
-  assert.deepEqual(result, SUCCESS);
+  // Potvrzení nese jen data ze serverové odpovědi: kód z D1, cena z /api/quote výpočtu, splatnost,
+  // SPAYD a hotová calendarUrl ze serveru (frontend ji neskládá).
+  assert.ok(result.kind === 'success');
+  assert.match(result.reservation.calendarUrl!, /^https:\/\/[^/]+\/calendar\/[A-Za-z0-9_-]{43}\.ics$/);
+  assert.deepEqual({ ...result, reservation: { ...result.reservation, calendarUrl: null } }, SUCCESS);
   const [request] = b.requests;
   assert.equal(request.method, 'POST');
   assert.equal(new URL(request.url).pathname, '/api/reservations');
