@@ -153,7 +153,7 @@ export async function verifyFile(bytes: Uint8Array, manifest: SnapshotManifest, 
     throw new CliError(errorKind(error) === 'decryption-failed' ? 'rozšifrování selhalo – nesprávný klíč nebo poškozený soubor' : `soubor nejde otevřít (${errorKind(error)})`);
   }
   if (sql.length !== manifest.sql.bytes || (await sha256Hex(sql)) !== manifest.sql.sha256) throw new CliError('SHA-256 SQL neodpovídá manifestu');
-  const check = inspectSql(sql, manifest.environment);
+  const check = inspectSql(sql, manifest.environment, manifest.schemaProfile ?? 'chalupa');
   if (check.problems.length > 0) throw new CliError(`SQL neprošlo kontrolou (${check.problems.join(', ')})`);
   if (check.migrations !== manifest.migrations) throw new CliError('počet migrací neodpovídá manifestu');
   return { sql };
@@ -245,13 +245,14 @@ function r2Source(config: BackupConfig, deps: CliDeps): SnapshotSource {
       const sql = new Uint8Array(await response.arrayBuffer());
       if (sql.length !== object.size) throw new CliError('velikost neodpovídá – stažení je neúplné');
       if (/^[0-9a-f]{32}$/.test(object.etag) && createHash('md5').update(sql).digest('hex') !== object.etag) throw new CliError('MD5 neodpovídá – soubor je poškozený');
-      const check = inspectSql(sql, config.environment);
+      const check = inspectSql(sql, config.environment, config.schemaProfile);
       if (check.problems.length > 0) throw new CliError(`SQL neprošlo kontrolou (${check.problems.join(', ')})`);
       const sha = await sha256Hex(sql);
       const fileName = `${snapshotBaseName(config.databaseName, config.environment, ref)}.sql`;
       const manifest = buildManifest({
         database: config.databaseName,
         environment: config.environment,
+        schemaProfile: config.schemaProfile,
         snapshot: ref,
         exportedAt: meta.createdAt ?? object.last_modified ?? '',
         bookmark: meta.bookmark || null,
@@ -386,7 +387,7 @@ async function restore(options: Record<string, string | true>, deps: CliDeps): P
     const counts = expectedRowCounts(originalSql);
     const expectedObjects = expectedSchema(originalSql);
     const tables = [...expectedObjects.entries()].filter(([, type]) => type === 'table').map(([name]) => name);
-    if (!tables.includes('d1_migrations')) throw new CliError('export neobsahuje d1_migrations');
+    if (manifest.schemaProfile !== 'generic' && !tables.includes('d1_migrations')) throw new CliError('export neobsahuje d1_migrations');
     // Ověřit i prázdné tabulky, které nemají žádné INSERT INTO.
     for (const table of tables) if (!counts.has(table)) counts.set(table, 0);
     const query = tables.map((t) => `SELECT '${t.replace(/'/g, "''")}' AS t, COUNT(*) AS n FROM "${t.replace(/"/g, '""')}"`).join(' UNION ALL ');

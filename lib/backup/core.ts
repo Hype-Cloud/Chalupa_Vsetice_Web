@@ -44,6 +44,8 @@ export interface CoreDeps {
 }
 
 export interface ExportConfig {
+  /** Profile defaults to strict Chalupa-specific validation for backward compatibility. */
+  schemaProfile?: 'chalupa' | 'generic';
   accountId: string;
   databaseId: string;
   /** Název D1 (metadata snapshotu). */
@@ -167,11 +169,14 @@ export class SqlInspector {
   private found = new Set<string>();
   private environmentFound = false;
   private invalidUtf8 = false;
+  private hasTable = false;
   migrations = 0;
   private readonly environment: string;
+  private readonly profile: 'chalupa' | 'generic';
 
-  constructor(environment: string) {
+  constructor(environment: string, profile: 'chalupa' | 'generic' = 'chalupa') {
     this.environment = environment;
+    this.profile = profile;
   }
 
   push(chunk: Uint8Array, final = false): void {
@@ -184,6 +189,7 @@ export class SqlInspector {
     }
     if (this.head.length < 64) this.head += text.slice(0, 64 - this.head.length);
     const window = this.carry + text;
+    if (/CREATE TABLE (?:IF NOT EXISTS )?["\w]+\s*\(/i.test(window)) this.hasTable = true;
     for (const [name, pattern] of Object.entries(MARKERS)) if (!this.found.has(name) && pattern.test(window)) this.found.add(name);
     if (!this.environmentFound && window.includes(`VALUES('environment','${this.environment}')`)) this.environmentFound = true;
     // Záznam migrace se počítá jen jednou: musí zasahovat do nového textu (konec za carry).
@@ -202,17 +208,21 @@ export class SqlInspector {
     const problems: string[] = [];
     if (this.invalidUtf8) problems.push('not-utf8');
     if (!this.head.startsWith('PRAGMA defer_foreign_keys=TRUE;')) problems.push('unexpected-start');
-    for (const name of Object.keys(MARKERS)) if (!this.found.has(name)) problems.push(`missing-${name}`);
-    if (this.migrations === 0) problems.push('missing-migration-rows');
-    if (!this.environmentFound) problems.push('environment-mismatch');
+    if (this.profile === 'chalupa') {
+      for (const name of Object.keys(MARKERS)) if (!this.found.has(name)) problems.push(`missing-${name}`);
+      if (this.migrations === 0) problems.push('missing-migration-rows');
+      if (!this.environmentFound) problems.push('environment-mismatch');
+    } else if (!this.hasTable) {
+      problems.push('missing-table-schema');
+    }
     if (this.lastChar !== ';') problems.push('truncated');
     return problems;
   }
 }
 
 /** Ověřená struktura celého SQL v paměti (CLI, GitHub backend); problémy nebo počet migrací. */
-export function inspectSql(sql: Uint8Array, environment: string): { problems: string[]; migrations: number } {
-  const inspector = new SqlInspector(environment);
+export function inspectSql(sql: Uint8Array, environment: string, profile: 'chalupa' | 'generic' = 'chalupa'): { problems: string[]; migrations: number } {
+  const inspector = new SqlInspector(environment, profile);
   inspector.push(sql);
   inspector.finish();
   return { problems: inspector.problems(), migrations: inspector.migrations };
@@ -256,7 +266,7 @@ export async function exportVerified(config: ExportConfig, deps: CoreDeps & { no
     sql.set(chunk, offset);
     offset += chunk.byteLength;
   }
-  const { problems, migrations } = inspectSql(sql, config.environment);
+  const { problems, migrations } = inspectSql(sql, config.environment, config.schemaProfile);
   if (problems.length > 0) {
     deps.log(`d1-backup: export check failed (${problems.join(',')})`);
     throw new BackupError('invalid-export');

@@ -120,7 +120,7 @@ export async function runGithubBackup(env: GithubEnv, deps: GithubDeps): Promise
       dailyState = 'exists';
     } else {
       const exported = await exportVerified(
-        { accountId: cfg.accountId, databaseId: cfg.databaseId, databaseName: cfg.databaseName, environment: cfg.environment, apiToken: env.D1_EXPORT_API_TOKEN?.trim() ?? '', maxExportBytes: cfg.maxExportBytes },
+        { accountId: cfg.accountId, databaseId: cfg.databaseId, databaseName: cfg.databaseName, environment: cfg.environment, schemaProfile: cfg.schemaProfile, apiToken: env.D1_EXPORT_API_TOKEN?.trim() ?? '', maxExportBytes: cfg.maxExportBytes },
         { ...deps, now: deps.now },
       );
       const file = await sealSnapshot(exported.sql, cfg.encryption);
@@ -129,6 +129,7 @@ export async function runGithubBackup(env: GithubEnv, deps: GithubDeps): Promise
       const manifest = buildManifest({
         database: cfg.databaseName,
         environment: cfg.environment,
+        schemaProfile: cfg.schemaProfile,
         snapshot: daily,
         exportedAt: exported.exportedAt,
         bookmark: exported.bookmark,

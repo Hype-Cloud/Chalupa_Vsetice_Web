@@ -9,12 +9,15 @@ import { DEFAULT_KEEP_DAILY, DEFAULT_KEEP_MONTHLY, DEFAULT_MAX_EXPORT_BYTES } fr
 
 export type BackupBackend = 'github' | 'r2';
 export type BackupEnvironment = 'production' | 'preview';
+export type BackupSchemaProfile = 'chalupa' | 'generic';
 /** Co konfigurace musí umožnit: záloha (export + zápis), čtení (výpis, stažení), kontrola stáří. */
 export type BackupPurpose = 'backup' | 'read' | 'monitor';
 
 export interface BackupConfig {
   backend: BackupBackend;
   environment: BackupEnvironment;
+  /** Chalupa-specific checks, or generic D1 structure checks. */
+  schemaProfile: BackupSchemaProfile;
   databaseName: string;
   /** Jen pro export (purpose backup). */
   databaseId: string;
@@ -100,6 +103,9 @@ export function parseBackupConfig(
   const environment = rawEnv === 'production' || rawEnv === 'preview' ? rawEnv : undefined;
   if (!environment) errors.push('BACKUP_ENV musí být "production" nebo "preview"');
 
+  const rawSchemaProfile = get('BACKUP_SCHEMA_PROFILE') ?? 'chalupa';
+  if (rawSchemaProfile !== 'chalupa' && rawSchemaProfile !== 'generic') errors.push('BACKUP_SCHEMA_PROFILE musí být "chalupa" nebo "generic"');
+  const schemaProfile: BackupSchemaProfile = rawSchemaProfile === 'generic' ? 'generic' : 'chalupa';
   const databaseName = get('BACKUP_DATABASE_NAME') ?? '';
   if (!DATABASE_NAME.test(databaseName) || databaseName.length > 64) errors.push('BACKUP_DATABASE_NAME musí být název D1 (malá písmena, číslice, jednoduché pomlčky, max. 64 znaků)');
 
@@ -152,7 +158,7 @@ export function parseBackupConfig(
 
   if (errors.length > 0 || !backend || !environment) return { config: null, errors };
   return {
-    config: { backend, environment, databaseName, databaseId, accountId, keepDaily, keepMonthly, maxExportBytes, github, r2, encryption: { mode, recipients } },
+    config: { backend, environment, schemaProfile, databaseName, databaseId, accountId, keepDaily, keepMonthly, maxExportBytes, github, r2, encryption: { mode, recipients } },
     errors,
   };
 }

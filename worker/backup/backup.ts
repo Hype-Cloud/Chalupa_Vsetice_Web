@@ -87,7 +87,7 @@ export const pendingKey = (instanceId: string) => `${PENDING_PREFIX}${instanceId
 export async function downloadToPending(config: ExportConfig, deps: BackupDeps, signedUrl: string, key: string): Promise<Omit<PendingExport, 'bookmark'>> {
   const { body, length } = await openExportDownload({ maxExportBytes: Math.min(config.maxExportBytes, MAX_EXPORT_BYTES) }, deps, signedUrl);
 
-  const inspector = new SqlInspector(config.environment);
+  const inspector = new SqlInspector(config.environment, config.schemaProfile);
   const md5 = deps.streams.md5();
   const md5Writer = md5.writable.getWriter();
   let bytes = 0;

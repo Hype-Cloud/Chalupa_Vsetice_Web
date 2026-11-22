@@ -48,6 +48,7 @@ export interface BackupEnv {
   /** production | preview – očekávané meta.environment v exportu. */
   BACKUP_ENV?: string;
   BACKUP_DATABASE_NAME?: string;
+  BACKUP_SCHEMA_PROFILE?: string;
   BACKUP_DATABASE_ID?: string;
   /** Secret: ID účtu Cloudflare (mimo veřejný repozitář). */
   BACKUP_CLOUDFLARE_ACCOUNT_ID?: string;
@@ -115,6 +116,7 @@ export function exportConfig(env: BackupEnv, config: BackupConfig): ExportConfig
     databaseId: config.databaseId,
     databaseName: config.databaseName,
     environment: config.environment,
+    schemaProfile: config.schemaProfile,
     apiToken: env.D1_EXPORT_API_TOKEN?.trim() ?? '',
     maxExportBytes: config.maxExportBytes,
   };

@@ -43,6 +43,17 @@ test('konfigurace: GitHub výchozí hodnoty (30/12, age), owner/repo i URL repoz
   for (const bad of ['http://github.com/a/b', 'https://gitlab.com/a/b', 'https://github.com/a/b/c', 'a/b/c', 'a', 'https://github.com/a/b?x=1', 'a/..']) assert.equal(parseGithubRepo(bad), null, bad);
 });
 
+test('generic D1 profil podporuje jiné tabulky bez Chalupa metadata a migrací', () => {
+  const sql = new TextEncoder().encode('PRAGMA defer_foreign_keys=TRUE;\nCREATE TABLE books(id INTEGER PRIMARY KEY, title TEXT);\nINSERT INTO "books" VALUES(1,\'Test\');\n');
+  const generic = inspectSql(sql, 'production', 'generic');
+  assert.deepEqual(generic.problems, []);
+  assert.equal(generic.migrations, 0);
+  assert.ok(inspectSql(sql, 'production').problems.length > 0, 'Chalupa profil zůstává přísný');
+  const parsed = parseBackupConfig({ ...GITHUB, BACKUP_SCHEMA_PROFILE: 'generic' }, { backend: 'github', purpose: 'backup' });
+  assert.equal(parsed.config?.schemaProfile, 'generic');
+  assert.ok(parseBackupConfig({ ...GITHUB, BACKUP_SCHEMA_PROFILE: 'invalid' }, { backend: 'github', purpose: 'backup' }).errors.length > 0);
+});
+
 test('konfigurace: backend musí být explicitní a odpovídat spouštěči', () => {
   const { BACKUP_BACKEND: _, ...withoutBackend } = GITHUB;
   assert.ok(parseBackupConfig(withoutBackend, { purpose: 'backup' }).errors.some((e) => e.includes('BACKUP_BACKEND')));

@@ -45,6 +45,8 @@ export interface SnapshotManifest {
   version: typeof MANIFEST_VERSION;
   database: string;
   environment: string;
+  /** Absent on old snapshots, which were always Chalupa-specific. */
+  schemaProfile?: 'chalupa' | 'generic';
   snapshot: { type: SnapshotType; date: string; id: string };
   exportedAt: string;
   bookmark: string | null;
@@ -59,6 +61,7 @@ export function buildManifest(input: Omit<SnapshotManifest, 'format' | 'version'
     version: MANIFEST_VERSION,
     database: input.database,
     environment: input.environment,
+    ...(input.schemaProfile === undefined ? {} : { schemaProfile: input.schemaProfile }),
     snapshot: { type: input.snapshot.type, date: input.snapshot.date, id: snapshotId(input.snapshot) },
     exportedAt: input.exportedAt,
     bookmark: input.bookmark,
@@ -82,6 +85,7 @@ export function manifestProblems(value: unknown, expected: { database?: string; 
   const problems: string[] = [];
   if (m.format !== MANIFEST_FORMAT || m.version !== MANIFEST_VERSION) problems.push('manifest-format');
   if (typeof m.database !== 'string' || typeof m.environment !== 'string') problems.push('manifest-identity');
+  if (m.schemaProfile !== undefined && m.schemaProfile !== 'chalupa' && m.schemaProfile !== 'generic') problems.push('manifest-schema-profile');
   if (!isObject(m.snapshot) || (m.snapshot.type !== 'daily' && m.snapshot.type !== 'monthly') || !parseSnapshotId(`${m.snapshot.type}/${m.snapshot.date}`)) problems.push('manifest-snapshot');
   if (!isObject(m.sql) || !Number.isSafeInteger(m.sql.bytes) || m.sql.bytes <= 0 || !SHA256.test(String(m.sql.sha256))) problems.push('manifest-sql');
   if (
@@ -96,7 +100,7 @@ export function manifestProblems(value: unknown, expected: { database?: string; 
   ) {
     problems.push('manifest-file');
   }
-  if (!Number.isSafeInteger(m.migrations) || (m.migrations ?? 0) <= 0) problems.push('manifest-migrations');
+  if (!Number.isSafeInteger(m.migrations) || (m.migrations ?? -1) < 0 || (m.schemaProfile !== 'generic' && m.migrations === 0)) problems.push('manifest-migrations');
   if (problems.length > 0) return problems;
   if (expected.database !== undefined && m.database !== expected.database) problems.push('manifest-database-mismatch');
   if (expected.environment !== undefined && m.environment !== expected.environment) problems.push('manifest-environment-mismatch');

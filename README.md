@@ -1556,6 +1556,7 @@ nic z R2 a naopak).
 |---|---|---|
 | `BACKUP_BACKEND` | `github` \| `r2` | vždy (spouštěč musí odpovídat) |
 | `BACKUP_ENV` | `production` \| `preview` (musí odpovídat `meta.environment` exportu) | vždy |
+| `BACKUP_SCHEMA_PROFILE` | `chalupa` (výchozí: kontrola rezervací, migrací a prostředí) nebo `generic` (obecná D1 se strukturou tabulek) | ne |
 | `BACKUP_DATABASE_NAME` | název D1 (malá písmena, číslice, pomlčky) | vždy |
 | `BACKUP_DATABASE_ID` | UUID D1 | záloha |
 | `BACKUP_CLOUDFLARE_ACCOUNT_ID` | ID účtu Cloudflare (secret) | záloha; čtení R2; obnova |
