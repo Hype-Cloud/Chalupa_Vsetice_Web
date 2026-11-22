@@ -210,6 +210,7 @@ Projekt využívá Node.js Test Runner. Databázové testy probíhají nad loká
 | reservation-note.test.ts | 17 | Poznámka hosta: NULL pro prázdné hodnoty, víceřádkový text, Unicode a NFC, limit 2000 znaků, zakázané řídicí a bidi znaky, SQL/HTML text jen jako text, není ve veřejné odpovědi ani v logách, idempotence, escapování v iCal exportu, CHECK v D1. |
 | d1-migrations.test.ts | 29 | Kontrola D1 migrací před deployem: číslování, konzistence konfigurací (oddělené D1, produkční POST vypnutý), čekající a neznámé migrace, fail-closed při chybě, detekce destruktivních migrací, interaktivní aplikace jen v terminálu s potvrzením, neinteraktivní jen s autorizací ověřenou proti stavu D1 (název DB, přesný seznam čekajících migrací, žádné neznámé migrace, nikdy v CI), destruktivní migrace přísněji (výslovné povolení, v produkci samostatně, fráze v terminálu), ověřená záloha před každou produkční migrací (bookmark, export se schématem a záznamy migrací), samostatná záloha, kontrola po aplikaci, parsování argumentů. |
 | smoke.test.ts | 9 | Smoke test veřejných endpointů proti skutečnému Workeru: produkce (POST 404, `booking-config` vypnutý) a Preview, bez tokenů a zápisů, odhalení zapnutého POST, výpadku D1, úniku osobních údajů a veřejného exportu, `/calendar/*` s `X-Robots-Tag` přepsaným platformou v Preview. |
+| backup.test.ts | 17 | Automatická záloha D1 → R2 ve workerd (Miniflare: skutečné R2, DigestStream, FixedLengthStream): export a dotazování, chyby API (HTTP, JSON, `status: error`, chybějící/neplatná URL či bookmark), vypršená URL, výpadek a chybějící délka streamu, validace obsahu (prostředí, schéma, migrace, zkrácení, UTF-8, cizí soubor), MD5, idempotence a nepřepisování, retence 30/12 jen po úspěchu, úklid `pending/`, kontrola stáří 48 h a objemu 7 GB, upozornění bez citlivých údajů, obnova snapshotu do samostatné D1, strop velikosti, konfigurace samostatného Workeru. |
 | frontend-quote.test.ts | 14 | Frontend rezervační sekce: cena jen z `/api/quote` (kontrakt proti skutečnému handleru), nightly se slevou, exact-stay, 422 a chyby serveru/sítě jako české hlášky, načítání bez staré ceny, souběh (starší odpověď nepřepíše novější), nový požadavek při změně termínu a hostů, žádný klientský výpočet ceny. |
 | i18n.test.ts | 17 | Jazykové verze: úplnost katalogů cs/en/de/ua (klíče, parametry, plurály, žádný český text ani HTML), fallback, volba jazyka (?lang, localStorage, čeština) a persistence, množná čísla, data a CZK v každém jazyce, kalendář, rezervační panel po přepnutí, přepínač, žádné pevné texty v komponentách ani pevná cena noci (3 000 / 2 990 Kč); orientační cena jen z `PRICE_PER_NIGHT`. |
 | date-input.test.ts | 8 | Vstup data DD.MM.RRRR ↔ ISO: přestupný rok, neexistující den a měsíc, rozepsané datum bez chyby, odmítnutí amerického a ISO tvaru, všechna zobrazená data den → měsíc → rok (angličtina bez měsíc/den). |
@@ -219,7 +220,7 @@ Projekt využívá Node.js Test Runner. Databázové testy probíhají nad loká
 | confirmation-email.test.ts | 34 | Potvrzovací e-mail: `locale` cs/en/de/ua (jiné → 422), nová rezervace = jeden e-mail s klíčem z interního UUID, replay i souběžný dvojklik znovu naplánují potvrzení se stejným klíčem a s uloženým e-mailem a jazykem, replay bez e-mailu (422, zrušená, bez jazyka), stejný veřejný kód po resetu čítače → různé klíče, UUID mimo API/e-mail/log, žádná synchronní práce před `ctx.waitUntil`, předgenerované ikony (bez rastrování ve Workeru), Preview → testovací schránka, produkce → host, odesílatel z business identity, business config (telefon E.164 → `tel:` a český zápis, validace), hlavička (jméno, značka, termín pobytu), kompaktní termín ve 4 jazycích, pořadí platební sekce a QR bez popisku, úvod se splatností, instrukcemi před příjezdem a kontaktem (bez věty o souhrnu), nadpis „Souhrn rezervace“ ve 4 jazycích, platba ve dvou sloupcích (QR vlevo, údaje vpravo) a na mobilu pod sebou, IBAN bez `nowrap` se zalomením po skupinách, patička bez oddělovacích znaků, nezměněná hlavička (otisk HTML a PNG) i patička (otisk HTML), QR 174 px se zaoblenými rohy a beze změny PNG, linka jen pod nadpisem „Platební údaje“ (nad „Těšíme se…“ žádná), nezměněný telefonický kontakt (otisk HTML), telefonický kontakt a patička (jméno → web, `mailto:`, `IČ` jako prostý text, žádný registr ani „IČO“), Preview bez banneru a adresy hosta (jen `[TEST]` v předmětu), domek bez vlastního pozadí a jméno jednotnou vahou, odkaz na registr odstraněný z konfigurace i dokumentace, výchozí světlá varianta, kontakty v plaintextu, renderer bez napevno zapsaných údajů provozovatele, chybějící konfigurace → skip bez upozornění, selhání providera (timeout, síť, HTTP 4xx/5xx) → 201 a jedno interní upozornění bez osobních a bankovních údajů, selhání upozornění nic dalšího nespouští, odložené odeslání, obsah HTML i textu ve 4 jazycích ze stejných dat jako API, QR příloha (cid) = SPAYD, escapování HTML, nové znění věty o e-mailu. |
 | payment.test.ts | 9 | Platby: pražské datum → `DDMMYY`, `NN` 01–99, splatnost (konec pražského dne po 24 h, změny času, vždy 24–48 h), IBAN (kontrolní součet, odvození čísla účtu), SPAYD (serverová cena, VS = kód, zpráva `Rezervace {kód}`), QR jako PNG (pixely = matice) se SVG fallbackem, kopírování do schránky, kontrola, že repozitář neobsahuje skutečný IBAN. |
 | calendar.test.ts | 15 | Odkaz do kalendáře: unikátní neveřejný token oddělený od id/kódu/VS, replay a souběžný dvojklik → stejná `calendarUrl`, dvě rezervace → různé URL, legacy `NULL` token (replay, e-mail i web bez odkazu), origin (produkce vždy hlavní web, Preview origin požadavku), endpoint (pending/paid → událost, hlavičky, HEAD, 405; neplatný tvar bez dotazu do D1, neznámý a zrušený → 404; bez D1 503; token se neloguje), validní VCALENDAR/VEVENT (ical.js), CRLF, 75 oktetů, stabilní UID, 14:00/11:00 v zimě, v létě i přes přechod času, žádné osobní/bankovní/interní údaje, e-mail (hlavička a Termín = stejný href, splatnost bez odkazu, věta ve 4 jazycích; příloha `pobyt.ics` s `method=PUBLISH` = stejná událost jako odkaz, bez osobních údajů, replay stejný obsah, produkce hostovi, legacy bez přílohy), web přijme jen serverovou URL, Worker obsluhuje `/calendar/*`, žádná externí calendar služba, CHECK a UNIQUE migrace 0010. |
-| **Celkem** | **394** | |
+| **Celkem** | **411** | |
 
 ### Testované scénáře
 
@@ -1451,6 +1452,122 @@ protože Cloudflare ho na Preview URL přepisuje u všech odpovědí). Exit 1 p�
 Nepoužívá žádné tokeny ani secrets: přijme jen origin (https, http jen localhost) bez cesty,
 query a přihlašovacích údajů, neposílá `Authorization` ani cookies a nic nezapisuje (rezervační
 POST jde bez údajů, nabídka je jen čtení).
+
+## Automatické zálohy D1
+
+Produkční D1 `chalupa-vsetice-rezervace` se každý den zálohuje do soukromého R2 bucketu
+`chalupa-vsetice-d1-backups` samostatným Workerem `chalupa-vsetice-d1-backup`
+(`wrangler.backup.jsonc`, `worker/backup/`) s Cloudflare Workflows. Rezervační Worker,
+schéma, secrets, Workers Builds ani cron kolizí se nemění. Doplňuje ruční zálohy před
+migracemi (`db:backup:*`, Time Travel), nenahrazuje je.
+
+### Architektura
+
+- **Spouštění:** `workflows[].schedules` (bez `triggers.crons` a `scheduled` handleru):
+  `15 2 * * *` = záloha (02:15 UTC), `45 14 * * *` = kontrola. Worker nemá veřejné HTTP
+  rozhraní (`workers_dev: false`, `preview_urls: false`, bez routes, `fetch` → 404).
+- **Export:** oficiální D1 REST API `POST …/d1/database/{id}/export` s
+  `dump_options.compatibility: "d1"` (obnovitelný SQL; `sqlite3_cli_only` se nepoužívá, nejde
+  importovat zpět). Tvar odpovědi ověřen proti API i wrangleru: `result.status`
+  (`complete` / `error`, chybí = probíhá), `result.at_bookmark`, `result.result.signed_url`
+  (oficiální příklad čte `result.signed_url`, což neodpovídá API). Probíhající export se musí
+  průběžně dotazovat, jinak se zruší – dotazování (max. 20× po 2 s) běží v jednom kroku.
+- **Uložení:** podepsaná URL (platí 1 h) se streamuje přes `FixedLengthStream` (délka
+  z `Content-Length`) do `pending/<instance>.sql`; cestou MD5 (`DigestStream`) a kontrola
+  struktury. Ověřený soubor se zkopíruje do `daily/YYYY-MM-DD.sql` (R2 při zápisu ověří MD5),
+  první úspěšná záloha měsíce i do `monthly/YYYY-MM.sql`; `pending/` se smaže.
+- **Upozornění:** přes stávající Resend (`worker/email/resend.ts`) na `CONFLICT_ALERT_EMAIL` jen
+  při problému – selhání zálohy, poslední denní záloha starší než 48 h, objem nad 7 GB. Jen
+  prostředí, druh chyby, čas a stav záloh; nikdy data, token ani URL. Úspěch e-mail neposílá.
+
+### Spolehlivost
+
+- HTTP 200 samo o sobě úspěch neznamená: kontroluje se obálka (`success`), `status`,
+  bookmark, https podepsaná URL; HTTP chyby, timeouty, nevalidní JSON, `status: error` = chyba.
+- Záloha je platná jen když: délka = `Content-Length` = velikost v R2, MD5 streamu = MD5 v R2,
+  soubor začíná `PRAGMA defer_foreign_keys=TRUE;`, obsahuje schéma `reservations`
+  a `d1_migrations`, záznamy migrací, `meta.environment` správného prostředí a končí příkazem
+  (`;`). Jinak se `pending/` smaže a nic se nepovýší.
+- Opakování: krok exportu 3× (exponenciálně od 10 min) – každý pokus = nový export (vypršená
+  URL, výpadek streamu); kroky R2 5×. Existující snapshot se nikdy nepřepíše: denní záloha
+  téhož dne = export se přeskočí (žádné duplicity), měsíční zůstává první úspěšná záloha
+  měsíce; neočekávaný jiný obsah pod klíčem při kopii = chyba.
+- Neúspěšný běh nic nemaže; starší zálohy zůstávají.
+
+### Retence
+
+Podle počtu, ne stáří: po **úspěšné** záloze zůstane 30 nejnovějších `daily/` a 12
+nejnovějších `monthly/`, `pending/` starší než 24 h se smaže. Lifecycle pravidla R2 umí jen
+stáří – při delším výpadku záloh by smazala i poslední funkční snapshoty, proto se pro
+`daily/` a `monthly/` nepoužívají. Doporučené jediné lifecycle pravidlo: `pending/` – smazat po
+1 dni (pojistka pro pozůstatky). Jen R2 Standard, žádný přechod na Infrequent Access.
+
+### Náklady (Workers Free + R2 Standard)
+
+| Zdroj | Spotřeba | Bezplatný limit |
+|---|---|---|
+| R2 úložiště | 42 snapshotů × ~6 kB (export 11/2026) ≈ 0,3 MB | 10 GB-month |
+| R2 Class A (put, list) | ~7 / den ≈ 210 / měsíc | 1 mil. / měsíc |
+| R2 Class B (head, get) | ~5 / den | 10 mil. / měsíc |
+| Workflows kroky | ~9 / den | 3 000 / den |
+| Workflows úložiště stavu | < 1 MB (stav instancí 3 dny) | 1 GB-month |
+| Požadavky / CPU | 2 instance denně, jednotky ms na krok | 100 000 / den, 10 ms na krok |
+| Externí subrequesty | ≤ 22 na krok exportu | 50 na vyvolání |
+
+Strop velikosti jednoho exportu 200 MiB drží nejhorší objem (30 + 12 + 2 snapshoty) pod 10 GB;
+větší export skončí chybou a upozorněním. Upozornění nad 7 GB. Na Workers Free se překročení
+limitů Workers/Workflows projeví chybou, ne platbou; R2 nemá tvrdý strop – proto strop exportu
+a upozornění.
+
+### Bezpečnost
+
+- Bucket neveřejný: bez vlastní domény a bez `r2.dev` (výchozí stav nového bucketu – nic
+  nezapínat).
+- Šifrování: R2 šifruje objekty i metadata v klidu AES-256 (GCM) s klíči spravovanými
+  Cloudflare, při přenosu TLS. Zálohy nejsou šifrované vlastním klíčem (SSE-C se nepoužívá) –
+  kdo má přístup k R2 v účtu (dashboard, token s R2 Read), čte osobní údaje hostů.
+- Secrets jen přes `wrangler secret put … --config wrangler.backup.jsonc [--env test]`:
+  `D1_EXPORT_API_TOKEN` (user token jen **Account → D1 → Edit** – export vyžaduje Edit, D1 Read
+  nestačí; oprávnění D1 nejde omezit na jednu databázi), `D1_EXPORT_ACCOUNT_ID`, volitelně
+  `RESEND_API_KEY`, `CONFLICT_ALERT_EMAIL`, `CONFLICT_ALERT_FROM`. Build token rezervačního
+  Workeru se nemění.
+- Logy: jen druh chyby (`d1-backup: …`); `invocation_logs` a traces vypnuté (traces by
+  zaznamenaly URL podrequestů včetně podepsané URL). Výsledky kroků Workflow (vidět
+  v dashboardu) obsahují jen klíč, velikost, MD5 a bookmark.
+- Zálohy se nikam mimo R2 neposílají.
+
+### Zprovoznění (jednorázově)
+
+1. Aktivovat R2 v dashboardu (R2 object storage → Purchase / Enable). Aktivace může vyžadovat
+   platební metodu i pro bezplatnou kvótu.
+2. Buckety: `wrangler r2 bucket create chalupa-vsetice-d1-backups` (a `…-test`), lifecycle
+   `wrangler r2 bucket lifecycle add <bucket> pending-cleanup pending/ --expire-days 1`.
+3. Token `D1_EXPORT_API_TOKEN` (D1 Edit) a secrets, viz výše.
+4. Test: `pnpm run backup:deploy:test`, `wrangler workflows trigger chalupa-vsetice-d1-backup-test
+   '{"mode":"backup"}'`, ověřit `daily/` v testovacím bucketu.
+5. Produkce (jen se souhlasem uživatele): `pnpm run backup:deploy`. Worker nemá Workers Builds –
+   nasazuje se jen tímto příkazem.
+
+### Obnova snapshotu
+
+Produkční D1 se nikdy nepřepisuje ani do ní neimportuje; obnova produkce jen na výslovný pokyn.
+
+```bash
+# 1. Stáhnout snapshot (osobní údaje – mimo repozitář, po obnově smazat)
+npx wrangler r2 object get chalupa-vsetice-d1-backups/daily/2026-11-23.sql --file /tmp/obnova.sql --remote
+# 2. Nová prázdná D1 a import (export obsahuje CREATE TABLE – do existující DB nejde)
+npx wrangler d1 create chalupa-vsetice-obnova-2026-11-23 --location eeur
+npx wrangler d1 execute chalupa-vsetice-obnova-2026-11-23 --remote --file /tmp/obnova.sql --yes
+# 3. Ověřit (počty, meta.environment, d1_migrations)
+npx wrangler d1 execute chalupa-vsetice-obnova-2026-11-23 --remote \
+  --command "SELECT (SELECT count(*) FROM reservations), (SELECT value FROM meta WHERE key='environment')"
+```
+
+Produkce (jen na pokyn): v rámci posledních 30 dní přednostně Time Travel (`wrangler d1
+time-travel restore`, bookmark je v metadatech snapshotu). Starší stav: obnovená D1 z kroku 2
+se přepne PR změnou `database_id` v `wrangler.jsonc` (produkční `meta.environment` je
+v exportu), merge → `check production` → deploy. Ověřeno: import exportu do samostatné D1
+(lokálně i v Cloudflare) dává shodné počty řádků, migrace i prostředí.
 
 ## License
 

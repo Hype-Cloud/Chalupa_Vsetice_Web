@@ -68,6 +68,27 @@ platí v každé session.
   schématu a záznamů migrací). Destruktivní (`DROP`, `DELETE`, `UPDATE`, `RENAME`, `REPLACE`)
   mají přísnější režim: výslovné povolení, v produkci samostatně.
 
+## Automatické zálohy D1 (R2)
+
+- Samostatný Worker `chalupa-vsetice-d1-backup` (`wrangler.backup.jsonc`, `worker/backup/`):
+  Workflow přes `workflows[].schedules` (02:15 UTC záloha, 14:45 UTC kontrola), export D1 REST
+  API → soukromý R2 `chalupa-vsetice-d1-backups`. Doplňuje ruční zálohy před migracemi
+  (`db:backup:*`), nenahrazuje je. Popis: README, „Automatické zálohy D1“.
+- Nasazení jen `pnpm run backup:deploy` a jen s výslovným souhlasem uživatele (Workers Builds ho
+  nenasazuje). Testovací prostředí (`pnpm run backup:deploy:test`, Preview D1 → testovací
+  bucket) smí Claude nasadit a spouštět samostatně.
+- Export vždy `dump_options.compatibility: "d1"` (obnovitelný); nikdy `sqlite3_cli_only`.
+- Retence podle počtu (30 denních, 12 měsíčních) až po úspěšné záloze; lifecycle R2 jen pro
+  `pending/`. Jen R2 Standard, žádný Infrequent Access. Strop exportu 200 MiB a upozornění nad
+  7 GB neměnit bez souhlasu (drží zálohy v bezplatné kvótě). Žádný placený tarif ani změna
+  billingu bez souhlasu uživatele.
+- Bucket nikdy neveřejný (žádná vlastní doména, žádné `r2.dev`). Zálohy nikam mimo R2.
+- Do logů, výsledků kroků Workflow, PR ani výstupů nikdy token, podepsanou URL, obsah SQL ani
+  osobní údaje. Stažený snapshot (osobní údaje) jen dočasně mimo repozitář a po použití smazat.
+- Do produkční D1 se nikdy neimportuje ani ji nic nepřepisuje. Obnova produkce (Time Travel nebo
+  přepnutí na obnovenou D1) jen na výslovný pokyn uživatele; zkušební obnovy jen do nové
+  samostatné D1, kterou je po ověření potřeba smazat.
+
 ## Cloudflare konfigurace mimo git
 
 Skutečný stav (nastaveno ručně v dashboardu, v diffu není vidět):
@@ -82,6 +103,10 @@ Skutečný stav (nastaveno ručně v dashboardu, v diffu není vidět):
 - Token pro správu D1 (záloha a migrace, mimo build): samostatný user token s Account Settings
   Read, **D1 Edit**, User Details Read, Memberships Read; v cloudové session Claude ho doplňuje
   proxy pro `api.cloudflare.com`. Build token zůstává D1 **Read** – nikdy ho nerozšiřovat.
+- Zálohovací Worker (`wrangler.backup.jsonc`): secrets `D1_EXPORT_API_TOKEN` (samostatný user
+  token jen Account → D1 → Edit), `D1_EXPORT_ACCOUNT_ID`, volitelně `RESEND_API_KEY`,
+  `CONFLICT_ALERT_EMAIL`, `CONFLICT_ALERT_FROM` – přes `wrangler secret put … --config
+  wrangler.backup.jsonc [--env test]`. R2 musí být na účtu aktivované (dashboard).
 - Secrets se nastavují jen přes `wrangler secret put` (produkce) a
   `wrangler preview base-config secret put` (sdílené všem Worker Previews). Preview potřebuje
   minimálně `ECHALUPY_ICAL_URL`, `BOOKING_ICAL_EXPORT_TOKEN`, `TURNSTILE_SECRET_KEY`

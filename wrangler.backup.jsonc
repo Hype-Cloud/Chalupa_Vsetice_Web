@@ -1,0 +1,61 @@
+// Samostatný Worker pro automatické zálohy D1 → R2 (Cloudflare Workflows). Oddělený od
+// rezervačního Workeru `chalupa-vsetice-web` (wrangler.jsonc) – jiné jméno, žádné sdílené
+// bindingy, žádná veřejná URL. Nasazení: `pnpm run backup:deploy` (produkce, jen se souhlasem
+// uživatele) / `pnpm run backup:deploy:test` (testovací prostředí). Viz README, „Automatické
+// zálohy D1“.
+//
+// Secrets (wrangler secret put … --config wrangler.backup.jsonc [--env test], nikdy v repozitáři):
+//   D1_EXPORT_API_TOKEN   – user token jen s D1 Edit (export D1 vyžaduje Edit)
+//   D1_EXPORT_ACCOUNT_ID  – ID účtu Cloudflare
+//   RESEND_API_KEY, CONFLICT_ALERT_EMAIL, CONFLICT_ALERT_FROM – upozornění správci (volitelné)
+{
+  "$schema": "./node_modules/wrangler/config-schema.json",
+  "name": "chalupa-vsetice-d1-backup",
+  "main": "./worker/backup/index.ts",
+  "compatibility_date": "2026-09-28",
+  // Žádné veřejné HTTP rozhraní: bez workers.dev a Preview URL, bez routes.
+  "workers_dev": false,
+  "preview_urls": false,
+  // Logy jen z kódu (druh chyby, bez URL a obsahu); traces vypnuté – zaznamenávaly by URL
+  // podrequestů včetně podepsané URL exportu.
+  "observability": {
+    "enabled": true,
+    "logs": { "enabled": true, "invocation_logs": false },
+    "traces": { "enabled": false }
+  },
+  "vars": {
+    "BACKUP_ENV": "production",
+    "DATABASE_NAME": "chalupa-vsetice-rezervace",
+    "DATABASE_ID": "08656b04-3ade-4a34-b9d3-94f7b8e154ef"
+  },
+  "workflows": [
+    {
+      "name": "chalupa-vsetice-d1-backup",
+      "binding": "BACKUP_WORKFLOW",
+      "class_name": "D1BackupWorkflow",
+      // 02:15 UTC záloha, 14:45 UTC kontrola stáří (48 h) a objemu (7 GB) – worker/backup/workflow.ts.
+      "schedules": ["15 2 * * *", "45 14 * * *"]
+    }
+  ],
+  "r2_buckets": [{ "binding": "BACKUPS", "bucket_name": "chalupa-vsetice-d1-backups" }],
+  "env": {
+    // Test: testovací D1 (Preview) → testovací bucket, spouští se jen ručně
+    // (`wrangler workflows trigger chalupa-vsetice-d1-backup-test`).
+    "test": {
+      "name": "chalupa-vsetice-d1-backup-test",
+      "vars": {
+        "BACKUP_ENV": "preview",
+        "DATABASE_NAME": "chalupa-vsetice-rezervace-test",
+        "DATABASE_ID": "b6269d5f-4705-4b4c-a52c-e5030a020605"
+      },
+      "workflows": [
+        {
+          "name": "chalupa-vsetice-d1-backup-test",
+          "binding": "BACKUP_WORKFLOW",
+          "class_name": "D1BackupWorkflow"
+        }
+      ],
+      "r2_buckets": [{ "binding": "BACKUPS", "bucket_name": "chalupa-vsetice-d1-backups-test" }]
+    }
+  }
+}
