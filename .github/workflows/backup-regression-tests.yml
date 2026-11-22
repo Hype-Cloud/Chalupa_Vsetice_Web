@@ -39,5 +39,12 @@ jobs:
         run: |
           corepack enable
           pnpm install --frozen-lockfile
+      - name: Install age CLI for interoperability tests
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends age
+          age --version
       - name: Run synthetic backup regression suite
+        env:
+          REQUIRE_AGE_INTEROP: '1'
         run: pnpm test
