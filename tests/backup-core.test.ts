@@ -6,7 +6,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { generateX25519Identity, identityToRecipient } from 'age-encryption';
 import { parseBackupConfig, parseGithubRepo } from '../lib/backup/config.ts';
-import { inspectSql, sha256Hex } from '../lib/backup/core.ts';
+import { inspectSql, sha256Hex, verifyGenericDatabaseIdentity } from '../lib/backup/core.ts';
 import { isAgeFile, openSnapshot, parseIdentityFile, sealSnapshot } from '../lib/backup/seal.ts';
 import { buildManifest, latestSnapshot, manifestFor, manifestProblems, parseSnapshotId, selectForRetention, snapshotBaseName } from '../lib/backup/snapshot.ts';
 
@@ -90,6 +90,32 @@ test('konfigurace: nepotřebné hodnoty nejsou povinné (GitHub bez R2, čtení 
   for (const [name, value] of [['BACKUP_KEEP_DAILY', '0'], ['BACKUP_KEEP_MONTHLY', '-1'], ['BACKUP_DATABASE_NAME', 'a--b'], ['BACKUP_ENV', 'staging']]) {
     assert.ok(parseBackupConfig({ ...GITHUB, [name]: value }, { backend: 'github', purpose: 'backup' }).config === null, `${name}=${value}`);
   }
+});
+
+test('generic profil: Cloudflare D1 UUID a název databáze se ověřují před exportem', async () => {
+  const config = {
+    schemaProfile: 'generic' as const, accountId: GITHUB.BACKUP_CLOUDFLARE_ACCOUNT_ID,
+    databaseId: GITHUB.BACKUP_DATABASE_ID, databaseName: 'other-d1',
+    environment: 'production', apiToken: 'synthetic-token', maxExportBytes: 1024,
+  };
+  const requests: { url: string; method: string; token: string | null }[] = [];
+  const deps = {
+    fetch: async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      requests.push({ url, method: init?.method ?? 'GET', token: new Headers(init?.headers).get('authorization') });
+      return Response.json({ success: true, result: { name: 'other-d1', uuid: GITHUB.BACKUP_DATABASE_ID } });
+    },
+    sleep: async () => undefined, log: () => undefined,
+  };
+  await verifyGenericDatabaseIdentity(config, deps);
+  assert.equal(requests.length, 1);
+  assert.equal(requests[0].method, 'GET');
+  assert.ok(requests[0].url.endsWith(`/d1/database/${GITHUB.BACKUP_DATABASE_ID}`));
+  const mismatched = { ...deps, fetch: async () => Response.json({ success: true, result: { name: 'other-d1', uuid: 'different-db' } }) };
+  await assert.rejects(verifyGenericDatabaseIdentity(config, mismatched), { kind: 'database-identity-mismatch' });
+  const denied = { ...deps, fetch: async () => new Response(null, { status: 403 }) };
+  await assert.rejects(verifyGenericDatabaseIdentity(config, denied), { kind: 'database-identity-check-failed' });
+  await verifyGenericDatabaseIdentity({ ...config, schemaProfile: 'chalupa' }, { ...deps, fetch: async () => assert.fail('Chalupa profil nemění REST API') });
 });
 
 // --- Snapshoty, manifest, retence --------------------------------------------------------------------

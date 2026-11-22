@@ -1802,6 +1802,11 @@ jádrem; konfigurace stejnými `BACKUP_*` (`BACKUP_BACKEND=r2` ve vars).
   Pro více databází i nadále používej samostatné R2 buckety, protože jejich
   denní klíče mají společný formát `daily/YYYY-MM-DD.sql`.
 - `BACKUP_SCHEMA_PROFILE=chalupa` (výchozí) zachovává přísné kontroly projektu.
+  V generic profilu se před exportem přes Cloudflare D1 GET API ověřuje, že UUID databáze
+  odpovídá požadovanému názvu (chyba = žádný export). Pokud databáze nemá vlastní marker
+  prostředí, `BACKUP_ENV` je pouze administrativní označení; generic profil neumí
+  sám dokázat, zda je databáze skutečně production nebo preview.
+  Používej proto oddělené účty/databáze a kontroluj UUID před aktivací.
   `generic` dovoluje jinou D1 bez tabulky rezervací či migrační tabulky,
   ale nedává stejnou garanci aplikační integrity jako profil Chalupy.
   Pro R2 backend nastav stejný profil také v CLI při obnově.

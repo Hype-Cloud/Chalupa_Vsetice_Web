@@ -116,9 +116,42 @@ async function callExport(config: ExportConfig, deps: CoreDeps, bookmark?: strin
   return { status: 'complete', bookmark: at, signedUrl: signed };
 }
 
+/** Generic D1 nemá povinnou tabulku meta.environment. Ověříme alespoň,
+ * že UUID skutečně patří očekávanému názvu databáze (před stažením osobních dat).
+ * Pro Chalupu zůstává přísná kontrola prostředí v samotném SQL exportu. */
+export async function verifyGenericDatabaseIdentity(config: ExportConfig, deps: CoreDeps): Promise<void> {
+  if (config.schemaProfile !== 'generic') return;
+  const url = `https://api.cloudflare.com/client/v4/accounts/${encodeURIComponent(config.accountId)}/d1/database/${encodeURIComponent(config.databaseId)}`;
+  let response: Response;
+  try {
+    response = await deps.fetch(url, {
+      method: 'GET',
+      headers: { authorization: `Bearer ${config.apiToken}` },
+      signal: AbortSignal.timeout(API_TIMEOUT_MS),
+    });
+  } catch {
+    throw new BackupError('database-identity-check-failed');
+  }
+  if (!response.ok) {
+    await response.body?.cancel().catch(() => undefined);
+    throw new BackupError('database-identity-check-failed');
+  }
+  let value: unknown;
+  try {
+    value = await response.json();
+  } catch {
+    throw new BackupError('database-identity-check-failed');
+  }
+  if (!isObject(value) || value.success !== true || !isObject(value.result) ||
+      value.result.name !== config.databaseName || value.result.uuid !== config.databaseId) {
+    throw new BackupError('database-identity-mismatch');
+  }
+}
+
 /** Spustí export a dotazuje se, dokud není hotový (nejvýš MAX_POLLS × POLL_INTERVAL_MS). */
 export async function requestExport(config: ExportConfig, deps: CoreDeps): Promise<{ bookmark: string; signedUrl: string }> {
   if (!config.apiToken || !config.accountId || !config.databaseId) throw new BackupError('not-configured');
+  await verifyGenericDatabaseIdentity(config, deps);
   let state = await callExport(config, deps);
   for (let poll = 0; state.status === 'pending'; poll++) {
     if (poll >= MAX_POLLS) throw new BackupError('export-timeout');
