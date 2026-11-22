@@ -1793,9 +1793,9 @@ jádrem; konfigurace stejnými `BACKUP_*` (`BACKUP_BACKEND=r2` ve vars).
   neakceptuje.
 - Nezávislý monitor pro GitHub při každé kontrole ověřuje aktuální denní snapshot
   stažením zašifrovaného souboru, manifestu a kontrolou SHA-256. Nepotřebuje age soukromý klíč.
-- Obnova kontroluje existenci tabulek včetně prázdných, názvy a typy indexů,
-  triggerů a pohledů a počty řádků; nejde však o kryptografickou garanci obnovitelnosti
-  ani porovnání všech SQL definic do posledního znaku.
+- Obnova kontroluje existenci tabulek včetně prázdných, indexů, triggerů
+  a pohledů, počty řádků a normalizované CREATE definice ze sqlite_master.
+  Nejde o kryptografickou garanci úplné obnovitelnosti všech databázových operací.
 - R2 retence se při automatických bězích řídí metadaty databáze a prostředí.
   Objekty bez metadat nebo patřící jiné databázi nejsou automaticky mazány.
   Při kolizi denního či měsíčního klíče s neoznačeným objektem běh selže.

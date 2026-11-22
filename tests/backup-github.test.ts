@@ -10,7 +10,7 @@ import { sealSnapshot } from '../lib/backup/seal.ts';
 import { GithubClient, identifySnapshot, publishSnapshot, RELEASE_MARKER, releaseTag, type GithubDeps } from '../lib/backup/github.ts';
 import { runGithubBackup, runGithubMonitor } from '../lib/backup/github-run.ts';
 import { buildManifest, type SnapshotManifest, type SnapshotRef } from '../lib/backup/snapshot.ts';
-import { expectedRowCounts, expectedSchema, runCli, sqlStatements, type CliDeps } from '../scripts/lib/backup-cli.ts';
+import { expectedRowCounts, expectedSchema, expectedSchemaDefinitions, normalizedSchemaSql, runCli, sqlStatements, type CliDeps } from '../scripts/lib/backup-cli.ts';
 import { FakeGithub } from './fixtures/fake-github.ts';
 
 // Backend GitHub Releases: běh zálohy (export → gzip → age → draft → upload → ověření →
@@ -375,6 +375,14 @@ test('obnova: parser schématu počítá i prázdné tabulky, indexy a triggery'
   assert.equal(expectedRowCounts(withEmpty).has('empty_test'), false);
   assert.equal(expectedSchema(withEmpty).get('empty_test'), 'table');
   assert.equal(expectedSchema(withEmpty).get('empty_test_index'), 'index');
+  const full = expectedSchemaDefinitions(sql);
+  assert.equal(full.size, objects.size, 'z každého CREATE se musí získat celá definice');
+  assert.ok(full.get('reservations_cancel_release_nights')?.includes("DELETE FROM reserved_nights"));
+  assert.ok(full.get('reservations')?.includes('CHECK (status IN'));
+  assert.equal(normalizedSchemaSql('CREATE TABLE IF NOT EXISTS "x"(id INT);'), normalizedSchemaSql('CREATE TABLE "x"(id INT)'));
+  assert.notEqual(normalizedSchemaSql('CREATE TABLE x(id INT)'), normalizedSchemaSql('CREATE TABLE x(id TEXT)'));
+  assert.notEqual(normalizedSchemaSql('CREATE TRIGGER x AFTER UPDATE ON t BEGIN SELECT 1; END'),
+    normalizedSchemaSql('CREATE TRIGGER x AFTER UPDATE ON t BEGIN SELECT 2; END'));
 });
 
 test('monitor nezatíží Workers paměť: kontrola SHA-256 z GitHub metadat bez stahování age assetu', async () => {

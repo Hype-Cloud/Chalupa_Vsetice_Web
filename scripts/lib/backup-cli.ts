@@ -311,6 +311,29 @@ export function expectedSchema(sql: string): Map<string, string> {
   return objects;
 }
 
+/** SQLite ukládá CREATE bez koncového středníku a IF NOT EXISTS.
+ * Ostatní text (včetně CHECK, triggerů a WHERE u indexů) porovnáváme. */
+export function normalizedSchemaSql(sql: string): string {
+  return sql.trim()
+    .replace(/;\s*$/, '')
+    .replace(/^(CREATE\s+(?:UNIQUE\s+)?(?:TABLE|INDEX|TRIGGER|VIEW)\s+)IF\s+NOT\s+EXISTS\s+/i, '$1')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+/** Úplné definice CREATE z ověřeného D1 exportu, nikoli jen názvy objektů. */
+export function expectedSchemaDefinitions(sql: string): Map<string, string> {
+  const definitions = new Map<string, string>();
+  const pattern = /^CREATE\s+(?:UNIQUE\s+)?(?:TABLE|INDEX|TRIGGER|VIEW)\s+(?:IF\s+NOT\s+EXISTS\s+)?(?:"([^"]+)"|([A-Za-z_][\w]*))/i;
+  for (const statement of sqlStatements(sql)) {
+    const match = pattern.exec(statement.trim());
+    if (!match) continue;
+    const name = match[1] ?? match[2];
+    if (!name.startsWith('sqlite_')) definitions.set(name, normalizedSchemaSql(statement));
+  }
+  return definitions;
+}
+
 export function expectedRowCounts(sql: string): Map<string, number> {
   const counts = new Map<string, number>();
   for (const statement of sqlStatements(sql)) {
@@ -386,6 +409,11 @@ async function restore(options: Record<string, string | true>, deps: CliDeps): P
     const originalSql = new TextDecoder().decode(sql);
     const counts = expectedRowCounts(originalSql);
     const expectedObjects = expectedSchema(originalSql);
+    const expectedDefinitions = expectedSchemaDefinitions(originalSql);
+    if (expectedDefinitions.size !== expectedObjects.size ||
+        [...expectedObjects].some(([name]) => !expectedDefinitions.has(name))) {
+      throw new CliError('export obsahuje neočekávanou definici schématu');
+    }
     const tables = [...expectedObjects.entries()].filter(([, type]) => type === 'table').map(([name]) => name);
     if (manifest.schemaProfile !== 'generic' && !tables.includes('d1_migrations')) throw new CliError('export neobsahuje d1_migrations');
     // Ověřit i prázdné tabulky, které nemají žádné INSERT INTO.
@@ -407,15 +435,25 @@ async function restore(options: Record<string, string | true>, deps: CliDeps): P
     const mismatch = tables.filter((t) => (t === 'd1_migrations' ? manifest.migrations : (counts.get(t) ?? 0)) !== actual.get(t));
     if (mismatch.length > 0) throw new CliError(`obnovená D1 neodpovídá záloze (tabulky: ${mismatch.join(', ')})`);
     const schemaResult = await run(['d1', 'execute', target, '--remote', '--json',
-      '--command=SELECT type, name FROM sqlite_master WHERE name NOT LIKE \'sqlite_%\'']);
+      '--command=SELECT type, name, sql FROM sqlite_master WHERE name NOT LIKE \'sqlite_%\'']);
     if (schemaResult.code !== 0) throw new CliError('kontrola schématu obnovené D1 selhala');
     const schemaResponse = wranglerJson(schemaResult.stdout);
     if (!Array.isArray(schemaResponse) || !isObject(schemaResponse[0]) || !Array.isArray(schemaResponse[0].results)) {
       throw new CliError('neplatná odpověď na kontrolu schématu');
     }
-    const actualObjects = new Map((schemaResponse[0].results as { type: string; name: string }[]).map((r) => [r.name, r.type]));
-    const missing = [...expectedObjects].filter(([name, type]) => actualObjects.get(name) !== type).map(([name]) => name);
+    const rowsOfSchema = schemaResponse[0].results as unknown[];
+    if (rowsOfSchema.some((value) => !isObject(value) || typeof value.name !== 'string' ||
+        typeof value.type !== 'string' || typeof value.sql !== 'string')) {
+      throw new CliError('neplatná SQL definice schématu');
+    }
+    const restored = new Map((rowsOfSchema as { type: string; name: string; sql: string }[])
+      .map((r) => [r.name, { type: r.type, sql: normalizedSchemaSql(r.sql) }]));
+    const missing = [...expectedObjects].filter(([name, type]) => restored.get(name)?.type !== type).map(([name]) => name);
     if (missing.length > 0) throw new CliError(`obnovená D1 postrádá objekty schématu: ${missing.join(', ')}`);
+    const changed = [...expectedDefinitions].filter(([name, sql]) => restored.get(name)?.sql !== sql).map(([name]) => name);
+    if (changed.length > 0) throw new CliError(`obnovená D1 má změněné definice schématu: ${changed.join(', ')}`);
+    const extra = [...restored.keys()].filter((name) => !expectedDefinitions.has(name));
+    if (extra.length > 0) throw new CliError(`obnovená D1 má neočekávané objekty schématu: ${extra.join(', ')}`);
     deps.out(`Obnova ověřena: ${manifest.migrations} migrací, ${tables.length} tabulek (včetně prázdných), ${expectedObjects.size} objektů schématu.`);
     deps.out(`Nová D1 „${target}“ je samostatná. Po ověření ji smažte (wrangler d1 delete ${target}), pokud ji nepotřebujete.`);
   } finally {
