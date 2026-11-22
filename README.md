@@ -1786,6 +1786,27 @@ jádrem; konfigurace stejnými `BACKUP_*` (`BACKUP_BACKEND=r2` ve vars).
   `pnpm run backup:r2:deploy:test` + secrets s `--env test` → `alert-test` a `backup` →
   produkce `pnpm run backup:r2:deploy` jen se souhlasem.
 
+### Bezpečnostní doplnění po nezávislém auditu
+
+- Produkční GitHub snapshoty se kontrolují na `age` šifrování také při opakovaných bězích
+  a při převzetí již existujícího měsíčního snapshotu. Nešifrovaný historický soubor se
+  neakceptuje.
+- Nezávislý monitor pro GitHub při každé kontrole ověřuje aktuální denní snapshot
+  stažením zašifrovaného souboru, manifestu a kontrolou SHA-256. Nepotřebuje age soukromý klíč.
+- Obnova kontroluje existenci tabulek včetně prázdných, názvy a typy indexů,
+  triggerů a pohledů a počty řádků; nejde však o kryptografickou garanci obnovitelnosti
+  ani porovnání všech SQL definic do posledního znaku.
+- R2 retence se při automatických bězích řídí metadaty databáze a prostředí.
+  Objekty bez metadat nebo patřící jiné databázi nejsou automaticky mazány.
+  Při kolizi denního či měsíčního klíče s neoznačeným objektem běh selže.
+  Pro více databází i nadále používej samostatné R2 buckety, protože jejich
+  denní klíče mají společný formát `daily/YYYY-MM-DD.sql`.
+- `BACKUP_SCHEMA_PROFILE=chalupa` (výchozí) zachovává přísné kontroly projektu.
+  `generic` dovoluje jinou D1 bez tabulky rezervací či migrační tabulky,
+  ale nedává stejnou garanci aplikační integrity jako profil Chalupy.
+  Pro R2 backend nastav stejný profil také v CLI při obnově.
+- CLI spouští přímo TypeScript, proto požaduje Node.js alespoň 22.18.
+
 ### Zprovoznění GitHub zálohy (jednorázově, uživatel)
 
 1. **Soukromý repozitář** (např. `<owner>/chalupa-vsetice-d1-backups`): GitHub → New

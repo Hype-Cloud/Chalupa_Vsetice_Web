@@ -42,6 +42,7 @@ env:
   # Necitlivá konfigurace (README, „Konfigurace“).
   BACKUP_BACKEND: github
   BACKUP_ENV: production
+  BACKUP_SCHEMA_PROFILE: chalupa
   BACKUP_DATABASE_NAME: chalupa-vsetice-rezervace
   BACKUP_DATABASE_ID: 08656b04-3ade-4a34-b9d3-94f7b8e154ef
   BACKUP_KEEP_DAILY: '30'

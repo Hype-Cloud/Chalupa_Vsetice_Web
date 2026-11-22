@@ -286,12 +286,13 @@ test('idempotence: stejný den → export se nespouští (žádný duplikát); e
   assert.equal(await text('daily/2030-01-16.sql'), changed);
   assert.equal(md5(new Uint8Array(await (await bucket.get('monthly/2030-01.sql'))!.arrayBuffer())), md5(EXPORT));
 
-  // Cizí obsah pod klíčem dnešního snapshotu se nikdy nepřepíše (a export se nespouští).
+  // Kolize se snapshotem bez potvrzené identity se musí zastavit ještě před exportem.
   await bucket.put('daily/2030-02-01.sql', 'jiný obsah');
   await bucket.put('monthly/2030-02.sql', 'jiný obsah');
   calls = [];
   const conflict = await run({ date: '2030-02-01' });
-  assert.equal(conflict.ok, true, JSON.stringify(conflict));
+  assert.equal(conflict.ok, false, JSON.stringify(conflict));
+  assert.equal(conflict.error, 'snapshot-identity-mismatch');
   assert.equal(calls.filter((c) => c.kind === 'export').length, 0);
   assert.equal(await text('daily/2030-02-01.sql'), 'jiný obsah');
   assert.equal(await text('monthly/2030-02.sql'), 'jiný obsah');
