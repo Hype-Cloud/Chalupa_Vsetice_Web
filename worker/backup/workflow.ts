@@ -1,10 +1,16 @@
 // Průběh Workflow zálohy nad injektovanými závislostmi (testovatelné mimo runtime Workflows).
 //
 // - Rozvrh `BACKUP_CRON` (02:15 UTC): záloha. `MONITOR_CRON` (14:45 UTC): jen kontrola stáří
-//   poslední denní zálohy (> 48 h) a objemu (> 7 GB). Ruční spuštění: payload { mode }.
-// - Kroky jsou idempotentní: existující denní snapshot = export se přeskočí (žádné duplicity),
-//   pending/ je vázaný na instanci, kopie nikdy nepřepisuje existující snapshot.
-// - Selhání po vyčerpání pokusů → upozornění správci (Resend) a instance skončí chybou.
+//   poslední denní zálohy (> 48 h) a objemu (> 7 GB). Ručně: payload { mode: backup | monitor |
+//   alert-test } (alert-test jen ověří doručení upozornění, na D1 ani R2 nesahá).
+// - Kroky jsou idempotentní: existující denní snapshot = export se přeskočí; pending/ je vázaný na
+//   instanci; snapshot se zapisuje podmíněně (If-None-Match: *), takže ho nepřepíše ani souběžná
+//   instance.
+// - Před exportem: úklid pending/ starších než 24 h a kontrola kapacity bucketu (tvrdý strop
+//   STORAGE_HARD_LIMIT_BYTES) – nad stropem se nic nezapisuje.
+// - Upozornění: v produkci jsou povinná. Chybějící RESEND_API_KEY / CONFLICT_ALERT_EMAIL nebo
+//   neúspěšné doručení ukončí instanci chybou (`alerts-not-configured`, `alert-delivery-failed`),
+//   ale až po uložení zálohy – vytvořená záloha se kvůli upozornění nikdy neruší ani nemaže.
 // - Výsledky kroků obsahují jen metadata (klíč, velikost, MD5, bookmark) – nikdy podepsanou
 //   URL ani obsah zálohy (stav Workflow je vidět v dashboardu).
 
@@ -16,10 +22,12 @@ import {
   copySnapshot,
   dailyKey,
   exportToPending,
+  MAX_EXPORT_BYTES,
   monthlyKey,
   pendingKey,
   pruneDaily,
   pruneMonthly,
+  STORAGE_HARD_LIMIT_BYTES,
   utcDate,
   type BackupDeps,
   type BackupStatus,
@@ -39,14 +47,16 @@ export interface BackupEnv {
   D1_EXPORT_ACCOUNT_ID?: string;
   /** Secret: API token s oprávněním exportu D1 (D1 Edit). */
   D1_EXPORT_API_TOKEN?: string;
-  /** Secrets pro upozornění (stejné jako u rezervačního Workeru). */
+  /** Secrets pro upozornění (v produkci povinné). */
   RESEND_API_KEY?: string;
   CONFLICT_ALERT_EMAIL?: string;
   CONFLICT_ALERT_FROM?: string;
 }
 
+export type BackupMode = 'backup' | 'monitor' | 'alert-test';
+
 export interface BackupParams {
-  mode?: 'backup' | 'monitor';
+  mode?: BackupMode;
 }
 
 /** Událost Workflow; `schedule` doplňuje runtime u instancí z `schedules`. */
@@ -65,16 +75,18 @@ export interface BackupStep {
 
 const EXPORT_STEP: StepConfig = { retries: { limit: 3, delay: '10 minutes', backoff: 'exponential' }, timeout: '15 minutes' };
 const STORAGE_STEP: StepConfig = { retries: { limit: 5, delay: '1 minute', backoff: 'exponential' }, timeout: '5 minutes' };
-const ALERT_STEP: StepConfig = { retries: { limit: 2, delay: '1 minute', backoff: 'exponential' }, timeout: '2 minutes' };
+const ALERT_STEP: StepConfig = { retries: { limit: 3, delay: '2 minutes', backoff: 'exponential' }, timeout: '2 minutes' };
+
+type StatusSummary = Pick<BackupStatus, 'stale' | 'nearLimit' | 'totalBytes' | 'dailyCount' | 'monthlyCount' | 'latest'>;
 
 export interface BackupResult {
-  mode: 'backup' | 'monitor';
+  mode: BackupMode;
   date: string;
   daily?: 'stored' | 'exists';
-  monthly?: 'stored' | 'exists';
+  monthly?: 'stored' | 'exists' | 'kept';
   bytes?: number;
   pruned?: number;
-  status: Pick<BackupStatus, 'stale' | 'nearLimit' | 'totalBytes' | 'dailyCount' | 'monthlyCount' | 'latest'> | null;
+  status: StatusSummary | null;
   alerts: string[];
 }
 
@@ -88,74 +100,128 @@ export function exportConfig(env: BackupEnv): ExportConfig {
   };
 }
 
-export const runMode = (event: BackupEvent): 'backup' | 'monitor' =>
-  event.schedule ? (event.schedule.cron === MONITOR_CRON ? 'monitor' : 'backup') : event.payload?.mode === 'monitor' ? 'monitor' : 'backup';
+export function runMode(event: BackupEvent): BackupMode {
+  if (event.schedule) return event.schedule.cron === MONITOR_CRON ? 'monitor' : 'backup';
+  const mode = event.payload?.mode;
+  return mode === 'monitor' || mode === 'alert-test' ? mode : 'backup';
+}
 
 /** Datum snapshotu: plánovaný čas spuštění (UTC), u ručního běhu čas události. */
 export const runDate = (event: BackupEvent) => utcDate(event.schedule ? new Date(event.schedule.scheduledTime) : event.timestamp);
+
+/** Upozornění jsou nakonfigurovaná (oba secrets). */
+export const alertsConfigured = (env: BackupEnv) => !!env.RESEND_API_KEY?.trim() && !!env.CONFLICT_ALERT_EMAIL?.trim();
+/** V produkci jsou upozornění povinná. */
+export const alertsRequired = (env: BackupEnv) => env.BACKUP_ENV?.trim() === 'production';
+
+/** Problém s kapacitou bucketu před novým exportem (null = lze zapisovat). */
+export function capacityProblem(totalBytes: number): string | null {
+  // Nový export: pending/ + denní kopie (+ měsíční) – rezerva tří maximálních exportů.
+  return totalBytes + 3 * MAX_EXPORT_BYTES > STORAGE_HARD_LIMIT_BYTES ? 'storage-limit' : null;
+}
 
 export async function runBackupWorkflow(event: BackupEvent, step: BackupStep, env: BackupEnv, deps: BackupDeps): Promise<BackupResult> {
   const mode = runMode(event);
   const date = runDate(event);
   const config = exportConfig(env);
   const alerts: string[] = [];
-  const alert = async (kind: string, status?: BackupStatus) => {
+  const undelivered: string[] = [];
+  const alert = async (kind: string, status?: BackupStatus | null) => {
     alerts.push(kind);
-    await step.do(`upozornění ${kind}`, ALERT_STEP, async () => sendBackupAlert(env, deps, { kind, date, status: status ?? null }));
+    try {
+      const state = await step.do(`upozornění ${kind}`, ALERT_STEP, async () =>
+        sendBackupAlert(env, deps, { kind, date, status: status ?? null, idempotencyKey: mode === 'alert-test' ? event.instanceId : date }),
+      );
+      // `skipped` (bez konfigurace) je problém jen tam, kde jsou upozornění povinná (produkce).
+      if (state !== 'sent' && alertsRequired(env)) undelivered.push(kind);
+    } catch {
+      // Výpadek Resend nesmí zrušit zálohu – instance jen na konci skončí chybou.
+      undelivered.push(kind);
+    }
+  };
+  /** Na konci běhu: v produkci je nedoručené / nenakonfigurované upozornění chyba instance. */
+  const finish = (result: BackupResult): BackupResult => {
+    if (alertsRequired(env) && !alertsConfigured(env)) {
+      deps.log('d1-backup: alerts not configured (RESEND_API_KEY, CONFLICT_ALERT_EMAIL) – produkce bez upozornění');
+      throw new BackupError('alerts-not-configured');
+    }
+    if (undelivered.length > 0) throw new BackupError('alert-delivery-failed');
+    return result;
   };
 
+  if (mode === 'alert-test') {
+    if (!alertsConfigured(env)) throw new BackupError('alerts-not-configured');
+    await alert('alert-test');
+    if (undelivered.length > 0) throw new BackupError('alert-delivery-failed');
+    return { mode, date, status: null, alerts };
+  }
+
   if (mode === 'monitor') {
-    const status = await step.do('kontrola záloh', STORAGE_STEP, () => backupStatus(deps.bucket, deps.now()));
+    const status = await step.do('kontrola záloh', STORAGE_STEP, async () => {
+      await cleanPending(deps.bucket, deps.now());
+      return backupStatus(deps.bucket, deps.now());
+    });
     if (status.stale) await alert('backup-stale', status);
     if (status.nearLimit) await alert('storage-near-limit', status);
-    return { mode, date, status: pick(status), alerts };
+    return finish({ mode, date, status: pick(status), alerts });
   }
 
   const daily = dailyKey(date);
   const pending = pendingKey(event.instanceId);
   let result: Omit<BackupResult, 'status' | 'alerts'>;
   try {
-    const existing = await step.do('kontrola dnešní zálohy', STORAGE_STEP, async () => {
+    // Příprava: úklid pozůstatků neúspěšných běhů, stav dnešní zálohy a kapacita bucketu.
+    const prepared = await step.do('příprava', STORAGE_STEP, async () => {
+      await cleanPending(deps.bucket, deps.now());
       const object = await deps.bucket.head(daily);
-      return object?.checksums.md5 ? { bytes: object.size, md5: hexOf(object.checksums.md5) } : null;
+      const status = await backupStatus(deps.bucket, deps.now());
+      return { existing: object?.checksums.md5 ? { bytes: object.size, md5: hexOf(object.checksums.md5) } : null, totalBytes: status.totalBytes };
     });
-    let snapshot = existing;
+    let snapshot = prepared.existing;
     let dailyState: 'stored' | 'exists' = 'exists';
     if (!snapshot) {
+      const limit = capacityProblem(prepared.totalBytes);
+      if (limit) throw new BackupError(limit);
       const exported = await step.do('export D1 do pending', EXPORT_STEP, () => exportToPending(config, deps, pending));
       const metadata = { database: config.databaseName, environment: config.environment, bookmark: exported.bookmark, createdAt: deps.now().toISOString(), migrations: exported.migrations };
       dailyState = await step.do('uložení denní zálohy', STORAGE_STEP, async () => {
-        const state = await copySnapshot(deps.bucket, exported.key, daily, exported, metadata);
+        const state = await copySnapshot(deps.bucket, exported.key, daily, exported, metadata, 'verify');
         await deps.bucket.delete(exported.key);
-        return state;
+        return state === 'stored' ? 'stored' : 'exists';
       });
       snapshot = { bytes: exported.bytes, md5: exported.md5 };
     }
     const target = snapshot;
     // Měsíční snapshot = první úspěšná záloha měsíce; existující (z dřívějšího dne) zůstává.
     const monthly = await step.do('měsíční záloha', STORAGE_STEP, async () => {
-      if (await deps.bucket.head(monthlyKey(date))) return 'exists' as const;
       const source = await deps.bucket.head(daily);
       const custom = source?.customMetadata ?? {};
-      return copySnapshot(deps.bucket, daily, monthlyKey(date), target, {
-        database: custom.database ?? config.databaseName,
-        environment: custom.environment ?? config.environment,
-        bookmark: custom.bookmark ?? '',
-        createdAt: custom.createdAt ?? deps.now().toISOString(),
-        migrations: Number(custom.migrations ?? 0),
-      });
+      return copySnapshot(
+        deps.bucket,
+        daily,
+        monthlyKey(date),
+        target,
+        {
+          database: custom.database ?? config.databaseName,
+          environment: custom.environment ?? config.environment,
+          bookmark: custom.bookmark ?? '',
+          createdAt: custom.createdAt ?? deps.now().toISOString(),
+          migrations: Number(custom.migrations ?? 0),
+        },
+        'keep',
+      );
     });
     // Retence až po úspěšném uložení – neúspěšný běh nic nemaže.
     const pruned = await step.do('retence', STORAGE_STEP, async () => {
       const removed = [...(await pruneDaily(deps.bucket)), ...(await pruneMonthly(deps.bucket))];
-      const stalePending = await cleanPending(deps.bucket, deps.now());
-      return removed.length + stalePending;
+      return removed.length;
     });
     result = { mode, date, daily: dailyState, monthly, bytes: target.bytes, pruned };
   } catch (error) {
     const kind = error instanceof BackupError ? error.kind : 'unknown';
     deps.log(`d1-backup: backup failed (${kind})`);
     await alert(`backup-failed:${kind}`);
+    if (alertsRequired(env) && !alertsConfigured(env)) deps.log('d1-backup: alerts not configured (RESEND_API_KEY, CONFLICT_ALERT_EMAIL) – produkce bez upozornění');
     throw error;
   }
 
@@ -168,10 +234,10 @@ export async function runBackupWorkflow(event: BackupEvent, step: BackupStep, en
   }
   if (status?.nearLimit) await alert('storage-near-limit', status);
   deps.log(`d1-backup: ok (${result.daily}, ${result.bytes} B${status ? `, ${status.dailyCount} denních, ${status.monthlyCount} měsíčních` : ''})`);
-  return { ...result, status: status ? pick(status) : null, alerts };
+  return finish({ ...result, status: status ? pick(status) : null, alerts });
 }
 
-const pick = (s: BackupStatus) => ({ stale: s.stale, nearLimit: s.nearLimit, totalBytes: s.totalBytes, dailyCount: s.dailyCount, monthlyCount: s.monthlyCount, latest: s.latest });
+const pick = (s: BackupStatus): StatusSummary => ({ stale: s.stale, nearLimit: s.nearLimit, totalBytes: s.totalBytes, dailyCount: s.dailyCount, monthlyCount: s.monthlyCount, latest: s.latest });
 const hexOf = (buffer: ArrayBuffer) => Array.from(new Uint8Array(buffer), (b) => b.toString(16).padStart(2, '0')).join('');
 
 // --- Upozornění správci ------------------------------------------------------------------------
@@ -179,6 +245,7 @@ const hexOf = (buffer: ArrayBuffer) => Array.from(new Uint8Array(buffer), (b) =>
 const KIND_TEXT: Record<string, string> = {
   'backup-stale': 'Poslední úspěšná denní záloha D1 je starší než 48 hodin (nebo žádná neexistuje).',
   'storage-near-limit': 'Objem záloh v R2 překročil 7 GB (bezplatná kvóta R2 Standard je 10 GB-month).',
+  'alert-test': 'Testovací upozornění zálohovacího Workeru – doručení upozornění funguje. Nic dalšího není potřeba.',
 };
 
 /** Text upozornění – jen prostředí, druh chyby, čas a stav záloh; žádná data z databáze. */
@@ -186,10 +253,13 @@ export function buildBackupAlert(alert: { kind: string; env: string; database: s
   const prefix = alert.env === 'production' ? '' : '[TEST] ';
   const [base, detail] = alert.kind.split(':');
   const time = new Intl.DateTimeFormat('cs-CZ', { timeZone: 'Europe/Prague', dateStyle: 'short', timeStyle: 'medium' }).format(alert.at);
-  const description = base === 'backup-failed' ? `Automatická záloha D1 se nepodařila (${detail ?? 'unknown'}). Starší zálohy zůstávají beze změny.` : (KIND_TEXT[base] ?? base);
+  const description =
+    base === 'backup-failed'
+      ? `Automatická záloha D1 se nepodařila (${detail ?? 'unknown'}). Starší zálohy zůstávají beze změny.${detail === 'storage-limit' ? ' Objem bucketu je u stropu – nová záloha se nezapsala.' : ''}`
+      : (KIND_TEXT[base] ?? base);
   const status = alert.status;
   return {
-    subject: `${prefix}POZOR: záloha D1 ${alert.database} – ${base}`,
+    subject: `${prefix}${base === 'alert-test' ? 'Test' : 'POZOR'}: záloha D1 ${alert.database} – ${base}`,
     text: [
       description,
       '',
@@ -210,8 +280,15 @@ export function buildBackupAlert(alert: { kind: string; env: string; database: s
   };
 }
 
-/** Best-effort e-mail správci; bez konfigurace jen log. Nevyhazuje kvůli chybě odeslání. */
-export async function sendBackupAlert(env: BackupEnv, deps: Pick<BackupDeps, 'fetch' | 'log' | 'now'>, alert: { kind: string; date: string; status: BackupStatus | null }): Promise<'sent' | 'skipped' | 'failed'> {
+/**
+ * E-mail správci. Bez konfigurace `skipped` (o závažnosti rozhoduje volající – v produkci chyba
+ * instance). Selhání odeslání vyhodí MailError, aby se krok Workflow zopakoval.
+ */
+export async function sendBackupAlert(
+  env: BackupEnv,
+  deps: Pick<BackupDeps, 'fetch' | 'log' | 'now'>,
+  alert: { kind: string; date: string; status: BackupStatus | null; idempotencyKey?: string },
+): Promise<'sent' | 'skipped'> {
   const apiKey = env.RESEND_API_KEY?.trim();
   const to = env.CONFLICT_ALERT_EMAIL?.trim();
   if (!apiKey || !to) {
@@ -220,16 +297,13 @@ export async function sendBackupAlert(env: BackupEnv, deps: Pick<BackupDeps, 'fe
   }
   const environment = env.BACKUP_ENV?.trim() || 'unknown';
   const { subject, text } = buildBackupAlert({ ...alert, env: environment, database: env.DATABASE_NAME?.trim() || 'D1', at: deps.now() });
+  const key = `d1-backup-${environment}-${alert.kind}-${alert.idempotencyKey ?? alert.date}`.replace(/[^A-Za-z0-9_-]/g, '-');
   try {
-    await sendViaResend(
-      apiKey,
-      { from: env.CONFLICT_ALERT_FROM?.trim() || RESEND_TEST_FROM, to, subject, text, idempotencyKey: `d1-backup-${environment}-${alert.kind.replace(/[^A-Za-z0-9_-]/g, '-')}-${alert.date}` },
-      deps.fetch,
-    );
-    deps.log(`d1-backup: alert sent (${alert.kind})`);
-    return 'sent';
+    await sendViaResend(apiKey, { from: env.CONFLICT_ALERT_FROM?.trim() || RESEND_TEST_FROM, to, subject, text, idempotencyKey: key }, deps.fetch);
   } catch (error) {
     deps.log(`d1-backup: alert failed (${error instanceof MailError ? error.kind : 'unknown'})`);
-    return 'failed';
+    throw error;
   }
+  deps.log(`d1-backup: alert sent (${alert.kind})`);
+  return 'sent';
 }

@@ -7,8 +7,8 @@ import { createRequire } from 'node:module';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { Miniflare } from 'miniflare';
-import { backupStatus, downloadToPending, KEEP_DAILY, KEEP_MONTHLY, MAX_EXPORT_BYTES, SqlInspector, STORAGE_ALERT_BYTES, type BackupBucket, type BackupDeps } from '../worker/backup/backup.ts';
-import { BACKUP_CRON, MONITOR_CRON, runDate, runMode } from '../worker/backup/workflow.ts';
+import { backupStatus, copySnapshot, downloadToPending, KEEP_DAILY, KEEP_MONTHLY, MAX_EXPORT_BYTES, SqlInspector, STORAGE_ALERT_BYTES, STORAGE_HARD_LIMIT_BYTES, type BackupBucket, type BackupDeps } from '../worker/backup/backup.ts';
+import { BACKUP_CRON, capacityProblem, MONITOR_CRON, runBackupWorkflow, runDate, runMode, type BackupStep } from '../worker/backup/workflow.ts';
 import { parseJsonc } from '../scripts/lib/d1-migrations.ts';
 
 // Automatická záloha D1 → R2 (worker/backup). Workflow běží ve workerd (Miniflare) se skutečným
@@ -31,7 +31,11 @@ const ENV = {
   DATABASE_ID,
   D1_EXPORT_ACCOUNT_ID: ACCOUNT,
   D1_EXPORT_API_TOKEN: TOKEN,
+  // V produkci jsou upozornění povinná – výchozí testovací prostředí je má (falešný Resend).
+  RESEND_API_KEY: 're_test_FAKE',
+  CONFLICT_ALERT_EMAIL: 'spravce@example.invalid',
 };
+const NO_ALERTS = { RESEND_API_KEY: '', CONFLICT_ALERT_EMAIL: '' };
 
 // --- Falešný Cloudflare API / podepsaná URL / Resend ------------------------------------------
 
@@ -40,6 +44,8 @@ type DownloadReply = 'ok' | 'no-length' | 'truncated' | { http: number } | { bod
 
 let exportReplies: ExportReply[];
 let downloadReplies: DownloadReply[];
+/** HTTP status falešného Resend (200 = doručeno). */
+let resendStatus: number;
 let calls: { kind: 'export' | 'download' | 'resend' | 'other'; body?: Record<string, unknown>; headers?: Record<string, string>; url: string }[];
 
 function envelope(result: Record<string, unknown>) {
@@ -80,7 +86,7 @@ async function service(request: Request): Promise<Response> {
   }
   if (url === 'https://api.resend.com/emails') {
     calls.push({ kind: 'resend', url, body: (await request.json()) as Record<string, unknown>, headers: Object.fromEntries(request.headers) });
-    return Response.json({ id: 'fake' });
+    return resendStatus === 200 ? Response.json({ id: 'fake' }) : new Response('chyba', { status: resendStatus });
   }
   calls.push({ kind: 'other', url });
   return new Response('neočekávaný požadavek', { status: 599 });
@@ -113,6 +119,7 @@ after(() => mf?.dispose());
 beforeEach(async () => {
   exportReplies = [];
   downloadReplies = [];
+  resendStatus = 200;
   calls = [];
   for (;;) {
     const page = await bucket.list();
@@ -129,7 +136,7 @@ interface RunOutput {
   logs: string[];
 }
 
-async function run(options: { date?: string; instanceId?: string; mode?: 'backup' | 'monitor'; cron?: string; env?: Record<string, string>; now?: string } = {}): Promise<RunOutput> {
+async function run(options: { date?: string; instanceId?: string; mode?: 'backup' | 'monitor' | 'alert-test'; cron?: string; env?: Record<string, string>; now?: string } = {}): Promise<RunOutput> {
   const date = options.date ?? '2030-01-15';
   const scheduledTime = `${date}T02:15:00.000Z`;
   const response = await mf.dispatchFetch('http://harness/', {
@@ -170,7 +177,7 @@ test('záloha: export → pending → denní a měsíční snapshot; obsah, MD5 
   assert.deepEqual(start.body, { output_format: 'polling', dump_options: { compatibility: 'd1' } });
   assert.equal(start.headers!.authorization, `Bearer ${TOKEN}`);
   assert.deepEqual(out.result!.alerts, []);
-  assert.deepEqual(out.steps.map((s) => s.name), ['kontrola dnešní zálohy', 'export D1 do pending', 'uložení denní zálohy', 'měsíční záloha', 'retence', 'kontrola objemu']);
+  assert.deepEqual(out.steps.map((s) => s.name), ['příprava', 'export D1 do pending', 'uložení denní zálohy', 'měsíční záloha', 'retence', 'kontrola objemu']);
 });
 
 test('export: dotazování probíhajícího exportu se stejným bookmarkem; omezený počet dotazů → export-timeout a opakování kroku', async () => {
@@ -273,7 +280,7 @@ test('idempotence: stejný den → export se nespouští (žádný duplikát); e
   const next = await run({ date: '2030-01-16' });
   assert.equal(next.ok, true, JSON.stringify(next));
   assert.equal(next.result!.daily, 'stored');
-  assert.equal(next.result!.monthly, 'exists');
+  assert.equal(next.result!.monthly, 'kept', 'měsíční snapshot z dřívějšího dne zůstává');
   assert.deepEqual(await keys(), ['daily/2030-01-15.sql', 'daily/2030-01-16.sql', 'monthly/2030-01.sql']);
   assert.equal(await text('daily/2030-01-16.sql'), changed);
   assert.equal(md5(new Uint8Array(await (await bucket.get('monthly/2030-01.sql'))!.arrayBuffer())), md5(EXPORT));
@@ -342,8 +349,10 @@ test('kontrola (14:45 UTC): žádná nebo stará denní záloha → upozornění
   const late = await run({ cron: '45 14 * * *', env: resend, now: new Date(Date.now() + 49 * 60 * 60 * 1000).toISOString() });
   assert.deepEqual(late.result!.alerts, ['backup-stale']);
 
-  const unconfigured = await run({ mode: 'monitor', now: new Date(Date.now() + 49 * 60 * 60 * 1000).toISOString() });
-  assert.deepEqual(unconfigured.result!.alerts, ['backup-stale']);
+  // Produkce bez nakonfigurovaných upozornění není bezproblémový stav: instance skončí chybou.
+  const unconfigured = await run({ mode: 'monitor', env: NO_ALERTS, now: new Date(Date.now() + 49 * 60 * 60 * 1000).toISOString() });
+  assert.equal(unconfigured.ok, false);
+  assert.equal(unconfigured.error, 'alerts-not-configured');
   assert.ok(unconfigured.logs.includes('d1-backup: alert skipped (not configured)'));
 });
 
@@ -494,10 +503,16 @@ test('wrangler.backup.jsonc: samostatný Worker bez veřejné URL a sdílených 
   assert.equal(scripts['backup:deploy:test'], 'wrangler deploy --config wrangler.backup.jsonc --env test');
 });
 
-test('náklady: strop velikosti exportu drží nejhorší objem záloh pod bezplatnými 10 GB; větší export se neuloží', async () => {
-  // 30 denních + 12 měsíčních + 1 měsíční před retencí + 1 pending.
-  assert.ok((KEEP_DAILY + KEEP_MONTHLY + 2) * MAX_EXPORT_BYTES < 10 * 1000 ** 3);
-  assert.ok(STORAGE_ALERT_BYTES < 10 * 1000 ** 3);
+test('náklady: strop exportu a tvrdý strop bucketu drží zálohy pod bezplatnými 10 GB; větší export se neuloží', async () => {
+  // Retence (30 + 12 + 1 měsíční před retencí) + 3 rozpracované pending/ (souběh, pozůstatky < 24 h).
+  assert.ok((KEEP_DAILY + KEEP_MONTHLY + 1 + 3) * MAX_EXPORT_BYTES < STORAGE_HARD_LIMIT_BYTES);
+  assert.ok(STORAGE_ALERT_BYTES < STORAGE_HARD_LIMIT_BYTES && STORAGE_HARD_LIMIT_BYTES < 10 * 1000 ** 3);
+  // Kontrola kapacity před exportem počítá s rezervou 3 maximálních exportů; i dvě souběžné
+  // instance, které kontrolou projdou zároveň, zůstanou pod 10 GB.
+  assert.equal(capacityProblem(0), null);
+  assert.equal(capacityProblem(STORAGE_HARD_LIMIT_BYTES - 3 * MAX_EXPORT_BYTES), null);
+  assert.equal(capacityProblem(STORAGE_HARD_LIMIT_BYTES - 3 * MAX_EXPORT_BYTES + 1), 'storage-limit');
+  assert.ok(STORAGE_HARD_LIMIT_BYTES + 3 * MAX_EXPORT_BYTES < 10 * 1000 ** 3);
   let cancelled = false;
   const body = new ReadableStream({ cancel: () => void (cancelled = true) });
   const deps = {
@@ -506,4 +521,186 @@ test('náklady: strop velikosti exportu drží nejhorší objem záloh pod bezpl
   } as unknown as BackupDeps;
   await assert.rejects(downloadToPending({ accountId: 'a', databaseId: 'd', databaseName: 'n', environment: 'production', apiToken: 't' }, deps, SIGNED, 'pending/x.sql'), (error: { kind?: string }) => error.kind === 'export-too-large');
   assert.equal(cancelled, true, 'stahování se ukončí');
+});
+
+// --- Souběžné zápisy (podmíněný put If-None-Match: *) -------------------------------------------
+
+async function seedSource(key: string, content: string) {
+  await bucket.put(key, content);
+  return { key, bytes: new TextEncoder().encode(content).length, md5: md5(content) };
+}
+
+async function race(sources: { key: string; bytes: number; md5: string }[], target: string, policy: 'verify' | 'keep' = 'verify'): Promise<string[]> {
+  const response = await mf.dispatchFetch('http://harness/copy-race', { method: 'POST', body: JSON.stringify({ sources, target, policy }) });
+  return (await response.json()) as string[];
+}
+
+test('souběh: dva současné zápisy různého obsahu do stejného snapshotu → právě jeden uspěje, druhý ho nepřepíše (opakováno)', async () => {
+  for (let round = 0; round < 25; round++) {
+    const target = `daily/2030-02-${String((round % 28) + 1).padStart(2, '0')}-${round}.sql`;
+    const a = await seedSource(`pending/a-${round}.sql`, `PRAGMA a;\n-- obsah A ${round} ${'a'.repeat(round * 97)}\n`);
+    const b = await seedSource(`pending/b-${round}.sql`, `PRAGMA b;\n-- obsah B ${round} ${'b'.repeat(round * 131)}\n`);
+    const results = await race([a, b], target);
+    assert.deepEqual([...results].sort(), ['error:snapshot-conflict', 'stored'], `kolo ${round}: ${results}`);
+    const winner = results[0] === 'stored' ? a : b;
+    const object = (await bucket.get(target))!;
+    const stored = new Uint8Array(await object.arrayBuffer());
+    // Uložený obsah patří celý vítězi a odpovídá jeho metadatům – žádné smíchání ani přepsání.
+    assert.equal(md5(stored), winner.md5, `kolo ${round}`);
+    assert.equal(object.customMetadata!.md5, winner.md5);
+    assert.equal(object.size, winner.bytes);
+    // Pozdější pokus poraženého obsahu (opakovaný krok) snapshot také nepřepíše.
+    const loser = winner === a ? b : a;
+    assert.deepEqual(await race([loser], target), ['error:snapshot-conflict']);
+    assert.equal(md5(new Uint8Array(await (await bucket.get(target))!.arrayBuffer())), winner.md5);
+  }
+});
+
+test('souběh: stejný obsah současně → jeden stored, druhý idempotentní exists; měsíční (keep) jiný obsah ponechá jako kept', async () => {
+  const a = await seedSource('pending/a.sql', 'PRAGMA x;\n-- stejný obsah\n');
+  const b = await seedSource('pending/b.sql', 'PRAGMA x;\n-- stejný obsah\n');
+  assert.deepEqual((await race([a, b], 'daily/2030-03-01.sql')).sort(), ['exists', 'stored']);
+
+  const first = await seedSource('pending/m1.sql', 'PRAGMA m;\n-- první záloha měsíce\n');
+  const later = await seedSource('pending/m2.sql', 'PRAGMA m;\n-- pozdější den\n');
+  assert.deepEqual(await race([first], 'monthly/2030-03.sql', 'keep'), ['stored']);
+  assert.deepEqual(await race([later], 'monthly/2030-03.sql', 'keep'), ['kept']);
+  assert.deepEqual(await race([first], 'monthly/2030-03.sql', 'keep'), ['exists']);
+  assert.equal(await text('monthly/2030-03.sql'), 'PRAGMA m;\n-- první záloha měsíce\n');
+  // Souběžné vytvoření měsíčního snapshotu dvěma instancemi: právě jeden zápis.
+  const x = await seedSource('pending/x.sql', 'PRAGMA m;\n-- instance X\n');
+  const y = await seedSource('pending/y.sql', 'PRAGMA m;\n-- instance Y\n');
+  const results = await race([x, y], 'monthly/2030-04.sql', 'keep');
+  assert.deepEqual([...results].sort(), ['kept', 'stored']);
+  assert.equal(md5(await text('monthly/2030-04.sql')), results[0] === 'stored' ? x.md5 : y.md5);
+});
+
+test('souběh: dvě instance Workflow téhož dne s různým exportem → jedna uloží snapshot, druhá skončí kolizí a nic nepřepíše', async () => {
+  const sqlA = EXPORT.toString('utf8');
+  const sqlB = sqlA.replace('Poznámka; se středníkem', 'Souběžná poznámka; se středníkem');
+  downloadReplies = [{ body: sqlA }, { body: sqlB }];
+  const [first, second] = await Promise.all([run({ instanceId: 'instance-a' }), run({ instanceId: 'instance-b' })]);
+  const outcomes = [first, second].map((o) => (o.ok ? `ok:${o.result!.daily}` : `error:${o.error}`)).sort();
+  assert.deepEqual(outcomes, ['error:snapshot-conflict', 'ok:stored'], JSON.stringify([first, second]));
+  const object = (await bucket.get('daily/2030-01-15.sql'))!;
+  const stored = new TextDecoder().decode(await object.arrayBuffer());
+  const winner = first.ok ? 'instance-a' : 'instance-b';
+  assert.equal(stored, winner === 'instance-a' ? sqlA : sqlB);
+  assert.equal(object.customMetadata!.md5, md5(stored));
+  // Kolize vyvolá upozornění (bez dat); vítězný snapshot je jediný denní.
+  assert.deepEqual(await keys('daily/'), ['daily/2030-01-15.sql']);
+  assert.ok(calls.some((c) => c.kind === 'resend' && String(c.body!.subject).endsWith('backup-failed')));
+});
+
+test('copySnapshot: zápis je podmíněný (If-None-Match: *); put vrátí null → jen ověření existujícího, nic se nepřepíše', async () => {
+  const content = new TextEncoder().encode('PRAGMA x;\n');
+  const expected = { bytes: content.length, md5: md5(content) };
+  const metadata = { database: 'd', environment: 'production', bookmark: '', createdAt: '2030-01-15T02:15:00.000Z', migrations: 0 };
+  const puts: { key: string; ifNoneMatch: string | null }[] = [];
+  const fake = (existing: { size: number; md5: string } | null, stored: boolean) =>
+    ({
+      get: async () => ({ size: content.length, body: new Blob([content]).stream() }),
+      put: async (key: string, _body: unknown, options: R2PutOptions) => {
+        puts.push({ key, ifNoneMatch: (options.onlyIf as Headers).get('if-none-match') });
+        return stored ? { size: content.length } : null;
+      },
+      head: async () => (existing ? { size: existing.size, checksums: { md5: Uint8Array.from(Buffer.from(existing.md5, 'hex')).buffer } } : null),
+    }) as unknown as BackupBucket;
+  assert.equal(await copySnapshot(fake(null, true), 's', 'daily/x.sql', expected, metadata), 'stored');
+  assert.deepEqual(puts.at(-1), { key: 'daily/x.sql', ifNoneMatch: '*' });
+  assert.equal(await copySnapshot(fake({ size: expected.bytes, md5: expected.md5 }, false), 's', 'daily/x.sql', expected, metadata), 'exists');
+  await assert.rejects(copySnapshot(fake({ size: 99, md5: md5('jiný') }, false), 's', 'daily/x.sql', expected, metadata), (e: { kind?: string }) => e.kind === 'snapshot-conflict');
+  // Podmínka selhala, ale objekt mezitím zmizel → kolize, nikdy nepodmíněný zápis.
+  await assert.rejects(copySnapshot(fake(null, false), 's', 'daily/x.sql', expected, metadata), (e: { kind?: string }) => e.kind === 'snapshot-conflict');
+  assert.equal(await copySnapshot(fake({ size: 99, md5: md5('jiný') }, false), 's', 'monthly/x.sql', expected, metadata, 'keep'), 'kept');
+  assert.ok(puts.every((p) => p.ifNoneMatch === '*'), 'každý zápis snapshotu je podmíněný');
+});
+
+// --- Upozornění --------------------------------------------------------------------------------
+
+test('upozornění: produkce bez Resend konfigurace → záloha uložena, instance skončí chybou alerts-not-configured', async () => {
+  const out = await run({ env: NO_ALERTS });
+  assert.equal(out.ok, false);
+  assert.equal(out.error, 'alerts-not-configured');
+  // Záloha vznikla a zůstává (upozornění ji neruší).
+  assert.deepEqual(await keys(), ['daily/2030-01-15.sql', 'monthly/2030-01.sql']);
+  assert.equal(md5(new Uint8Array(await (await bucket.get('daily/2030-01-15.sql'))!.arrayBuffer())), md5(EXPORT));
+  assert.ok(out.logs.some((l) => l.includes('alerts not configured')));
+  // Preview/test: chybějící upozornění jen log, běh v pořádku.
+  const preview = await run({ mode: 'monitor', env: { ...NO_ALERTS, BACKUP_ENV: 'preview' }, now: new Date(Date.now() + 49 * 60 * 60 * 1000).toISOString() });
+  assert.equal(preview.ok, true, JSON.stringify(preview));
+  assert.deepEqual(preview.result!.alerts, ['backup-stale']);
+  assert.ok(preview.logs.includes('d1-backup: alert skipped (not configured)'));
+});
+
+test('upozornění: výpadek Resend nezruší ani nesmaže zálohu; kroky se opakují; instance skončí alert-delivery-failed', async () => {
+  // Selhání zálohy + nedostupný Resend: původní chyba zůstává, starší zálohy beze změny.
+  assert.equal((await run({ date: '2030-01-14' })).ok, true);
+  resendStatus = 500;
+  calls = [];
+  exportReplies = Array.from({ length: 4 }, () => ({ http: 500 }));
+  const failed = await run();
+  assert.equal(failed.ok, false);
+  assert.equal(failed.error, 'api-http-500');
+  assert.equal(calls.filter((c) => c.kind === 'resend').length, 4, 'krok upozornění se opakuje (retries.limit 3)');
+  assert.deepEqual(await keys('daily/'), ['daily/2030-01-14.sql']);
+
+  // Kontrola stáří s nedostupným Resend → chyba instance, data beze změny.
+  const monitor = await run({ cron: '45 14 * * *', now: new Date(Date.now() + 49 * 60 * 60 * 1000).toISOString() });
+  assert.equal(monitor.ok, false);
+  assert.equal(monitor.error, 'alert-delivery-failed');
+  assert.deepEqual(await keys('daily/'), ['daily/2030-01-14.sql']);
+
+  // Úspěšná záloha při nedostupném Resend (např. upozornění na objem) se nikdy nesmaže.
+  resendStatus = 200;
+  const ok = await run({ date: '2030-01-15' });
+  assert.equal(ok.ok, true, JSON.stringify(ok));
+});
+
+test('test doručení upozornění (mode alert-test): jen e-mail správci, žádný export ani zápis do R2; bez konfigurace nebo při chybě → chyba', async () => {
+  const out = await run({ mode: 'alert-test', instanceId: 'alert-test-1' });
+  assert.equal(out.ok, true, JSON.stringify(out));
+  assert.deepEqual(out.result!.alerts, ['alert-test']);
+  assert.deepEqual(calls.map((c) => c.kind), ['resend']);
+  const [mail] = calls;
+  assert.deepEqual(mail.body!.to, ['spravce@example.invalid']);
+  assert.match(String(mail.body!.subject), /^Test: záloha D1 chalupa-vsetice-rezervace – alert-test$/);
+  assert.equal(mail.headers!['idempotency-key'], 'd1-backup-production-alert-test-alert-test-1');
+  assert.deepEqual(await keys(), []);
+  // Každý test je samostatné doručení (jiná instance = jiný klíč idempotence).
+  await run({ mode: 'alert-test', instanceId: 'alert-test-2' });
+  assert.equal(calls.filter((c) => c.kind === 'resend').length, 2);
+
+  const missing = await run({ mode: 'alert-test', env: NO_ALERTS });
+  assert.equal(missing.error, 'alerts-not-configured');
+  resendStatus = 422;
+  const rejected = await run({ mode: 'alert-test', instanceId: 'alert-test-3' });
+  assert.equal(rejected.error, 'alert-delivery-failed');
+});
+
+test('kapacita: nad tvrdým stropem bucketu se export nespustí a nic se nezapíše; upozornění odejde', async () => {
+  const fetched: string[] = [];
+  const objects = [{ key: 'daily/2030-01-14.sql', size: STORAGE_HARD_LIMIT_BYTES - MAX_EXPORT_BYTES, uploaded: new Date('2030-01-14T02:16:00Z') }];
+  const fake = {
+    head: async () => null,
+    list: async () => ({ objects, truncated: false, delimitedPrefixes: [] }),
+    put: async () => assert.fail('nic se nesmí zapisovat'),
+    get: async () => assert.fail('nic se nesmí číst'),
+    delete: async () => undefined,
+  } as unknown as BackupBucket;
+  const step: BackupStep = { do: async (_name, _config, callback) => callback() };
+  const deps = {
+    fetch: (async (url: string) => {
+      fetched.push(String(url));
+      return Response.json({ id: 'fake' });
+    }) as typeof fetch,
+    bucket: fake,
+    streams: { md5: () => assert.fail(), fixedLength: () => assert.fail() },
+    sleep: async () => undefined,
+    now: () => new Date('2030-01-15T02:16:00Z'),
+    log: () => undefined,
+  } as unknown as BackupDeps;
+  const event = { instanceId: 'kapacita', timestamp: new Date('2030-01-15T02:15:00Z'), schedule: { cron: BACKUP_CRON, scheduledTime: Date.parse('2030-01-15T02:15:00Z') } };
+  await assert.rejects(runBackupWorkflow(event, step, { ...ENV, BACKUPS: fake as unknown as R2Bucket }, deps), (e: { kind?: string }) => e.kind === 'storage-limit');
+  assert.deepEqual(fetched, ['https://api.resend.com/emails'], 'žádné volání D1 API, jen upozornění');
 });

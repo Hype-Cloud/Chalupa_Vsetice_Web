@@ -22,7 +22,7 @@ export const PENDING_PREFIX = 'pending/';
 export const KEEP_DAILY = 30;
 export const KEEP_MONTHLY = 12;
 /** Upozornění při objemu záloh nad 7 GB (bezplatná kvóta R2 Standard je 10 GB-month). */
-export const STORAGE_ALERT_BYTES = 7 * 1024 ** 3;
+export const STORAGE_ALERT_BYTES = 7 * 1000 ** 3;
 /** Upozornění, když poslední denní záloha je starší než 48 h. */
 export const STALE_AFTER_MS = 48 * 60 * 60 * 1000;
 export const MAX_POLLS = 20;
@@ -30,11 +30,16 @@ export const POLL_INTERVAL_MS = 2_000;
 const API_TIMEOUT_MS = 30_000;
 const DOWNLOAD_TIMEOUT_MS = 5 * 60_000;
 /**
- * Strop velikosti jednoho exportu. Při retenci 30 + 12 snapshotů (+ rozpracovaný pending/) drží
- * objem záloh i v nejhorším případě pod bezplatnou kvótou R2 (44 × 200 MiB ≈ 8,6 GiB < 10 GB).
- * Větší export = chyba a upozornění, ne tiché čerpání placeného úložiště.
+ * Strop velikosti jednoho exportu (150 MiB; produkční export má řádově kB). Větší export = chyba
+ * a upozornění, ne tiché čerpání úložiště.
  */
-export const MAX_EXPORT_BYTES = 200 * 1024 ** 2;
+export const MAX_EXPORT_BYTES = 150 * 1024 ** 2;
+/**
+ * Tvrdý strop objemu bucketu: nová záloha se nezačne, pokud by objem (všechny objekty bucketu
+ * včetně cizích a pending/) mohl s rezervou 3 × MAX_EXPORT_BYTES překročit 9 GB. Drží zálohy pod
+ * bezplatnou kvótou R2 (10 GB-month) s rezervou na souběžný běh. Nezahrnuje jiné buckety účtu.
+ */
+export const STORAGE_HARD_LIMIT_BYTES = 9 * 1000 ** 3;
 
 const DAILY_KEY = /^daily\/(\d{4}-\d{2}-\d{2})\.sql$/;
 const MONTHLY_KEY = /^monthly\/(\d{4}-\d{2})\.sql$/;
@@ -315,15 +320,30 @@ export interface SnapshotMetadata {
 }
 
 /**
- * Zkopíruje ověřený objekt `source` do `target` (R2 při zápisu ověří MD5). Existující `target`
- * se nikdy nepřepisuje: stejný obsah = hotovo (opakovaný pokus), jiný = chyba.
+ * Co dělat, když cílový klíč už existuje:
+ * - `verify` (denní snapshot): stejná velikost a MD5 = idempotentní úspěch (`exists`), jiný
+ *   obsah = kolize (`snapshot-conflict`) – existující objekt zůstává beze změny;
+ * - `keep` (měsíční snapshot = první úspěšná záloha měsíce): existující objekt se ponechá vždy;
+ *   `exists` při shodném obsahu, `kept` při jiném (starší záloha téhož měsíce).
  */
-export async function copySnapshot(bucket: BackupBucket, source: string, target: string, expected: { bytes: number; md5: string }, metadata: SnapshotMetadata): Promise<'stored' | 'exists'> {
-  const existing = await bucket.head(target);
-  if (existing) {
-    if (existing.size === expected.bytes && existing.checksums.md5 && hex(existing.checksums.md5) === expected.md5) return 'exists';
-    throw new BackupError('snapshot-exists');
-  }
+export type ExistingPolicy = 'verify' | 'keep';
+
+/** Podmíněný zápis „jen když klíč neexistuje“ (R2 put s If-None-Match: *; neúspěch = null). */
+const CREATE_ONLY = () => new Headers({ 'if-none-match': '*' });
+
+/**
+ * Zkopíruje ověřený objekt `source` do `target` atomickým podmíněným zápisem: R2 objekt uloží jen
+ * tehdy, když `target` neexistuje (`If-None-Match: *`), a při zápisu ověří MD5. Existující
+ * snapshot tak nepřepíše ani souběžná instance – rozhoduje R2, ne předchozí `head()`.
+ */
+export async function copySnapshot(
+  bucket: BackupBucket,
+  source: string,
+  target: string,
+  expected: { bytes: number; md5: string },
+  metadata: SnapshotMetadata,
+  policy: ExistingPolicy = 'verify',
+): Promise<'stored' | 'exists' | 'kept'> {
   const object = await bucket.get(source);
   if (!object) throw new BackupError('source-missing');
   if (object.size !== expected.bytes) {
@@ -333,6 +353,7 @@ export async function copySnapshot(bucket: BackupBucket, source: string, target:
   let stored: R2Object | null;
   try {
     stored = await bucket.put(target, object.body, {
+      onlyIf: CREATE_ONLY(),
       md5: expected.md5,
       httpMetadata: { contentType: 'application/sql' },
       customMetadata: { ...metadata, migrations: String(metadata.migrations), md5: expected.md5, bytes: String(expected.bytes) },
@@ -340,8 +361,18 @@ export async function copySnapshot(bucket: BackupBucket, source: string, target:
   } catch {
     throw new BackupError('upload-failed');
   }
-  if (!stored || stored.size !== expected.bytes) throw new BackupError('size-mismatch');
-  return 'stored';
+  if (stored) {
+    if (stored.size !== expected.bytes) throw new BackupError('size-mismatch');
+    return 'stored';
+  }
+  // Podmínka selhala: klíč už existuje (jiná instance nebo dřívější běh). Nic se nepřepsalo –
+  // existující objekt se jen ověří.
+  await object.body.cancel().catch(() => undefined);
+  const existing = await bucket.head(target);
+  const same = !!existing && existing.size === expected.bytes && !!existing.checksums.md5 && hex(existing.checksums.md5) === expected.md5;
+  if (same) return 'exists';
+  if (policy === 'keep' && existing) return 'kept';
+  throw new BackupError('snapshot-conflict');
 }
 
 async function listAll(bucket: BackupBucket, prefix?: string): Promise<R2Object[]> {
