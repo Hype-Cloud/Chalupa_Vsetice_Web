@@ -143,12 +143,15 @@ export async function runSmoke(baseUrl: URL, env: SmokeEnv, fetchFn: typeof fetc
   });
 
   // Odkaz do kalendáře obsluhuje Worker (run_worker_first), ne statický 404: neznámý token v
-  // platném tvaru → 404 s hlavičkami Workeru (noindex, no-store).
+  // platném tvaru → 404 JSON s hlavičkami Workeru (noindex, no-store). Cloudflare na Preview URL
+  // přepisuje X-Robots-Tag na `noindex` u všech odpovědí – přesná hodnota se ověřuje jen v produkci.
   await check('GET /calendar/<neznámý token>.ics → 404 z Workeru', async () => {
     const response = await request(`/calendar/${'0'.repeat(43)}.ics`);
-    const text = await response.text();
-    const ok = response.status === 404 && response.headers.get('x-robots-tag') === 'noindex, nofollow' && response.headers.get('cache-control') === 'private, no-store' && !text.includes('BEGIN:VCALENDAR');
-    return { ok, detail: `HTTP ${response.status}` };
+    const { body } = await jsonOf(response);
+    const robots = response.headers.get('x-robots-tag') ?? '';
+    const robotsOk = env === 'production' ? robots === 'noindex, nofollow' : /\bnoindex\b/.test(robots);
+    const ok = response.status === 404 && robotsOk && response.headers.get('cache-control') === 'private, no-store' && (body as { error?: unknown })?.error === 'not-found';
+    return { ok, detail: `HTTP ${response.status}${robotsOk ? '' : `, x-robots-tag: ${robots || 'chybí'}`}` };
   });
 
   await check('GET /api/neexistuje → 404 JSON', async () => {

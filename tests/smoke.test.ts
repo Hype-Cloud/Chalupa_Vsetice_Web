@@ -178,3 +178,25 @@ test('základní URL: jen origin přes https (http jen localhost), bez tokenu a 
     assert.throws(() => parseBaseUrl(input), expected, input);
   }
 });
+
+test('/calendar/*: Preview toleruje platformou přepsaný X-Robots-Tag (noindex), produkce vyžaduje noindex, nofollow; statická 404 neprojde', async () => {
+  // Cloudflare na Preview URL přepisuje X-Robots-Tag na `noindex` u všech odpovědí.
+  const rewriteRobots = (fetchFn: typeof fetch) =>
+    (async (input: RequestInfo | URL, init?: RequestInit) => {
+      const response = await fetchFn(input, init);
+      const headers = new Headers(response.headers);
+      headers.set('x-robots-tag', 'noindex');
+      return new Response(response.body, { status: response.status, headers });
+    }) as typeof fetch;
+  const preview = await runSmoke(BASE, 'preview', rewriteRobots(workerFetch(PREVIEW).fetchFn));
+  assert.equal(byName(preview, '/calendar/').ok, true, byName(preview, '/calendar/').detail);
+  const production = await runSmoke(BASE, 'production', rewriteRobots(workerFetch(PRODUCTION).fetchFn));
+  assert.equal(byName(production, '/calendar/').ok, false);
+  assert.match(byName(production, '/calendar/').detail!, /x-robots-tag: noindex$/);
+  // Statická 404 stránka (cesta neobsloužená Workerem) neprojde ani v Preview.
+  const staticNotFound = (async (input: RequestInfo | URL, init?: RequestInit) =>
+    String(input).includes('/calendar/')
+      ? new Response('<!doctype html><title>404</title>', { status: 404, headers: { 'content-type': 'text/html', 'x-robots-tag': 'noindex', 'cache-control': 'private, no-store' } })
+      : workerFetch(PREVIEW).fetchFn(input, init)) as typeof fetch;
+  assert.equal(byName(await runSmoke(BASE, 'preview', staticNotFound), '/calendar/').ok, false);
+});

@@ -209,7 +209,7 @@ Projekt využívá Node.js Test Runner. Databázové testy probíhají nad loká
 | pricing.test.ts | 33 | Ceník: výchozí a vlastní ceny nocí, prahy slev, zaokrouhlení, přelom měsíce a roku, pevná cena pobytu (přesná shoda, priorita, neplatná data, beze vlivu na dostupnost), `/api/quote` (kontrakt, validace, neplatný ceník, výpadek D1, žádné zápisy), shoda ceny nabídky a rezervace, `price-mismatch`. |
 | reservation-note.test.ts | 17 | Poznámka hosta: NULL pro prázdné hodnoty, víceřádkový text, Unicode a NFC, limit 2000 znaků, zakázané řídicí a bidi znaky, SQL/HTML text jen jako text, není ve veřejné odpovědi ani v logách, idempotence, escapování v iCal exportu, CHECK v D1. |
 | d1-migrations.test.ts | 21 | Kontrola D1 migrací před deployem: číslování, konzistence konfigurací (oddělené D1, produkční POST vypnutý, PoC kalendářové přílohy jen v Preview), čekající a neznámé migrace, fail-closed při chybě, detekce destruktivních migrací, ruční aplikace jen v terminálu s potvrzením, záloha před destruktivní migrací produkce. |
-| smoke.test.ts | 8 | Smoke test veřejných endpointů proti skutečnému Workeru: produkce (POST 404, `booking-config` vypnutý) a Preview, bez tokenů a zápisů, odhalení zapnutého POST, výpadku D1, úniku osobních údajů a veřejného exportu. |
+| smoke.test.ts | 9 | Smoke test veřejných endpointů proti skutečnému Workeru: produkce (POST 404, `booking-config` vypnutý) a Preview, bez tokenů a zápisů, odhalení zapnutého POST, výpadku D1, úniku osobních údajů a veřejného exportu, `/calendar/*` s `X-Robots-Tag` přepsaným platformou v Preview. |
 | frontend-quote.test.ts | 14 | Frontend rezervační sekce: cena jen z `/api/quote` (kontrakt proti skutečnému handleru), nightly se slevou, exact-stay, 422 a chyby serveru/sítě jako české hlášky, načítání bez staré ceny, souběh (starší odpověď nepřepíše novější), nový požadavek při změně termínu a hostů, žádný klientský výpočet ceny. |
 | i18n.test.ts | 17 | Jazykové verze: úplnost katalogů cs/en/de/ua (klíče, parametry, plurály, žádný český text ani HTML), fallback, volba jazyka (?lang, localStorage, čeština) a persistence, množná čísla, data a CZK v každém jazyce, kalendář, rezervační panel po přepnutí, přepínač, žádné pevné texty v komponentách ani pevná cena noci (3 000 / 2 990 Kč); orientační cena jen z `PRICE_PER_NIGHT`. |
 | date-input.test.ts | 8 | Vstup data DD.MM.RRRR ↔ ISO: přestupný rok, neexistující den a měsíc, rozepsané datum bez chyby, odmítnutí amerického a ISO tvaru, všechna zobrazená data den → měsíc → rok (angličtina bez měsíc/den). |
@@ -220,7 +220,7 @@ Projekt využívá Node.js Test Runner. Databázové testy probíhají nad loká
 | payment.test.ts | 9 | Platby: pražské datum → `DDMMYY`, `NN` 01–99, splatnost (konec pražského dne po 24 h, změny času, vždy 24–48 h), IBAN (kontrolní součet, odvození čísla účtu), SPAYD (serverová cena, VS = kód, zpráva `Rezervace {kód}`), QR jako PNG (pixely = matice) se SVG fallbackem, kopírování do schránky, kontrola, že repozitář neobsahuje skutečný IBAN. |
 | calendar.test.ts | 13 | Odkaz do kalendáře: unikátní neveřejný token oddělený od id/kódu/VS, replay a souběžný dvojklik → stejná `calendarUrl`, dvě rezervace → různé URL, legacy `NULL` token (replay, e-mail i web bez odkazu), origin (produkce vždy hlavní web, Preview origin požadavku), endpoint (pending/paid → událost, hlavičky, HEAD, 405; neplatný tvar bez dotazu do D1, neznámý a zrušený → 404; bez D1 503; token se neloguje), validní VCALENDAR/VEVENT (ical.js), CRLF, 75 oktetů, stabilní UID, 14:00/11:00 v zimě, v létě i přes přechod času, žádné osobní/bankovní/interní údaje, e-mail (hlavička a Termín = stejný href, splatnost bez odkazu, věta ve 4 jazycích, žádná `.ics` příloha), web přijme jen serverovou URL, Worker obsluhuje `/calendar/*`, žádná externí calendar služba, CHECK a UNIQUE migrace 0010. |
 | calendar-invite-poc.test.ts | 8 | Preview PoC kalendářové části: produkce nikdy nepřikládá (ani s proměnnou), Preview bez/s neplatnou hodnotou beze změny, `publish` (bez ATTENDEE/ORGANIZER, UID a časy shodné s odkazem, TENTATIVE, SEQUENCE:0), `request` (ORGANIZER = odesílatel, ATTENDEE jen testovací schránka, RSVP=FALSE), `method` v MIME = METHOD v ICS (ical.js, CRLF, 75 oktetů), žádné osobní/bankovní/interní údaje, replay = stejný klíč a stejné ICS, klíč idempotence podle varianty, legacy bez tokenu, paid → CONFIRMED, přechod času, odmítnutí neplatného ATTENDEE. |
-| **Celkem** | **391** | |
+| **Celkem** | **392** | |
 
 ### Testované scénáře
 
@@ -1423,8 +1423,10 @@ Ověří web, `/api/availability` (status, žádné osobní údaje), `/api/quote
 termín, 405), `POST /api/reservations` (**v produkci musí vrátit 404**; nikde nesmí přijmout
 prázdný požadavek), `/api/booking-config` (v produkci `bookingEnabled: false`, v Preview zapnutý
 s veřejným site key), `/api/reservations.ics` bez tokenu (404) a neznámé API (404 JSON
-s bezpečnostními hlavičkami), `/calendar/<neznámý token>.ics` (404 z Workeru s `noindex`
-a `no-store`, ne statický 404). Exit 1 při selhání; `stale`/`partial` obsazenost je jen varování.
+s bezpečnostními hlavičkami), `/calendar/<neznámý token>.ics` (404 JSON z Workeru s `no-store`,
+ne statický 404; `X-Robots-Tag` v produkci přesně `noindex, nofollow`, v Preview stačí `noindex`,
+protože Cloudflare ho na Preview URL přepisuje u všech odpovědí). Exit 1 při selhání;
+`stale`/`partial` obsazenost je jen varování.
 
 Nepoužívá žádné tokeny ani secrets: přijme jen origin (https, http jen localhost) bez cesty,
 query a přihlašovacích údajů, neposílá `Authorization` ani cookies a nic nezapisuje (rezervační
