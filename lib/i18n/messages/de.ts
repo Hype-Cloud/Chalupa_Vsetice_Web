@@ -179,6 +179,7 @@ export const de = {
   'email.calendarHint': 'Mit einem Klick auf den Termin Ihres Aufenthalts können Sie ihn Ihrem Kalender hinzufügen.',
   'calendarEvent.summary': 'Aufenthalt – {name}',
   'calendarEvent.description': 'Anreise ab {checkIn}, Abreise bis {checkOut}.',
+  'calendarEvent.inviteNote': 'Eine Antwort auf diese Einladung ändert Ihre Reservierung nicht.',
   'email.summaryHeading': 'Buchungsübersicht',
   'email.reservationCode': 'Buchungscode',
   'email.qrAlt': 'Zahlungs-QR-Code',

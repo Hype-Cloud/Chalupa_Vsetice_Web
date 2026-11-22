@@ -111,6 +111,7 @@ export function verifyConfigs(wranglerText: string, previewMigrationsText: strin
   if (main.vars?.BOOKING_ENV !== 'production') errors.push('wrangler.jsonc: vars.BOOKING_ENV musí být "production"');
   if (main.previews?.vars?.BOOKING_ENV !== 'preview') errors.push('wrangler.jsonc: previews.vars.BOOKING_ENV musí být "preview"');
   if (main.vars && 'BOOKING_API_ENABLED' in main.vars) errors.push('wrangler.jsonc: produkční rezervační POST musí zůstat vypnutý (žádné vars.BOOKING_API_ENABLED)');
+  if (main.vars && 'CALENDAR_INVITE_POC' in main.vars) errors.push('wrangler.jsonc: PoC kalendářové přílohy je jen pro Preview (žádné vars.CALENDAR_INVITE_POC)');
   return errors;
 }
 

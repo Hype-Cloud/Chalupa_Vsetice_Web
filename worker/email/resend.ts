@@ -13,6 +13,8 @@ export interface MailAttachment {
   content: string;
   /** Inline příloha pro `<img src="cid:…">`. */
   contentId?: string;
+  /** MIME typ přílohy včetně parametrů (např. `text/calendar; method=PUBLISH`); bez něj ho Resend odvodí z názvu souboru. */
+  contentType?: string;
 }
 
 export interface MailMessage {
@@ -39,7 +41,12 @@ export async function sendViaResend(apiKey: string, message: MailMessage, fetchF
   const body: Record<string, unknown> = { from: message.from, to: [message.to], subject: message.subject, text: message.text };
   if (message.html) body.html = message.html;
   if (message.attachments?.length) {
-    body.attachments = message.attachments.map((a) => ({ filename: a.filename, content: a.content, ...(a.contentId ? { content_id: a.contentId } : {}) }));
+    body.attachments = message.attachments.map((a) => ({
+      filename: a.filename,
+      content: a.content,
+      ...(a.contentId ? { content_id: a.contentId } : {}),
+      ...(a.contentType ? { content_type: a.contentType } : {}),
+    }));
   }
   let response: Response;
   try {

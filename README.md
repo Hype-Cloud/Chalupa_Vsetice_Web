@@ -208,7 +208,7 @@ Projekt využívá Node.js Test Runner. Databázové testy probíhají nad loká
 | booking-public.test.ts | 16 | Veřejný POST: Turnstile (platný, neplatný, chybějící, nedostupný), rate limit, idempotentní retry a dvojklik, chybové kódy, bez úniku osobních údajů a secrets. |
 | pricing.test.ts | 33 | Ceník: výchozí a vlastní ceny nocí, prahy slev, zaokrouhlení, přelom měsíce a roku, pevná cena pobytu (přesná shoda, priorita, neplatná data, beze vlivu na dostupnost), `/api/quote` (kontrakt, validace, neplatný ceník, výpadek D1, žádné zápisy), shoda ceny nabídky a rezervace, `price-mismatch`. |
 | reservation-note.test.ts | 17 | Poznámka hosta: NULL pro prázdné hodnoty, víceřádkový text, Unicode a NFC, limit 2000 znaků, zakázané řídicí a bidi znaky, SQL/HTML text jen jako text, není ve veřejné odpovědi ani v logách, idempotence, escapování v iCal exportu, CHECK v D1. |
-| d1-migrations.test.ts | 21 | Kontrola D1 migrací před deployem: číslování, konzistence konfigurací (oddělené D1, produkční POST vypnutý), čekající a neznámé migrace, fail-closed při chybě, detekce destruktivních migrací, ruční aplikace jen v terminálu s potvrzením, záloha před destruktivní migrací produkce. |
+| d1-migrations.test.ts | 21 | Kontrola D1 migrací před deployem: číslování, konzistence konfigurací (oddělené D1, produkční POST vypnutý, PoC kalendářové přílohy jen v Preview), čekající a neznámé migrace, fail-closed při chybě, detekce destruktivních migrací, ruční aplikace jen v terminálu s potvrzením, záloha před destruktivní migrací produkce. |
 | smoke.test.ts | 8 | Smoke test veřejných endpointů proti skutečnému Workeru: produkce (POST 404, `booking-config` vypnutý) a Preview, bez tokenů a zápisů, odhalení zapnutého POST, výpadku D1, úniku osobních údajů a veřejného exportu. |
 | frontend-quote.test.ts | 14 | Frontend rezervační sekce: cena jen z `/api/quote` (kontrakt proti skutečnému handleru), nightly se slevou, exact-stay, 422 a chyby serveru/sítě jako české hlášky, načítání bez staré ceny, souběh (starší odpověď nepřepíše novější), nový požadavek při změně termínu a hostů, žádný klientský výpočet ceny. |
 | i18n.test.ts | 17 | Jazykové verze: úplnost katalogů cs/en/de/ua (klíče, parametry, plurály, žádný český text ani HTML), fallback, volba jazyka (?lang, localStorage, čeština) a persistence, množná čísla, data a CZK v každém jazyce, kalendář, rezervační panel po přepnutí, přepínač, žádné pevné texty v komponentách ani pevná cena noci (3 000 / 2 990 Kč); orientační cena jen z `PRICE_PER_NIGHT`. |
@@ -219,7 +219,8 @@ Projekt využívá Node.js Test Runner. Databázové testy probíhají nad loká
 | confirmation-email.test.ts | 34 | Potvrzovací e-mail: `locale` cs/en/de/ua (jiné → 422), nová rezervace = jeden e-mail s klíčem z interního UUID, replay i souběžný dvojklik znovu naplánují potvrzení se stejným klíčem a s uloženým e-mailem a jazykem, replay bez e-mailu (422, zrušená, bez jazyka), stejný veřejný kód po resetu čítače → různé klíče, UUID mimo API/e-mail/log, žádná synchronní práce před `ctx.waitUntil`, předgenerované ikony (bez rastrování ve Workeru), Preview → testovací schránka, produkce → host, odesílatel z business identity, business config (telefon E.164 → `tel:` a český zápis, validace), hlavička (jméno, značka, termín pobytu), kompaktní termín ve 4 jazycích, pořadí platební sekce a QR bez popisku, úvod se splatností, instrukcemi před příjezdem a kontaktem (bez věty o souhrnu), nadpis „Souhrn rezervace“ ve 4 jazycích, platba ve dvou sloupcích (QR vlevo, údaje vpravo) a na mobilu pod sebou, IBAN bez `nowrap` se zalomením po skupinách, patička bez oddělovacích znaků, nezměněná hlavička (otisk HTML a PNG) i patička (otisk HTML), QR 174 px se zaoblenými rohy a beze změny PNG, linka jen pod nadpisem „Platební údaje“ (nad „Těšíme se…“ žádná), nezměněný telefonický kontakt (otisk HTML), telefonický kontakt a patička (jméno → web, `mailto:`, `IČ` jako prostý text, žádný registr ani „IČO“), Preview bez banneru a adresy hosta (jen `[TEST]` v předmětu), domek bez vlastního pozadí a jméno jednotnou vahou, odkaz na registr odstraněný z konfigurace i dokumentace, výchozí světlá varianta, kontakty v plaintextu, renderer bez napevno zapsaných údajů provozovatele, chybějící konfigurace → skip bez upozornění, selhání providera (timeout, síť, HTTP 4xx/5xx) → 201 a jedno interní upozornění bez osobních a bankovních údajů, selhání upozornění nic dalšího nespouští, odložené odeslání, obsah HTML i textu ve 4 jazycích ze stejných dat jako API, QR příloha (cid) = SPAYD, escapování HTML, nové znění věty o e-mailu. |
 | payment.test.ts | 9 | Platby: pražské datum → `DDMMYY`, `NN` 01–99, splatnost (konec pražského dne po 24 h, změny času, vždy 24–48 h), IBAN (kontrolní součet, odvození čísla účtu), SPAYD (serverová cena, VS = kód, zpráva `Rezervace {kód}`), QR jako PNG (pixely = matice) se SVG fallbackem, kopírování do schránky, kontrola, že repozitář neobsahuje skutečný IBAN. |
 | calendar.test.ts | 13 | Odkaz do kalendáře: unikátní neveřejný token oddělený od id/kódu/VS, replay a souběžný dvojklik → stejná `calendarUrl`, dvě rezervace → různé URL, legacy `NULL` token (replay, e-mail i web bez odkazu), origin (produkce vždy hlavní web, Preview origin požadavku), endpoint (pending/paid → událost, hlavičky, HEAD, 405; neplatný tvar bez dotazu do D1, neznámý a zrušený → 404; bez D1 503; token se neloguje), validní VCALENDAR/VEVENT (ical.js), CRLF, 75 oktetů, stabilní UID, 14:00/11:00 v zimě, v létě i přes přechod času, žádné osobní/bankovní/interní údaje, e-mail (hlavička a Termín = stejný href, splatnost bez odkazu, věta ve 4 jazycích, žádná `.ics` příloha), web přijme jen serverovou URL, Worker obsluhuje `/calendar/*`, žádná externí calendar služba, CHECK a UNIQUE migrace 0010. |
-| **Celkem** | **383** | |
+| calendar-invite-poc.test.ts | 8 | Preview PoC kalendářové části: produkce nikdy nepřikládá (ani s proměnnou), Preview bez/s neplatnou hodnotou beze změny, `publish` (bez ATTENDEE/ORGANIZER, UID a časy shodné s odkazem, TENTATIVE, SEQUENCE:0), `request` (ORGANIZER = odesílatel, ATTENDEE jen testovací schránka, RSVP=FALSE), `method` v MIME = METHOD v ICS (ical.js, CRLF, 75 oktetů), žádné osobní/bankovní/interní údaje, replay = stejný klíč a stejné ICS, klíč idempotence podle varianty, legacy bez tokenu, paid → CONFIRMED, přechod času, odmítnutí neplatného ATTENDEE. |
+| **Celkem** | **391** | |
 
 ### Testované scénáře
 
@@ -544,6 +545,47 @@ při každém požadavku.
 - **Capability URL:** kdokoli s odkazem stáhne událost – proto náhodný token a minimální obsah.
   Kód tokenu ani URL neloguje. Pozor: Workers Logs (`invocation_logs`) ukládají URL požadavku
   včetně cesty; `redact_query_string` cestu neskrývá. Logy jsou přístupné jen v účtu Cloudflare.
+
+#### Preview PoC: kalendářová část v potvrzovacím e-mailu (`CALENDAR_INVITE_POC`)
+
+Ověření, zda e-mailoví klienti (Apple Mail na iOS, Gmail, Outlook) nabídnou přidání **jednorázové
+události** přímo z e-mailu – odkaz na iPhonu v Apple Mailu nabídl odběr kalendáře. Jen Preview:
+
+- **Zapnutí:** `previews.vars.CALENDAR_INVITE_POC` = `publish` | `request`; bez proměnné (výchozí
+  stav) nebo s jinou hodnotou se nic nepřikládá. Gate `calendarInviteVariant` vyžaduje
+  `BOOKING_ENV=preview` a testovacího příjemce (`BOOKING_CONFIRMATION_TEST_EMAIL`) – v produkci se
+  kalendářová část nepřikládá ani s nastavenou proměnnou; `CALENDAR_INVITE_POC` v produkčních
+  `vars` zastaví deploy (`scripts/d1-migrations.ts check`).
+- **Příloha:** `pobyt.ics` s `content_type: text/calendar; charset=utf-8; method=<METHOD>`
+  (Resend HTTP API, pole `content_type`); parametr `method` se shoduje s `METHOD` v ICS. Resend
+  neumožňuje raw MIME ani `multipart/alternative` – kalendářová část je vždy příloha. Zda Resend
+  parametr `method=` zachová, se ověřuje v originálu přijaté zprávy.
+- **`publish`:** jednorázová událost bez `ORGANIZER` a `ATTENDEE`, obsahem shodná s odkazem.
+- **`request`:** iTIP pozvánka; `ORGANIZER` = veřejný e-mail rezervací (shodný s odesílatelem),
+  jediný `ATTENDEE` = adresa příjemce (v Preview testovací schránka), `RSVP=FALSE`, v popisu věta,
+  že odpověď rezervaci nemění. Odpovědi (`REPLY`) přijdou na e-mail rezervací; systém je
+  nezpracovává a stav rezervace se nemění.
+- **Obě varianty:** stejné `UID` jako odkaz (import z e-mailu i přes odkaz = jedna událost),
+  `SEQUENCE:0`, `STATUS:TENTATIVE` (`pending_payment`) / `CONFIRMED` (`paid`), `DTSTAMP` z
+  `created_at` → replay dává bajtově stejné ICS. Klíč idempotence u Resend nese variantu
+  (`…-calendar-publish|request`), aby se varianty v 24h okně nepřekrývaly. Rezervace bez tokenu
+  (legacy) kalendářovou část nedostane.
+
+Před případným produkčním nasazením (PoC je neřeší):
+
+- **Potvrzení platby:** `TENTATIVE` se po zaplacení sám nezmění – potřeba e-mail s aktualizací
+  (stejné `UID`, vyšší `SEQUENCE`, `STATUS:CONFIRMED`). U `publish` aktualizaci klienti
+  spolehlivě nepřevezmou.
+- **Zrušení:** `cancelReservation` zvyšuje `ical_sequence`, ale hostovi nic neposílá; událost by
+  zůstala v kalendáři. U `request` potřeba `METHOD:CANCEL` (stejné `UID` a `ORGANIZER`, vyšší
+  `SEQUENCE`); totéž platí pro import přes odkaz.
+- **Změny termínu:** stejné `UID`, vyšší `SEQUENCE`; sdílené číslo sekvence s exportem do e-chalup
+  (`ical_sequence`) je třeba posoudit.
+- **Odpovědi a RSVP:** schránka rezervací musí počítat s `REPLY` zprávami; host nesmí odmítnutí
+  pozvánky chápat jako zrušení rezervace.
+- **Soukromí:** `ATTENDEE` by v produkci byl e-mail hosta (jen v e-mailu jemu samotnému); veřejný
+  ICS endpoint zůstává bez osobních údajů.
+- **Zadání issue #38** (zákaz e-mailové `.ics` přílohy a PII v ICS) je pro produkci potřeba upravit.
 
 ### Transakce v D1
 

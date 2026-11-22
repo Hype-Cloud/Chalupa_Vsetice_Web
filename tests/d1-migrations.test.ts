@@ -77,6 +77,7 @@ test('konfigurace: chyby oddělení prostředí se odhalí', () => {
     [WRANGLER.replace(previewId, prodId), PREVIEW_MIGRATIONS.replace(previewId, prodId), /sdílejí stejnou D1/],
     [WRANGLER, PREVIEW_MIGRATIONS.replace(previewId, '00000000-0000-0000-0000-000000000000'), /database_id se liší/],
     [WRANGLER.replace('"BOOKING_ENV": "production",', '"BOOKING_ENV": "production",\n    "BOOKING_API_ENABLED": "true",'), PREVIEW_MIGRATIONS, /produkční rezervační POST musí zůstat vypnutý/],
+    [WRANGLER.replace('"BOOKING_ENV": "production",', '"BOOKING_ENV": "production",\n    "CALENDAR_INVITE_POC": "request",'), PREVIEW_MIGRATIONS, /PoC kalendářové přílohy je jen pro Preview/],
     [WRANGLER.replace('"BOOKING_ENV": "production"', '"BOOKING_ENV": "preview"'), PREVIEW_MIGRATIONS, /vars\.BOOKING_ENV musí být "production"/],
     [WRANGLER, PREVIEW_MIGRATIONS.replace('"name": "chalupa-vsetice-web",', '"name": "chalupa-vsetice-web",\n  "main": "./worker/index.ts",'), /nesmí mít "main"/],
     [WRANGLER, PREVIEW_MIGRATIONS.replace('"database_name": "chalupa-vsetice-rezervace-test"', '"database_name": "chalupa-vsetice-rezervace"'), /D1 musí být chalupa-vsetice-rezervace-test/],

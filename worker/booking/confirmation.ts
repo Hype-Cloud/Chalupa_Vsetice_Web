@@ -23,6 +23,8 @@
 //   kreslí jen QR.
 //   Vložené <style> je jen vylepšení: užší okraje na mobilu, tmavý režim (Apple Mail,
 //   Outlook.com) a vypnutí automatických odkazů Apple Mail. Bez něj zůstává světlá varianta.
+// - Preview PoC kalendářové části (CALENDAR_INVITE_POC=publish|request): jen BOOKING_ENV=preview
+//   a testovací příjemce; v produkci se žádná kalendářová příloha nepřikládá (calendarInviteVariant).
 
 import { businessIdentity, type BusinessIdentity } from '../../lib/business.ts';
 import { bytesToBase64, qrMatrix, qrPngBytes } from '../../lib/booking/qr.ts';
@@ -30,6 +32,7 @@ import { createI18n, type Locale } from '../../lib/i18n/index.ts';
 import { BRAND_MARK_PNG, PHONE_ICON_DARK_PNG, PHONE_ICON_LIGHT_PNG } from '../email/iconAssets.ts';
 import { CREAM, GREEN, WHITE } from '../email/palette.ts';
 import { MailError, RESEND_TEST_FROM, sendViaResend, type MailAttachment, type MailMessage } from '../email/resend.ts';
+import { buildStayInvite, inviteContentType, type CalendarMethod } from './calendar.ts';
 import type { ReservationResponse } from './response.ts';
 
 export interface ConfirmationEnv {
@@ -43,6 +46,8 @@ export interface ConfirmationEnv {
   CONFLICT_ALERT_EMAIL?: string;
   /** Odesílatel interních upozornění; bez nastavení testovací odesílatel Resend. */
   CONFLICT_ALERT_FROM?: string;
+  /** Preview PoC: kalendářová část v potvrzení (`publish` | `request`); v produkci se ignoruje. */
+  CALENDAR_INVITE_POC?: string;
 }
 
 export interface ConfirmationDeps {
@@ -416,11 +421,49 @@ export interface ConfirmationTarget {
   /** E-mail a jazyk uložené u rezervace (při replay z DB, ne z opakovaného požadavku). */
   guestEmail: string;
   locale: Locale;
+  /** Token odkazu do kalendáře a čas vytvoření rezervace – jen pro Preview PoC kalendářové části. */
+  calendarToken?: string | null;
+  createdAt?: string;
+}
+
+export type CalendarInviteVariant = 'publish' | 'request';
+
+/**
+ * Varianta Preview PoC kalendářové části, nebo null. Jen Preview a jen testovací příjemce –
+ * v produkci (nebo bez testovací schránky) nikdy, i kdyby proměnná byla nastavená.
+ */
+export function calendarInviteVariant(env: ConfirmationEnv, recipient: { test: boolean }): CalendarInviteVariant | null {
+  if (env.BOOKING_ENV !== 'preview' || !recipient.test) return null;
+  const value = env.CALENDAR_INVITE_POC?.trim();
+  return value === 'publish' || value === 'request' ? value : null;
+}
+
+/** Příloha `pobyt.ics` pro PoC, nebo null (rezervace bez tokenu, zrušená, neplatný vstup). */
+async function calendarInviteAttachment(
+  variant: CalendarInviteVariant,
+  data: ReservationResponse,
+  target: ConfirmationTarget,
+  recipient: string,
+): Promise<MailAttachment | null> {
+  const { status, arrival, departure } = data.reservation;
+  if (!target.calendarToken || !target.createdAt || (status !== 'pending_payment' && status !== 'paid')) return null;
+  const method: CalendarMethod = variant === 'request' ? 'REQUEST' : 'PUBLISH';
+  try {
+    const ics = await buildStayInvite({ arrival, departure, locale: target.locale }, target.calendarToken, {
+      method,
+      status,
+      createdAt: target.createdAt,
+      ...(method === 'REQUEST' ? { attendee: recipient } : {}),
+    });
+    return { filename: 'pobyt.ics', content: bytesToBase64(new TextEncoder().encode(ics)), contentType: inviteContentType(method) };
+  } catch {
+    return null;
+  }
 }
 
 /** Klíč idempotence potvrzení u Resend – stejný pro první pokus i replay téže rezervace. */
-export const confirmationIdempotencyKey = (env: ConfirmationEnv, reservationId: string) =>
-  `reservation-confirmation-${env.BOOKING_ENV ?? 'unknown'}-${reservationId}`;
+export const confirmationIdempotencyKey = (env: ConfirmationEnv, reservationId: string, calendarVariant: CalendarInviteVariant | null = null) =>
+  `reservation-confirmation-${env.BOOKING_ENV ?? 'unknown'}-${reservationId}${calendarVariant ? `-calendar-${calendarVariant}` : ''}`;
 
 /**
  * Odešle potvrzení rezervace (nové i replay). Nikdy nevyhazuje (best-effort); vrací výsledek
@@ -453,14 +496,19 @@ export async function sendReservationConfirmation(
       business,
       test: recipient.test,
     });
+    // Preview PoC: varianta je i v klíči idempotence, aby se publish/request nepřekryly v 24h okně.
+    const variant = calendarInviteVariant(env, recipient);
+    const invite = variant ? await calendarInviteAttachment(variant, data, target, recipient.to) : null;
+    if (variant && !invite) deps.log(`reservations: calendar invite skipped (${variant})`);
     const message: MailMessage = {
       from: confirmationSender(business),
       to: recipient.to,
       ...email,
-      idempotencyKey: confirmationIdempotencyKey(env, target.reservationId),
+      attachments: invite ? [...email.attachments, invite] : email.attachments,
+      idempotencyKey: confirmationIdempotencyKey(env, target.reservationId, invite ? variant : null),
     };
     await sendViaResend(apiKey, message, deps.fetch);
-    deps.log('reservations: confirmation email sent');
+    deps.log(invite ? `reservations: confirmation email sent (calendar ${variant})` : 'reservations: confirmation email sent');
     return 'sent';
   } catch (error) {
     const kind = error instanceof MailError ? error.kind : 'unknown';

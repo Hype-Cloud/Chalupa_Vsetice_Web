@@ -178,6 +178,7 @@ export const ua = {
   'email.calendarHint': 'Натисніть на дати перебування, щоб додати його до свого календаря.',
   'calendarEvent.summary': 'Перебування – {name}',
   'calendarEvent.description': 'Заїзд з {checkIn}, виїзд до {checkOut}.',
+  'calendarEvent.inviteNote': 'Відповідь на це запрошення не змінює ваше бронювання.',
   'email.summaryHeading': 'Підсумок бронювання',
   'email.reservationCode': 'Код бронювання',
   'email.qrAlt': 'Платіжний QR-код',

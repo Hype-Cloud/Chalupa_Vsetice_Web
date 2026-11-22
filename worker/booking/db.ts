@@ -148,6 +148,8 @@ export interface StoredContact {
   email: string;
   /** Jazyk uložený u rezervace; u rezervací z doby před migrací 0009 null. */
   locale: Locale | null;
+  /** reservations.created_at (ISO). */
+  createdAt: string;
 }
 
 export async function findByIdempotencyKey(
@@ -163,7 +165,7 @@ export async function findByIdempotencyKey(
     .first<{ id: string; email: string; locale: string | null; public_code: string; arrival: string; departure: string; guests: number; price_czk: number; variable_symbol: string; status: ReservationStatus; request_hash: string | null; created_at: string; payment_due_at: string | null; calendar_token: string | null }>();
   if (!row) return null;
   return {
-    stored: { reservationId: row.id, email: row.email, locale: isLocale(row.locale) ? row.locale : null },
+    stored: { reservationId: row.id, email: row.email, locale: isLocale(row.locale) ? row.locale : null, createdAt: row.created_at },
     code: row.public_code,
     arrival: row.arrival,
     departure: row.departure,
