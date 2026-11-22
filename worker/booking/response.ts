@@ -17,7 +17,7 @@ export interface PublicReservation {
   status: ReservationStatus;
   paymentDueAt: string;
   /**
-   * Odkaz „přidat do kalendáře“ (GET /calendar/<token>.ics), složený jen na serveru; stejnou
+   * Odkaz „přidat do kalendáře“ (GET /calendar/<token>), složený jen na serveru; stejnou
    * hodnotu používá potvrzovací e-mail. Rezervace bez tokenu (před migrací 0010) → null.
    */
   calendarUrl?: string | null;
