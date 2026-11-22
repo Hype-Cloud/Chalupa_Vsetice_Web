@@ -208,7 +208,7 @@ Projekt využívá Node.js Test Runner. Databázové testy probíhají nad loká
 | booking-public.test.ts | 16 | Veřejný POST: Turnstile (platný, neplatný, chybějící, nedostupný), rate limit, idempotentní retry a dvojklik, chybové kódy, bez úniku osobních údajů a secrets. |
 | pricing.test.ts | 33 | Ceník: výchozí a vlastní ceny nocí, prahy slev, zaokrouhlení, přelom měsíce a roku, pevná cena pobytu (přesná shoda, priorita, neplatná data, beze vlivu na dostupnost), `/api/quote` (kontrakt, validace, neplatný ceník, výpadek D1, žádné zápisy), shoda ceny nabídky a rezervace, `price-mismatch`. |
 | reservation-note.test.ts | 17 | Poznámka hosta: NULL pro prázdné hodnoty, víceřádkový text, Unicode a NFC, limit 2000 znaků, zakázané řídicí a bidi znaky, SQL/HTML text jen jako text, není ve veřejné odpovědi ani v logách, idempotence, escapování v iCal exportu, CHECK v D1. |
-| d1-migrations.test.ts | 21 | Kontrola D1 migrací před deployem: číslování, konzistence konfigurací (oddělené D1, produkční POST vypnutý), čekající a neznámé migrace, fail-closed při chybě, detekce destruktivních migrací, ruční aplikace jen v terminálu s potvrzením, záloha před destruktivní migrací produkce. |
+| d1-migrations.test.ts | 29 | Kontrola D1 migrací před deployem: číslování, konzistence konfigurací (oddělené D1, produkční POST vypnutý), čekající a neznámé migrace, fail-closed při chybě, detekce destruktivních migrací, interaktivní aplikace jen v terminálu s potvrzením, neinteraktivní jen s autorizací ověřenou proti stavu D1 (název DB, přesný seznam čekajících migrací, žádné neznámé migrace, nikdy v CI), destruktivní migrace přísněji (výslovné povolení, v produkci samostatně, fráze v terminálu), ověřená záloha před každou produkční migrací (bookmark, export se schématem a záznamy migrací), samostatná záloha, kontrola po aplikaci, parsování argumentů. |
 | smoke.test.ts | 9 | Smoke test veřejných endpointů proti skutečnému Workeru: produkce (POST 404, `booking-config` vypnutý) a Preview, bez tokenů a zápisů, odhalení zapnutého POST, výpadku D1, úniku osobních údajů a veřejného exportu, `/calendar/*` s `X-Robots-Tag` přepsaným platformou v Preview. |
 | frontend-quote.test.ts | 14 | Frontend rezervační sekce: cena jen z `/api/quote` (kontrakt proti skutečnému handleru), nightly se slevou, exact-stay, 422 a chyby serveru/sítě jako české hlášky, načítání bez staré ceny, souběh (starší odpověď nepřepíše novější), nový požadavek při změně termínu a hostů, žádný klientský výpočet ceny. |
 | i18n.test.ts | 17 | Jazykové verze: úplnost katalogů cs/en/de/ua (klíče, parametry, plurály, žádný český text ani HTML), fallback, volba jazyka (?lang, localStorage, čeština) a persistence, množná čísla, data a CZK v každém jazyce, kalendář, rezervační panel po přepnutí, přepínač, žádné pevné texty v komponentách ani pevná cena noci (3 000 / 2 990 Kč); orientační cena jen z `PRICE_PER_NIGHT`. |
@@ -219,7 +219,7 @@ Projekt využívá Node.js Test Runner. Databázové testy probíhají nad loká
 | confirmation-email.test.ts | 34 | Potvrzovací e-mail: `locale` cs/en/de/ua (jiné → 422), nová rezervace = jeden e-mail s klíčem z interního UUID, replay i souběžný dvojklik znovu naplánují potvrzení se stejným klíčem a s uloženým e-mailem a jazykem, replay bez e-mailu (422, zrušená, bez jazyka), stejný veřejný kód po resetu čítače → různé klíče, UUID mimo API/e-mail/log, žádná synchronní práce před `ctx.waitUntil`, předgenerované ikony (bez rastrování ve Workeru), Preview → testovací schránka, produkce → host, odesílatel z business identity, business config (telefon E.164 → `tel:` a český zápis, validace), hlavička (jméno, značka, termín pobytu), kompaktní termín ve 4 jazycích, pořadí platební sekce a QR bez popisku, úvod se splatností, instrukcemi před příjezdem a kontaktem (bez věty o souhrnu), nadpis „Souhrn rezervace“ ve 4 jazycích, platba ve dvou sloupcích (QR vlevo, údaje vpravo) a na mobilu pod sebou, IBAN bez `nowrap` se zalomením po skupinách, patička bez oddělovacích znaků, nezměněná hlavička (otisk HTML a PNG) i patička (otisk HTML), QR 174 px se zaoblenými rohy a beze změny PNG, linka jen pod nadpisem „Platební údaje“ (nad „Těšíme se…“ žádná), nezměněný telefonický kontakt (otisk HTML), telefonický kontakt a patička (jméno → web, `mailto:`, `IČ` jako prostý text, žádný registr ani „IČO“), Preview bez banneru a adresy hosta (jen `[TEST]` v předmětu), domek bez vlastního pozadí a jméno jednotnou vahou, odkaz na registr odstraněný z konfigurace i dokumentace, výchozí světlá varianta, kontakty v plaintextu, renderer bez napevno zapsaných údajů provozovatele, chybějící konfigurace → skip bez upozornění, selhání providera (timeout, síť, HTTP 4xx/5xx) → 201 a jedno interní upozornění bez osobních a bankovních údajů, selhání upozornění nic dalšího nespouští, odložené odeslání, obsah HTML i textu ve 4 jazycích ze stejných dat jako API, QR příloha (cid) = SPAYD, escapování HTML, nové znění věty o e-mailu. |
 | payment.test.ts | 9 | Platby: pražské datum → `DDMMYY`, `NN` 01–99, splatnost (konec pražského dne po 24 h, změny času, vždy 24–48 h), IBAN (kontrolní součet, odvození čísla účtu), SPAYD (serverová cena, VS = kód, zpráva `Rezervace {kód}`), QR jako PNG (pixely = matice) se SVG fallbackem, kopírování do schránky, kontrola, že repozitář neobsahuje skutečný IBAN. |
 | calendar.test.ts | 15 | Odkaz do kalendáře: unikátní neveřejný token oddělený od id/kódu/VS, replay a souběžný dvojklik → stejná `calendarUrl`, dvě rezervace → různé URL, legacy `NULL` token (replay, e-mail i web bez odkazu), origin (produkce vždy hlavní web, Preview origin požadavku), endpoint (pending/paid → událost, hlavičky, HEAD, 405; neplatný tvar bez dotazu do D1, neznámý a zrušený → 404; bez D1 503; token se neloguje), validní VCALENDAR/VEVENT (ical.js), CRLF, 75 oktetů, stabilní UID, 14:00/11:00 v zimě, v létě i přes přechod času, žádné osobní/bankovní/interní údaje, e-mail (hlavička a Termín = stejný href, splatnost bez odkazu, věta ve 4 jazycích; příloha `pobyt.ics` s `method=PUBLISH` = stejná událost jako odkaz, bez osobních údajů, replay stejný obsah, produkce hostovi, legacy bez přílohy), web přijme jen serverovou URL, Worker obsluhuje `/calendar/*`, žádná externí calendar služba, CHECK a UNIQUE migrace 0010. |
-| **Celkem** | **386** | |
+| **Celkem** | **394** | |
 
 ### Testované scénáře
 
@@ -1225,7 +1225,9 @@ npx wrangler d1 execute chalupa-vsetice-rezervace --local \
 ## Nasazení a migrace D1
 
 Nasazení zajišťuje Cloudflare Workers Builds napojené na tento repozitář. Migrace D1 se
-**nikdy nespouštějí automaticky** – build je jen kontroluje a při nesouladu nasazení zastaví.
+**nikdy nespouštějí automaticky v buildu ani v CI** – build je jen kontroluje a při nesouladu
+nasazení zastaví. Aplikuje je vědomě člověk v terminálu, nebo agent či skript neinteraktivně
+s explicitní autorizací (viz níže).
 
 ### Nastavení Workers Builds
 
@@ -1276,12 +1278,16 @@ build skončí chybou (fail-closed).
 
 1. PR s novou migrací `migrations/NNNN_nazev.sql` (souvislé číslování; kontroluje test).
    Preview build PR selže, dokud migrace není na testovací D1 – to je záměr.
-2. Testovací D1: `pnpm run db:migrate:preview` → Preview build znovu spustit (retry) a ověřit.
+2. Testovací D1: `pnpm run db:migrate:preview` (nebo neinteraktivně, viz níže) → Preview build
+   znovu spustit (retry) a ověřit.
 3. Review PR.
-4. Produkční D1 – vědomé schválení: `pnpm run db:migrate:production`
-   - jen v interaktivním terminálu (v CI a buildu se odmítne),
-   - vypíše čekající migrace a označí destruktivní,
-   - vyžaduje opsat název databáze `chalupa-vsetice-rezervace`.
+4. Produkční D1 – vědomé schválení, jedním ze dvou režimů (v CI a buildu se oba odmítnou):
+   - interaktivně: `pnpm run db:migrate:production` – vypíše čekající migrace, označí
+     destruktivní a vyžaduje opsat název databáze `chalupa-vsetice-rezervace`;
+   - neinteraktivně s autorizací (agent, skript) – viz
+     [Neinteraktivní aplikace](#neinteraktivní-aplikace-autorizovaná).
+
+   Před každou produkční migrací se vytvoří a ověří záloha (viz [Záloha](#záloha-před-produkční-migrací)).
 5. Merge do `main` → build: kontrola projde → deploy.
 6. Smoke test: `pnpm run smoke https://chalupavsetice.cz --env production`.
 
@@ -1301,26 +1307,62 @@ Migrace musí být **zpětně kompatibilní** s předchozí verzí kódu:
 - `check` migrace, které jsou v DB, ale kód je nezná, jen varuje – na ochranu po rollbacku
   se proto spoléhat nedá.
 
+### Neinteraktivní aplikace (autorizovaná)
+
+Pro automatizaci (agent, skript mimo CI) bez terminálu. Ochrana TTY interaktivního režimu se
+neobchází – jde o samostatný režim, který místo opisování vyžaduje explicitní autorizaci
+a ověřuje ji proti skutečnému stavu D1:
+
+```bash
+pnpm run db:migrate:production --non-interactive \
+  --database=chalupa-vsetice-rezervace \
+  --expect=0009_jazyk_rezervace.sql,0010_kalendar_pobytu.sql
+```
+
+- `--database` musí přesně odpovídat cílové databázi (produkce `chalupa-vsetice-rezervace`,
+  Preview `chalupa-vsetice-rezervace-test`) – záměna prostředí se odmítne; `meta.environment`
+  se kontroluje stejně jako v `check`.
+- `--expect` je přesný seznam čekajících migrací v pořadí aplikace. Jakýkoli rozdíl (jiná,
+  chybějící nebo navíc čekající migrace, jiné pořadí) = nic se neprovede.
+- D1 s migracemi, které kód nezná (rollback, jiná větev) se neinteraktivně nemigruje.
+- `CI` / `WORKERS_CI` = odmítnuto v obou režimech.
+- Po aplikaci se stav znovu zkontroluje (`check`); čekající migrace = chyba.
+
 ### Destruktivní migrace
 
 Za destruktivní se považuje migrace s `DROP`, `ALTER TABLE … DROP COLUMN / RENAME`, `DELETE`,
 `UPDATE` nebo `REPLACE` (mimo těla `CREATE TRIGGER`, komentáře a řetězce; v pochybnostech
-konzervativně ano). U produkce `db:migrate:production` navíc:
+konzervativně ano). Mají přísnější režim než aditivní:
 
-1. zjistí Time Travel bookmark aktuálního stavu (`wrangler d1 time-travel info`) a vypíše
-   příkaz pro obnovu,
-2. vyexportuje celou DB (`wrangler d1 export`) do `.d1-backups/` a ověří, že export není prázdný,
-3. vyžaduje opsat frázi `ZALOHA OVERENA`.
+- interaktivně: po ověřené záloze navíc opsat frázi `ZALOHA OVERENA`;
+- neinteraktivně: výslovné povolení `--allow-destructive=<migrace>` (přesně čekající
+  destruktivní migrace) a v produkci **jen samostatně** – destruktivní migrace nesmí být
+  v jednom běhu s jinou migrací (i na Preview je `--allow-destructive` povinné);
+- agent ji v produkci spouští jen po výslovném souhlasu uživatele s konkrétní migrací
+  (CLAUDE.md).
 
-Bez bookmarku, exportu nebo fráze se migrace neaplikuje. Před potvrzením export otevři
-a zkontroluj. **`.d1-backups/` obsahuje osobní údaje hostů:** je v `.gitignore`, nikam ho
-nenahrávej a po ověření migrace ho smaž.
+### Záloha před produkční migrací
+
+Před **každou** produkční migrací (aditivní i destruktivní, oba režimy), samostatně
+`pnpm run db:backup:production` (`db:backup:preview` pro testovací D1):
+
+1. Time Travel bookmark aktuálního stavu (`wrangler d1 time-travel info --json`; tvar bookmarku
+   se ověří) a výpis příkazu pro obnovu,
+2. export celé DB (`wrangler d1 export --remote`) do `.d1-backups/`,
+3. ověření exportu: neprázdný soubor, schéma `reservations` a `d1_migrations` a záznamy všech
+   migrací aplikovaných v D1 (obsah se nevypisuje).
+
+Bez platného bookmarku nebo ověřeného exportu se migrace neaplikuje. Export vyžaduje token
+s **D1 Edit** (s D1 Read selže a migrace se neprovede). **`.d1-backups/` obsahuje osobní
+údaje hostů:** je v `.gitignore`, nikam ho nenahrávej a po ověření migrace ho smaž. V dočasném
+prostředí (cloudová session agenta) export zaniká s prostředím – trvalou obnovou je Time
+Travel bookmark.
 
 Obnova při problému:
 
 ```bash
-# Celá DB do stavu před migrací (Time Travel, bookmark z výpisu migrace)
-npx wrangler d1 time-travel restore chalupa-vsetice-rezervace --bookmark=<bookmark>
+# Celá DB do stavu před migrací (Time Travel, bookmark z výpisu zálohy)
+npx wrangler d1 time-travel restore chalupa-vsetice-rezervace --bookmark=<bookmark> --config wrangler.jsonc
 ```
 
 Pak vrátit kód na verzi odpovídající schématu. Time Travel uchovává historii 30 dní (Workers
@@ -1331,11 +1373,17 @@ Paid) / 7 dní (Free).
 ```bash
 pnpm run db:check:preview          # stav testovací D1 (jen čtení)
 pnpm run db:check:production       # stav produkční D1 (jen čtení)
-pnpm run db:migrate:preview        # aplikace na testovací D1
-pnpm run db:migrate:production     # aplikace na produkční D1 (potvrzení, u destruktivních záloha)
+pnpm run db:backup:preview         # ověřená záloha testovací D1 (bookmark + export)
+pnpm run db:backup:production      # ověřená záloha produkční D1 (bookmark + export)
+pnpm run db:migrate:preview        # aplikace na testovací D1 (interaktivně)
+pnpm run db:migrate:production     # aplikace na produkční D1 (interaktivně, vždy po ověřené záloze)
+pnpm run db:migrate:production --non-interactive --database=… --expect=…   # autorizovaně, viz výše
 ```
 
-Vyžadují přihlášení (`npx wrangler login`) nebo `CLOUDFLARE_API_TOKEN`. Pod kapotou je
+Vyžadují přihlášení (`npx wrangler login`) nebo `CLOUDFLARE_API_TOKEN`. Pro `check` stačí
+D1 Read (build token); pro `backup` a `apply` je potřeba samostatný token s **D1 Edit**
+(Account Settings Read, D1 Edit, User Details Read, Memberships Read) – nikdy build token,
+ten zůstává D1 Read. Pod kapotou je
 `wrangler d1 … --remote`; `wrangler d1` čte jen top-level `d1_databases`, proto testovací DB
 používá `wrangler.preview-migrations.jsonc` (stejné ID jako `previews.d1_databases`, jen pro
 `wrangler d1`, ne pro deploy – kontroluje to `check`).
