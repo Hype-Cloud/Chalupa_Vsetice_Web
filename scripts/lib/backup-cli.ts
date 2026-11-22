@@ -452,7 +452,9 @@ async function restore(options: Record<string, string | true>, deps: CliDeps): P
     if (missing.length > 0) throw new CliError(`obnovená D1 postrádá objekty schématu: ${missing.join(', ')}`);
     const changed = [...expectedDefinitions].filter(([name, sql]) => restored.get(name)?.sql !== sql).map(([name]) => name);
     if (changed.length > 0) throw new CliError(`obnovená D1 má změněné definice schématu: ${changed.join(', ')}`);
-    const extra = [...restored.keys()].filter((name) => !expectedDefinitions.has(name));
+    // Miniflare/Cloudflare D1 si vytváří vlastní interní metadata tabulku,
+    // která v exportu aplikace není. Ignorujeme pouze přesný systémový název.
+    const extra = [...restored.keys()].filter((name) => name !== '_cf_METADATA' && !expectedDefinitions.has(name));
     if (extra.length > 0) throw new CliError(`obnovená D1 má neočekávané objekty schématu: ${extra.join(', ')}`);
     deps.out(`Obnova ověřena: ${manifest.migrations} migrací, ${tables.length} tabulek (včetně prázdných), ${expectedObjects.size} objektů schématu.`);
     deps.out(`Nová D1 „${target}“ je samostatná. Po ověření ji smažte (wrangler d1 delete ${target}), pokud ji nepotřebujete.`);
