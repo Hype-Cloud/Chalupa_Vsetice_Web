@@ -237,7 +237,7 @@ async function createReservation(request: Request, env: BookingEnv, deps: Bookin
         deps.log('reservations: created');
         const body = reservationResponse(reservation, account, calendarBase);
         // Potvrzovací e-mail až po skutečném zápisu; best-effort, odpověď 201 nemění.
-        await scheduleConfirmation(env, deps, body, { reservationId: id, guestEmail: booking.email, locale: booking.locale, calendarToken, createdAt: now.toISOString() });
+        await scheduleConfirmation(env, deps, body, { reservationId: id, guestEmail: booking.email, locale: booking.locale });
         return created(body);
       } catch (error) {
         if (error instanceof NightsTakenError) {
@@ -295,13 +295,7 @@ async function replay(
   const { requestHash: _, stored, ...reservation } = existing;
   const body = reservationResponse(reservation, account, calendarBase);
   if (reservation.status === 'pending_payment' && stored.locale) {
-    await scheduleConfirmation(env, deps, body, {
-      reservationId: stored.reservationId,
-      guestEmail: stored.email,
-      locale: stored.locale,
-      calendarToken: reservation.calendarToken,
-      createdAt: stored.createdAt,
-    });
+    await scheduleConfirmation(env, deps, body, { reservationId: stored.reservationId, guestEmail: stored.email, locale: stored.locale });
   }
   return created(body, 200, true);
 }

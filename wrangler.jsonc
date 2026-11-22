@@ -72,10 +72,7 @@
       "BOOKING_ENV": "preview",
       "BOOKING_API_ENABLED": "true",
       "BOOKING_ICAL_EXPORT_ENABLED": "true",
-      "TURNSTILE_SITE_KEY": "1x00000000000000000000BB",
-      // Preview PoC kalendářové části v potvrzovacím e-mailu (publish | request); jen testovací
-      // schránka. V produkčních vars zakázáno (scripts/d1-migrations.ts check).
-      "CALENDAR_INVITE_POC": "publish"
+      "TURNSTILE_SITE_KEY": "1x00000000000000000000BB"
     },
     // Vlastní namespace, aby se Preview a produkce nepočítaly dohromady.
     "ratelimits": [

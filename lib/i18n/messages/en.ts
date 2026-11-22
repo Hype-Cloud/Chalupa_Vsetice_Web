@@ -178,7 +178,6 @@ export const en = {
   'email.calendarHint': 'Click the dates of your stay to add it to your calendar.',
   'calendarEvent.summary': 'Stay – {name}',
   'calendarEvent.description': 'Check-in from {checkIn}, check-out by {checkOut}.',
-  'calendarEvent.inviteNote': 'Replying to this invitation does not change your reservation.',
   'email.summaryHeading': 'Booking summary',
   'email.reservationCode': 'Booking code',
   'email.qrAlt': 'Payment QR code',

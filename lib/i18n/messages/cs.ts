@@ -180,7 +180,6 @@ export const cs = {
   'email.calendarHint': 'Kliknutím na termín pobytu si jej můžete přidat do kalendáře.',
   'calendarEvent.summary': 'Pobyt – {name}',
   'calendarEvent.description': 'Příjezd od {checkIn}, odjezd do {checkOut}.',
-  'calendarEvent.inviteNote': 'Odpověď na tuto pozvánku rezervaci nemění.',
   'email.summaryHeading': 'Souhrn rezervace',
   'email.reservationCode': 'Kód rezervace',
   'email.qrAlt': 'Platební QR kód',
