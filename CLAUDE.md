@@ -1,6 +1,6 @@
 # Chalupa Všetice – pravidla pro Claude Code
 
-Web chalupy na Cloudflare Workers (statické assety + Worker pro `/api/*`) s rezervačním
+Web chalupy na Cloudflare Workers (statické assety + Worker pro `/api/*` a `/calendar/*`) s rezervačním
 backendem v D1. Podrobný technický a provozní popis je v `README.md`; tady jsou pravidla, která
 platí v každé session.
 
@@ -17,7 +17,9 @@ platí v každé session.
 
 ## D1 a migrace
 
-- Migrace se **nikdy** neaplikují automaticky – ani v CI, ani ve Workers Builds. Build token má
+- Migrace se **nikdy neaplikují v CI ani ve Workers Builds**. Mimo build je smí po schválení
+  konkrétního nasazení aplikovat agent autorizovaným neinteraktivním režimem, případně
+  člověk interaktivně. Build token má
   k D1 jen **Read**: build stav jen kontroluje (`check`) a při nesouladu deploy zastaví.
 - Claude migrace aplikuje **jen** neinteraktivním autorizovaným režimem skriptu (TTY ochranu
   interaktivního režimu nikdy neobcházet, žádné podvržení terminálu):
@@ -43,7 +45,12 @@ platí v každé session.
   4. merge do `main` (build: `check production` → deploy) a ověření buildu,
   5. po deployi `pnpm run smoke https://chalupavsetice.cz --env production`,
   6. uživateli předat Time Travel bookmark z výpisu zálohy; `.d1-backups/` po ověření smazat.
+- Stav k 22. 11. 2026: PR #41 a #40 mergnuté, produkční D1 má migrace `0001`–`0010`,
+  produkční smoke test prošel 10/10. Migrace `0009` a `0010` neopakovat; další aplikace
+  vždy vychází ze skutečného `db:check`. Rezervační POST v produkci zůstává vypnutý.
 - Obnova (`wrangler d1 time-travel restore`) maže novější data – jen na výslovný pokyn uživatele.
+  Time Travel má časově omezenou retenci; SQL export v dočasné cloudové session je po
+  ověření mazán. Jde o pojistku pro migraci, ne dlouhodobý archiv záloh.
 - Příkazy: `pnpm run db:check:preview`, `pnpm run db:check:production`,
   `pnpm run db:backup:preview`, `pnpm run db:backup:production`,
   `pnpm run db:migrate:preview`, `pnpm run db:migrate:production` (+ autorizace výše),
@@ -114,6 +121,10 @@ Skutečný stav (nastaveno ručně v dashboardu, v diffu není vidět):
   a v API jen ISO `YYYY-MM-DD`.
 - Rezervační formulář se nabízí jen podle `GET /api/booking-config` (`bookingEnabled`); produkce
   zůstává na poptávce přes e-chalupy, dokud o zapnutí nerozhodne uživatel.
+- Potvrzovací e-mail i kalendář jsou v produkci nasazené, ale nové hostovské rezervace
+  vznikají jen v Preview. `calendarUrl` skládá server (`GET /calendar/<token>`, bez `.ics`
+  v URL); e-mail obsahuje stejnou událost jako přílohu `pobyt.ics` pro rozpoznání Siri.
+  URL i příloha jsou jednorázový import, nikoli automatická aktualizace události.
 
 ## Identita provozovatele
 
@@ -132,6 +143,9 @@ Skutečný stav (nastaveno ručně v dashboardu, v diffu není vidět):
   používají fiktivní účet banky `9999` (`tests/helpers.ts`), `tests/payment.test.ts` to hlídá.
 - Testy a ruční ověřování jen se syntetickými daty (rok 2030, domény `.invalid`).
 - Osobní údaje hostů a obsah poznámek se nelogují a nejsou ve veřejných odpovědích.
+  Calendar URL je neveřejný odkaz s náhodným tokenem: kód ho výslovně neloguje, ale
+  platformní invocation logs mohou ukládat cestu požadavku. `redact_query_string`
+  neskryje token obsažený v URL cestě; obsah ICS nesmí obsahovat PII.
 - `.d1-backups/` obsahuje osobní údaje: je v `.gitignore`, nikam se nenahrává a po ověření
   migrace se smaže.
 
@@ -175,4 +189,4 @@ Skutečný stav (nastaveno ručně v dashboardu, v diffu není vidět):
   sebejistě.
 - PR komentáře k testům nebo opravám psát stejným věcným stylem; místo
   „Otestoval jsem to a funguje to“ použít například
-  „Ověřeno v Preview: 8/8 smoke kontrol úspěšných.“
+  „Ověřeno v Preview: 10/10 smoke kontrol úspěšných.“
