@@ -76,12 +76,12 @@ export interface ReservationConfirmation {
   payment: PaymentInstructions;
 }
 
-/** Jen serverová URL tvaru http(s)://…/calendar/<token>.ics; cokoli jiného = bez odkazu. */
+/** Jen serverová URL tvaru http(s)://…/calendar/<token> (dříve i s `.ics`); cokoli jiného = bez odkazu. */
 function calendarHref(value: unknown): string | null {
   if (typeof value !== 'string') return null;
   try {
     const url = new URL(value);
-    return (url.protocol === 'https:' || url.protocol === 'http:') && /^\/calendar\/[A-Za-z0-9_-]{43}\.ics$/.test(url.pathname) && !url.search && !url.hash ? url.href : null;
+    return (url.protocol === 'https:' || url.protocol === 'http:') && /^\/calendar\/[A-Za-z0-9_-]{43}(?:\.ics)?$/.test(url.pathname) && !url.search && !url.hash ? url.href : null;
   } catch {
     return null;
   }

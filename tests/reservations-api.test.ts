@@ -74,7 +74,7 @@ test('úspěšná rezervace: 201, kód DDMMYYNN = VS, cena ze serveru, splatnost
     reservation: {
       reservationCode: '10013001', arrival: '2030-02-01', departure: '2030-02-04', nights: 3, guests: 2, totalCzk: 8970,
       status: 'pending_payment', paymentDueAt: '2030-01-11T22:59:59.000Z',
-      calendarUrl: `https://preview.test.invalid/calendar/${token}.ics`,
+      calendarUrl: `https://preview.test.invalid/calendar/${token}`,
     },
     payment: {
       amountCzk: 8970, currency: 'CZK', accountNumber: FAKE_ACCOUNT_NUMBER, iban: FAKE_PAYMENT_IBAN, variableSymbol: '10013001',

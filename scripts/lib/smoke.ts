@@ -145,8 +145,8 @@ export async function runSmoke(baseUrl: URL, env: SmokeEnv, fetchFn: typeof fetc
   // Odkaz do kalendáře obsluhuje Worker (run_worker_first), ne statický 404: neznámý token v
   // platném tvaru → 404 JSON s hlavičkami Workeru (noindex, no-store). Cloudflare na Preview URL
   // přepisuje X-Robots-Tag na `noindex` u všech odpovědí – přesná hodnota se ověřuje jen v produkci.
-  await check('GET /calendar/<neznámý token>.ics → 404 z Workeru', async () => {
-    const response = await request(`/calendar/${'0'.repeat(43)}.ics`);
+  await check('GET /calendar/<neznámý token> → 404 z Workeru', async () => {
+    const response = await request(`/calendar/${'0'.repeat(43)}`);
     const { body } = await jsonOf(response);
     const robots = response.headers.get('x-robots-tag') ?? '';
     const robotsOk = env === 'production' ? robots === 'noindex, nofollow' : /\bnoindex\b/.test(robots);

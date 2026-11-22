@@ -500,9 +500,9 @@ POST /api/reservations → validace → čerstvý export e-chalup → D1 batch (
   (`renderReservationEmail`) je obecný – stejný půjde použít pro potvrzení platby, zrušení
   nebo připomínku splatnosti s jinými texty.
 
-### Odkaz do kalendáře (`GET /calendar/<token>.ics`, `worker/booking/calendar.ts`)
+### Odkaz do kalendáře (`GET /calendar/<token>`, `worker/booking/calendar.ts`)
 
-Termín pobytu je klikací odkaz na vlastní URL `https://chalupavsetice.cz/calendar/<token>.ics`,
+Termín pobytu je klikací odkaz na vlastní URL `https://chalupavsetice.cz/calendar/<token>`,
 která vrátí jednu událost celého pobytu. Žádná příloha e-mailu, žádná externí služba
 (Google/Outlook/Apple odkazy, add-to-calendar SaaS) a žádné úložiště souborů – ICS se generuje
 při každém požadavku.
@@ -514,7 +514,7 @@ při každém požadavku.
   `POST /api/reservations` v `reservation.calendarUrl`; stejnou hodnotu používá potvrzovací
   e-mail. Replay (stejný `Idempotency-Key` i souběžný dvojklik) vrací stejnou URL. Rezervace bez
   tokenu (před migrací 0010) → `calendarUrl: null` a termín bez odkazu. Frontend URL nikdy
-  neskládá – přijme jen serverovou URL tvaru `http(s)://…/calendar/<token>.ics`.
+  neskládá – přijme jen serverovou URL tvaru `http(s)://…/calendar/<token>` (i dříve vydaný tvar s `.ics`).
 - **Origin:** produkce vždy `BUSINESS_WEBSITE_URL` (`https://chalupavsetice.cz`), i když
   požadavek přišel přes `workers.dev`; Preview origin požadavku (odkaz jde otestovat proti
   Preview Workeru).
@@ -542,6 +542,10 @@ při každém požadavku.
   na macOS) soubor stáhnou a událost se přidá otevřením staženého souboru. Automatické otevření
   kalendáře hlavička nezaručuje. `filename` zůstává, aby se stažený soubor nejmenoval podle
   tokenu. Jde o jednorázový import (`https://`), ne o odběr kalendáře (`webcal://`).
+- **URL bez přípony `.ics`:** Apple Mail na iOS odkaz končící `.ics` nabízí jako odběr kalendáře
+  (ověřeno v Preview), příloha `text/calendar` a návrh Siri naopak jako jednorázovou událost.
+  Odkaz proto končí tokenem; obsah a hlavičky jsou stejné. Cesta `/calendar/<token>.ics` dál
+  vrací stejnou událost (dříve odeslané odkazy).
 - **Capability URL:** kdokoli s odkazem stáhne událost – proto náhodný token a minimální obsah.
   Kód tokenu ani URL neloguje. Pozor: Workers Logs (`invocation_logs`) ukládají URL požadavku
   včetně cesty; `redact_query_string` cestu neskrývá. Logy jsou přístupné jen v účtu Cloudflare.
@@ -1423,7 +1427,7 @@ Ověří web, `/api/availability` (status, žádné osobní údaje), `/api/quote
 termín, 405), `POST /api/reservations` (**v produkci musí vrátit 404**; nikde nesmí přijmout
 prázdný požadavek), `/api/booking-config` (v produkci `bookingEnabled: false`, v Preview zapnutý
 s veřejným site key), `/api/reservations.ics` bez tokenu (404) a neznámé API (404 JSON
-s bezpečnostními hlavičkami), `/calendar/<neznámý token>.ics` (404 JSON z Workeru s `no-store`,
+s bezpečnostními hlavičkami), `/calendar/<neznámý token>` (404 JSON z Workeru s `no-store`,
 ne statický 404; `X-Robots-Tag` v produkci přesně `noindex, nofollow`, v Preview stačí `noindex`,
 protože Cloudflare ho na Preview URL přepisuje u všech odpovědí). Exit 1 při selhání;
 `stale`/`partial` obsazenost je jen varování.

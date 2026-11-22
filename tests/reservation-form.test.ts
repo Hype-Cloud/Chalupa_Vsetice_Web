@@ -343,7 +343,7 @@ test('POST: správný request (JSON, Idempotency-Key, turnstileToken, expectedPr
   // Potvrzení nese jen data ze serverové odpovědi: kód z D1, cena z /api/quote výpočtu, splatnost,
   // SPAYD a hotová calendarUrl ze serveru (frontend ji neskládá).
   assert.ok(result.kind === 'success');
-  assert.match(result.reservation.calendarUrl!, /^https:\/\/[^/]+\/calendar\/[A-Za-z0-9_-]{43}\.ics$/);
+  assert.match(result.reservation.calendarUrl!, /^https:\/\/[^/]+\/calendar\/[A-Za-z0-9_-]{43}$/);
   assert.deepEqual({ ...result, reservation: { ...result.reservation, calendarUrl: null } }, SUCCESS);
   const [request] = b.requests;
   assert.equal(request.method, 'POST');

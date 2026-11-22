@@ -178,7 +178,7 @@ test('bez osobních, bankovních a interních údajů v obou variantách (kromě
     const s = setup({ poc });
     const { body } = await s.post(stay());
     const ics = unfold(decode(calendarParts(s.mails[0])[0].content));
-    const token = /\/calendar\/([A-Za-z0-9_-]{43})\.ics$/.exec(body.reservation.calendarUrl!)![1];
+    const token = /\/calendar\/([A-Za-z0-9_-]{43})$/.exec(body.reservation.calendarUrl!)![1];
     const forbidden = [GUEST.firstName, GUEST.lastName, GUEST.phone, GUEST.email, NOTE, FAKE_PAYMENT_IBAN, FAKE_ACCOUNT_NUMBER, body.reservation.reservationCode, String(body.reservation.totalCzk), '00000000-0000-4000-8000-000000000001', token, 'SPD*'];
     for (const value of forbidden) assert.ok(!ics.includes(value), `${poc}: ${value}`);
   }

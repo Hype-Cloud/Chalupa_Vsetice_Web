@@ -22,7 +22,7 @@ const NOW = new Date('2030-01-10T10:00:00Z');
 const GUEST = { firstName: 'Jan', lastName: 'Testovací', phone: '+420 000 000 000', email: 'host-kalendar@example.invalid' };
 const NOTE = 'Přijedeme pozdě večer.';
 const stay = (extra: Record<string, unknown> = {}) => ({ arrival: '2030-02-01', departure: '2030-02-04', guests: 2, ...GUEST, note: NOTE, locale: 'cs', turnstileToken: 'XXXX.DUMMY.TOKEN.XXXX', ...extra });
-const TOKEN_URL = /^https:\/\/[^/]+\/calendar\/([A-Za-z0-9_-]{43})\.ics$/;
+const TOKEN_URL = /^https:\/\/[^/]+\/calendar\/([A-Za-z0-9_-]{43})$/;
 
 let preview: Awaited<ReturnType<typeof createTestDatabase>>;
 let production: Awaited<ReturnType<typeof createTestDatabase>>;
@@ -138,7 +138,7 @@ test('origin: produkce vždy https://chalupavsetice.cz (i z workers.dev), Previe
   const prod = setup({ db: 'production', origin: 'https://chalupa-vsetice-web.example.workers.dev' });
   const created = await prod.post(stay());
   assert.equal(created.status, 201);
-  assert.match(created.body.reservation.calendarUrl!, /^https:\/\/chalupavsetice\.cz\/calendar\/[A-Za-z0-9_-]{43}\.ics$/);
+  assert.match(created.body.reservation.calendarUrl!, /^https:\/\/chalupavsetice\.cz\/calendar\/[A-Za-z0-9_-]{43}$/);
   const mail = prod.mails[0].body;
   assert.ok(!mail.html.includes('workers.dev') && !mail.text.includes('workers.dev'));
   assert.equal(calendarOrigin('production', 'https://x.workers.dev/api/reservations'), 'https://chalupavsetice.cz');
@@ -161,6 +161,12 @@ test('ICS endpoint: platný token pending i paid → událost se správnými hla
     assert.equal(response.headers.get('content-disposition'), 'inline; filename="pobyt.ics"');
     assert.match(await response.text(), /^BEGIN:VCALENDAR\r\n/);
   }
+  // Odkaz je bez přípony (iOS odkaz končící `.ics` nabízí jako odběr); dříve odeslaný tvar
+  // s `.ics` vrací stejnou událost.
+  assert.doesNotMatch(path, /\.ics$/);
+  const legacy = await s.calendar(`${path}.ics`);
+  assert.equal(legacy.status, 200);
+  assert.equal(await legacy.text(), await (await s.calendar(path)).text());
   const head = await s.calendar(path, 'HEAD');
   assert.equal(head.status, 200);
   assert.equal(await head.text(), '');
@@ -175,7 +181,7 @@ test('ICS endpoint: neplatný formát (bez dotazu do D1), neexistující i zruš
   const path = pathOf(body.reservation.calendarUrl!);
   // Neplatný formát se odmítne před databází: D1, která při dotazu vyhodí chybu, se nepoužije.
   const exploding = { prepare: () => { throw new Error('DB se nemá volat'); } } as unknown as D1Database;
-  for (const bad of ['/calendar/abc.ics', '/calendar/' + 'A'.repeat(42) + '.ics', '/calendar/' + 'A'.repeat(44) + '.ics', '/calendar/' + 'A'.repeat(42) + '!.ics', '/calendar/' + 'A'.repeat(43), '/calendar/' + 'A'.repeat(43) + '.ics/x', '/calendar/10013001.ics', '/calendar/00000000-0000-4000-8000-000000000001.ics']) {
+  for (const bad of ['/calendar/abc.ics', '/calendar/' + 'A'.repeat(42) + '.ics', '/calendar/' + 'A'.repeat(44) + '.ics', '/calendar/' + 'A'.repeat(42) + '!.ics', '/calendar/' + 'A'.repeat(43) + '.ical', '/calendar/' + 'A'.repeat(43) + '/', '/calendar/' + 'A'.repeat(43) + '.ics/x', '/calendar/10013001.ics', '/calendar/00000000-0000-4000-8000-000000000001.ics']) {
     const response = await s.calendar(bad, 'GET', exploding);
     assert.equal(response.status, 404, bad);
     assert.equal(response.headers.get('x-robots-tag'), 'noindex, nofollow');
@@ -279,8 +285,10 @@ test('web success summary: calendarUrl jen ze serveru; frontend URL neskládá z
     reservation: { reservationCode: '10013001', arrival: '2030-02-01', departure: '2030-02-04', nights: 3, guests: 2, totalCzk: 8970, status: 'pending_payment', paymentDueAt: '2030-01-11T22:59:59.000Z', calendarUrl: calendar },
     payment: { amountCzk: 8970, currency: 'CZK', accountNumber: FAKE_ACCOUNT_NUMBER, iban: FAKE_PAYMENT_IBAN, variableSymbol: '10013001', message: 'Rezervace 10013001', dueAt: '2030-01-11T22:59:59.000Z', spayd: 'SPD*1.0' },
   });
-  const url = `https://chalupavsetice.cz/calendar/${'a'.repeat(43)}.ics`;
+  const url = `https://chalupavsetice.cz/calendar/${'a'.repeat(43)}`;
   assert.equal(parseConfirmation(base(url))!.calendarUrl, url);
+  // Dříve vydaný tvar s `.ics` web dál přijme.
+  assert.equal(parseConfirmation(base(`${url}.ics`))!.calendarUrl, `${url}.ics`);
   // Chybějící, null nebo neočekávaný tvar → termín bez odkazu (potvrzení se jinak přijme).
   for (const bad of [undefined, null, '', 'javascript:alert(1)', 'https://x.invalid/calendar/10013001.ics', `ftp://x.invalid/calendar/${'a'.repeat(43)}.ics`, `${url}?x=1`, 42]) {
     const parsed = parseConfirmation(base(bad));

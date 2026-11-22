@@ -1,4 +1,7 @@
-// Odkaz „přidat do kalendáře“: GET /calendar/<token>.ics – jedna událost celého pobytu.
+// Odkaz „přidat do kalendáře“: GET /calendar/<token> – jedna událost celého pobytu.
+//
+// - URL je bez přípony `.ics`: iOS (Apple Mail) odkaz končící `.ics` nabízí jako odběr kalendáře,
+//   ne jako jednorázovou událost. Cesta s `.ics` zůstává funkční (dříve odeslané odkazy).
 //
 // - Token (reservations.calendar_token, migrace 0010) je capability: 32 kryptograficky
 //   náhodných bajtů v base64url, oddělený od interního id, veřejného kódu i VS. Kdo zná odkaz,
@@ -24,7 +27,8 @@ import { escapeText, foldLine } from './ics.ts';
 
 /** Token: 43 znaků base64url (32 bajtů). */
 export const CALENDAR_TOKEN = /^[A-Za-z0-9_-]{43}$/;
-const CALENDAR_PATH = /^\/calendar\/([^/]+)\.ics$/;
+/** `/calendar/<token>` (aktuální tvar) i `/calendar/<token>.ics` (dříve odeslané odkazy). */
+const CALENDAR_PATH = /^\/calendar\/([^/.]+)(?:\.ics)?$/;
 
 const CRLF = '\r\n';
 const HEADERS = {
@@ -51,7 +55,7 @@ export function calendarOrigin(bookingEnv: string | undefined, requestUrl: strin
 
 /** Hotová URL pro API a e-mail; rezervace bez tokenu (před migrací 0010) → null. */
 export function calendarUrl(origin: string, token: string | null): string | null {
-  return token && CALENDAR_TOKEN.test(token) ? `${origin}/calendar/${token}.ics` : null;
+  return token && CALENDAR_TOKEN.test(token) ? `${origin}/calendar/${token}` : null;
 }
 
 export const isCalendarPath = (pathname: string) => pathname.startsWith('/calendar/');
