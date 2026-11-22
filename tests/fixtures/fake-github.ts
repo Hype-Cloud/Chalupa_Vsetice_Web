@@ -1,6 +1,7 @@
 // Falešné REST API GitHub Releases pro testy záloh (in-memory).
 import { createHash } from 'node:crypto';
-const digestOf = (bytes: Uint8Array) => `sha256:${createHash('sha256').update(bytes).digest('hex')}`; Chová se jako GitHub v bodech,
+const digestOf = (bytes: Uint8Array) => `sha256:${createHash('sha256').update(bytes).digest('hex')}`;
+// Chová se jako GitHub v bodech,
 // na kterých záloha závisí: drafty bez tagu, 422 při duplicitním tagu publikovaného releasu
 // i duplicitním názvu assetu, stránkování výpisu, mazání releasu a tagu zvlášť.
 
