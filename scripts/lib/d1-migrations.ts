@@ -3,8 +3,10 @@
 // - check: jen čte (SELECT z d1_migrations a meta). Zastaví deploy, pokud cílové D1 chybí
 //   migrace z repozitáře, DB patří jinému prostředí, konfigurace je nekonzistentní nebo D1 nejde
 //   přečíst (fail-closed). Migrace navíc v DB (rollback, jiná větev) jsou jen varování.
-// - apply: jen ručně z terminálu (ne v CI). Produkce vyžaduje opsání názvu DB; destruktivní
-//   migrace v produkci navíc zálohu (Time Travel bookmark + export) a potvrzovací frázi.
+// - apply: nikdy v CI. Interaktivně z terminálu (produkce: opsání názvu DB, destruktivní:
+//   potvrzovací fráze), nebo neinteraktivně s explicitní autorizací (název DB, přesný seznam
+//   čekajících migrací, výslovné povolení destruktivních). Produkce vždy po ověřené záloze
+//   (Time Travel bookmark + export). Viz d1-workflow.ts.
 //
 // Wrangler se volá přes injektovaný runner (testy), nikdy přes shell.
 
@@ -30,7 +32,9 @@ export const TARGETS: Record<TargetName, Target> = {
 
 export const MIGRATIONS_DIR = 'migrations';
 export const BACKUP_DIR = '.d1-backups';
-/** Fráze, kterou je nutné opsat před destruktivní migrací produkce. */
+/** Time Travel bookmark (wrangler d1 time-travel info --json). */
+export const BOOKMARK = /^[0-9a-f]{8}-[0-9a-f]{8}-[0-9a-f]{8}-[0-9a-f]{32}$/;
+/** Fráze, kterou je nutné opsat před destruktivní migrací produkce (interaktivní režim). */
 export const DESTRUCTIVE_CONFIRMATION = 'ZALOHA OVERENA';
 
 const MIGRATION_FILE = /^(\d{4})_[a-z0-9_]+\.sql$/;

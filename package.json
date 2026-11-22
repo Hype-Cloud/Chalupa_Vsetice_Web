@@ -15,6 +15,8 @@
     "db:check:preview": "node scripts/d1-migrations.ts check preview",
     "db:migrate:preview": "node scripts/d1-migrations.ts apply preview",
     "db:migrate:production": "node scripts/d1-migrations.ts apply production",
+    "db:backup:preview": "node scripts/d1-migrations.ts backup preview",
+    "db:backup:production": "node scripts/d1-migrations.ts backup production",
     "smoke": "node scripts/smoke.ts",
     "email:icons": "node scripts/email-icons.ts",
     "test": "node --test 'tests/*.test.ts'"
