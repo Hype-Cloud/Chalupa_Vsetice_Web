@@ -13,7 +13,7 @@ import {
   TARGETS,
   verifyConfigs,
 } from '../scripts/lib/d1-migrations.ts';
-import { applyTarget, checkTarget, type WorkflowDeps } from '../scripts/lib/d1-workflow.ts';
+import { applyTarget, authorizationProblems, backupOnly, checkTarget, exportProblems, parseApplyArgs, type ApplyAuthorization, type WorkflowDeps } from '../scripts/lib/d1-workflow.ts';
 
 // Kontrola a řízená aplikace D1 migrací. Wrangler je falešný – žádné volání Cloudflare.
 const ROOT = new URL('..', import.meta.url).pathname;
@@ -167,13 +167,19 @@ function fake(options: {
   applied?: string[];
   environment?: string | null;
   interactive?: boolean;
+  ci?: boolean;
   answers?: string[];
   executeCode?: number;
   executeStdout?: string;
   throwOnSpawn?: boolean;
   bookmark?: string | null;
   exportSize?: number | null;
+  /** Obsah exportu; výchozí = platný export s aktuálně aplikovanými migracemi. */
+  exportContent?: string;
+  exportCode?: number;
   applyCode?: number;
+  /** wrangler skončí 0, ale migrace v D1 nepřibudou. */
+  applyNoop?: boolean;
 }): Fake {
   let applied = options.applied ?? LOCAL;
   const environment = options.environment === undefined ? (options.target ?? 'production') : options.environment;
@@ -181,17 +187,18 @@ function fake(options: {
   const out: string[] = [];
   const prompts: string[] = [];
   const answers = [...(options.answers ?? [])];
-  const files = new Map<string, number>();
+  const files = new Map<string, { size: number; content: string }>();
   const deps: WorkflowDeps = {
     root: ROOT,
     interactive: options.interactive ?? true,
+    ci: options.ci ?? false,
     wrangler: async (args) => {
       calls.push(args);
       if (options.throwOnSpawn) throw new Error('spawn ENOENT');
       const [, command] = args;
       if (command === 'execute') return { code: options.executeCode ?? 0, stdout: options.executeStdout ?? executeOutput(applied, environment) };
       if (command === 'migrations') {
-        if ((options.applyCode ?? 0) === 0) applied = [...LOCAL];
+        if ((options.applyCode ?? 0) === 0 && !options.applyNoop) applied = [...LOCAL];
         return { code: options.applyCode ?? 0, stdout: '' };
       }
       if (command === 'time-travel') {
@@ -199,19 +206,31 @@ function fake(options: {
       }
       if (command === 'export') {
         const file = args[args.indexOf('--output') + 1];
-        if (options.exportSize !== null) files.set(file, options.exportSize ?? 4096);
-        return { code: 0, stdout: '' };
+        if (options.exportSize !== null) files.set(file, { size: options.exportSize ?? 4096, content: options.exportContent ?? validExport(applied) });
+        return { code: options.exportCode ?? 0, stdout: '' };
       }
       return { code: 1, stdout: '' };
     },
     prompt: async (question) => (prompts.push(question), answers.shift() ?? ''),
-    fileSize: (path) => files.get(path) ?? null,
+    fileSize: (path) => files.get(path)?.size ?? null,
+    readFile: (path) => files.get(path)?.content ?? null,
     mkdir: () => undefined,
     now: () => new Date('2026-10-08T10:00:00.000Z'),
     log: (m) => out.push(m),
     error: (m) => out.push(m),
   };
   return { deps, calls, out, prompts };
+}
+
+/** Export ve tvaru `wrangler d1 export` (schéma + záznamy d1_migrations), jen syntetická data. */
+function validExport(applied: string[]): string {
+  return [
+    'PRAGMA defer_foreign_keys=TRUE;',
+    'CREATE TABLE d1_migrations(\n\t\tid         INTEGER PRIMARY KEY AUTOINCREMENT,\n\t\tname       TEXT UNIQUE,\n\t\tapplied_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP\n);',
+    ...applied.map((name, i) => `INSERT INTO "d1_migrations" ("id","name","applied_at") VALUES(${i + 1},'${name}','2026-10-01 10:00:00');`),
+    'CREATE TABLE reservations (\n  id TEXT PRIMARY KEY\n);',
+    `INSERT INTO "meta" ("key","value") VALUES('environment','production');`,
+  ].join('\n');
 }
 
 const commandOf = (args: string[]) => args.slice(0, args[1] === 'migrations' || args[1] === 'time-travel' ? 3 : 2).join(' ');
@@ -270,12 +289,12 @@ test('check: migrace v D1, které kód nezná (rollback) → jen varování', as
   assert.ok(f.out.some((l) => l.includes('0008_budouci.sql') && l.includes('zpětně kompatibilní')));
 });
 
-test('apply: mimo interaktivní terminál (CI, build) se nic nespustí', async () => {
+test('apply: bez terminálu a bez explicitní autorizace se nic nespustí', async () => {
   for (const target of ['production', 'preview'] as const) {
     const f = fake({ target, applied: LOCAL.slice(0, -1), interactive: false });
     assert.equal(await applyTarget(TARGETS[target], f.deps), 1);
     assert.deepEqual(f.calls, [], 'žádné volání wrangleru');
-    assert.ok(f.out.some((l) => l.includes('nikdy v CI')));
+    assert.ok(f.out.some((l) => l.includes('--non-interactive') && l.includes('nikdy v CI')));
   }
 });
 
@@ -305,12 +324,16 @@ test('apply produkce: bez opsaného názvu databáze se nic neprovede', async ()
   }
 });
 
-test('apply produkce: nedestruktivní migrace po opsání názvu, bez zálohy', async () => {
+test('apply produkce: nedestruktivní migrace po opsání názvu – vždy nejdřív ověřená záloha', async () => {
   const f = fake({ applied: LOCAL.slice(0, -1), answers: ['chalupa-vsetice-rezervace'] });
   assert.equal(await applyTarget(TARGETS.production, f.deps), 0, f.out.join('\n'));
-  assert.deepEqual(f.calls.map(commandOf), ['d1 execute', 'd1 migrations apply', 'd1 execute']);
-  assert.deepEqual(f.calls[1], ['d1', 'migrations', 'apply', 'chalupa-vsetice-rezervace', '--remote', '--config', 'wrangler.jsonc']);
+  assert.deepEqual(f.calls.map(commandOf), ['d1 execute', 'd1 time-travel info', 'd1 export', 'd1 migrations apply', 'd1 execute']);
+  // time-travel info pracuje se vzdálenou D1 a --remote nezná.
+  assert.deepEqual(f.calls[1], ['d1', 'time-travel', 'info', 'chalupa-vsetice-rezervace', '--config', 'wrangler.jsonc', '--json']);
+  assert.deepEqual(f.calls[3], ['d1', 'migrations', 'apply', 'chalupa-vsetice-rezervace', '--remote', '--config', 'wrangler.jsonc']);
   assert.equal(f.prompts.length, 1);
+  assert.ok(f.out.some((l) => l.startsWith('✓ Záloha ověřena:') && l.includes(`${LOCAL.length - 1} aplikovaných migrací`)), f.out.join('\n'));
+  assert.ok(f.out.some((l) => l.includes('time-travel restore chalupa-vsetice-rezervace --bookmark=00000085-')));
 });
 
 test('apply produkce: destruktivní migrace → bookmark, export, potvrzovací fráze, teprve pak aplikace', async () => {
@@ -325,24 +348,160 @@ test('apply produkce: destruktivní migrace → bookmark, export, potvrzovací f
   assert.ok(f.prompts[1].includes(DESTRUCTIVE_CONFIRMATION));
 });
 
-test('apply produkce: destruktivní migrace bez platné zálohy nebo potvrzení se neaplikuje', async () => {
+test('apply produkce: bez platné a ověřené zálohy nebo bez potvrzení se nic neaplikuje', async () => {
+  const backupCalls = ['d1 execute', 'd1 time-travel info', 'd1 export'];
   const cases: [Parameters<typeof fake>[0], string[]][] = [
-    [{ bookmark: null, answers: ['chalupa-vsetice-rezervace', DESTRUCTIVE_CONFIRMATION] }, ['d1 execute', 'd1 time-travel info']],
-    [{ exportSize: null, answers: ['chalupa-vsetice-rezervace', DESTRUCTIVE_CONFIRMATION] }, ['d1 execute', 'd1 time-travel info', 'd1 export']],
-    [{ exportSize: 0, answers: ['chalupa-vsetice-rezervace', DESTRUCTIVE_CONFIRMATION] }, ['d1 execute', 'd1 time-travel info', 'd1 export']],
-    [{ answers: ['chalupa-vsetice-rezervace', 'ano'] }, ['d1 execute', 'd1 time-travel info', 'd1 export']],
+    [{ bookmark: null }, ['d1 execute', 'd1 time-travel info']],
+    [{ bookmark: 'neplatny-bookmark' }, ['d1 execute', 'd1 time-travel info']],
+    [{ exportSize: null }, backupCalls],
+    [{ exportSize: 0 }, backupCalls],
+    [{ exportCode: 1 }, backupCalls],
+    [{ exportContent: 'CREATE TABLE d1_migrations (id INTEGER);' }, backupCalls],
+    [{ exportContent: validExport([LOCAL[0]]).replace('CREATE TABLE reservations', 'CREATE TABLE jina') }, backupCalls],
+    [{ answers: ['chalupa-vsetice-rezervace', 'ano'] }, backupCalls],
   ];
   for (const [options, expectedCalls] of cases) {
-    const f = fake({ applied: [LOCAL[0]], ...options });
+    const f = fake({ applied: [LOCAL[0]], answers: ['chalupa-vsetice-rezervace', DESTRUCTIVE_CONFIRMATION], ...options });
     assert.equal(await applyTarget(TARGETS.production, f.deps), 1, JSON.stringify(options));
     assert.deepEqual(f.calls.map(commandOf), expectedCalls, JSON.stringify(options));
   }
+  // Export, ve kterém chybí některá aplikovaná migrace (neúplná záloha).
+  const g = fake({ applied: LOCAL.slice(0, -1), answers: ['chalupa-vsetice-rezervace'], exportContent: validExport(LOCAL.slice(0, -2)) });
+  assert.equal(await applyTarget(TARGETS.production, g.deps), 1);
+  assert.ok(g.out.some((l) => l.includes(`v exportu chybí záznam migrací: ${LOCAL.at(-2)}`)), g.out.join('\n'));
+  assert.ok(!g.calls.some((c) => c[1] === 'migrations'));
 });
 
-test('apply: selhání wrangler d1 migrations apply → exit 1', async () => {
+// Neinteraktivní režim s explicitní autorizací
+
+const AUTH_PROD = (expect: string[], allowDestructive: string[] = []): ApplyAuthorization => ({ database: 'chalupa-vsetice-rezervace', expect, allowDestructive });
+
+test('apply: v CI se migrace neaplikují v žádném režimu (ani s autorizací)', async () => {
+  for (const authorization of [undefined, AUTH_PROD([LOCAL.at(-1)!])]) {
+    const f = fake({ applied: LOCAL.slice(0, -1), ci: true, interactive: false });
+    assert.equal(await applyTarget(TARGETS.production, f.deps, authorization), 1);
+    assert.deepEqual(f.calls, []);
+    assert.ok(f.out.some((l) => l.includes('nikdy neaplikují v CI')));
+  }
+});
+
+test('apply neinteraktivně (produkce, aditivní): autorizace → ověřená záloha → aplikace → kontrola; bez promptů', async () => {
+  const pending = LOCAL.slice(-2);
+  const f = fake({ applied: LOCAL.slice(0, -2), interactive: false });
+  assert.equal(await applyTarget(TARGETS.production, f.deps, AUTH_PROD(pending)), 0, f.out.join('\n'));
+  assert.deepEqual(f.calls.map(commandOf), ['d1 execute', 'd1 time-travel info', 'd1 export', 'd1 migrations apply', 'd1 execute']);
+  assert.deepEqual(f.prompts, []);
+  assert.ok(f.out.some((l) => l.includes(`Autorizováno neinteraktivně: chalupa-vsetice-rezervace, migrace ${pending.join(', ')}`)));
+  assert.ok(f.out.some((l) => l.startsWith('✓ Záloha ověřena:')));
+  assert.ok(f.out.some((l) => l.includes('všech') && l.includes('migrací aplikováno')));
+});
+
+test('apply neinteraktivně: autorizace, která neodpovídá stavu D1, nic nespustí (jen čtení stavu)', async () => {
+  const pending = LOCAL.slice(-2);
+  const cases: [ApplyAuthorization, Parameters<typeof fake>[0], RegExp][] = [
+    [{ ...AUTH_PROD(pending), database: 'chalupa-vsetice-rezervace-test' }, {}, /neodpovídá cílové databázi/],
+    [AUTH_PROD([LOCAL.at(-1)!]), {}, /neodpovídají --expect/],
+    [AUTH_PROD([...pending].reverse()), {}, /neodpovídají --expect/],
+    [AUTH_PROD([...pending, '0010_neexistuje.sql']), {}, /neodpovídají --expect/],
+    [AUTH_PROD(pending, [LOCAL.at(-1)!]), {}, /neodpovídá žádné čekající destruktivní/],
+    [AUTH_PROD(pending), { applied: [...LOCAL.slice(0, -2), '0099_jina_vetev.sql'] }, /migrace, které kód nezná/],
+  ];
+  for (const [authorization, options, expected] of cases) {
+    const f = fake({ applied: LOCAL.slice(0, -2), interactive: false, ...options });
+    assert.equal(await applyTarget(TARGETS.production, f.deps, authorization), 1, JSON.stringify(authorization));
+    assert.deepEqual(f.calls.map(commandOf), ['d1 execute'], JSON.stringify(authorization));
+    assert.ok(f.out.some((l) => expected.test(l)), `${expected}\n${f.out.join('\n')}`);
+  }
+});
+
+test('apply neinteraktivně: destruktivní migrace – přísnější režim (výslovné povolení, v produkci samostatně, záloha)', async () => {
+  const destructive = '0002_zruseni_uvolni_noci.sql';
+  // Bez --allow-destructive nebo s dalšími migracemi v témže běhu → nic.
+  const multi = fake({ applied: [LOCAL[0]], interactive: false });
+  assert.equal(await applyTarget(TARGETS.production, multi.deps, AUTH_PROD(LOCAL.slice(1), [destructive])), 1);
+  assert.ok(multi.out.some((l) => l.includes('jen samostatně')), multi.out.join('\n'));
+  assert.deepEqual(multi.calls.map(commandOf), ['d1 execute']);
+  const onlyDestructive = LOCAL.filter((m) => m !== destructive);
+  const denied = fake({ applied: onlyDestructive, interactive: false });
+  assert.equal(await applyTarget(TARGETS.production, denied.deps, AUTH_PROD([destructive])), 1);
+  assert.ok(denied.out.some((l) => l.includes(`vyžadují přesně --allow-destructive=${destructive}`)));
+  assert.deepEqual(denied.calls.map(commandOf), ['d1 execute']);
+  // Samostatná, výslovně povolená destruktivní migrace → záloha, aplikace; bez promptu.
+  const ok = fake({ applied: onlyDestructive, interactive: false });
+  assert.equal(await applyTarget(TARGETS.production, ok.deps, AUTH_PROD([destructive], [destructive])), 0, ok.out.join('\n'));
+  assert.deepEqual(ok.calls.map(commandOf), ['d1 execute', 'd1 time-travel info', 'd1 export', 'd1 migrations apply', 'd1 execute']);
+  assert.deepEqual(ok.prompts, []);
+  // Selhání zálohy → nic se neaplikuje.
+  const noBackup = fake({ applied: onlyDestructive, interactive: false, exportSize: 0 });
+  assert.equal(await applyTarget(TARGETS.production, noBackup.deps, AUTH_PROD([destructive], [destructive])), 1);
+  assert.ok(!noBackup.calls.some((c) => c[1] === 'migrations'));
+});
+
+test('apply neinteraktivně (preview): bez zálohy, destruktivní jen s výslovným povolením; DB musí odpovídat', async () => {
+  const auth = (expect: string[], allowDestructive: string[] = []): ApplyAuthorization => ({ database: 'chalupa-vsetice-rezervace-test', expect, allowDestructive });
+  const f = fake({ target: 'preview', applied: LOCAL.slice(0, -1), interactive: false });
+  assert.equal(await applyTarget(TARGETS.preview, f.deps, auth([LOCAL.at(-1)!])), 0, f.out.join('\n'));
+  assert.deepEqual(f.calls.map(commandOf), ['d1 execute', 'd1 migrations apply', 'd1 execute']);
+  // Produkční název DB pro preview cíl → nic.
+  const wrong = fake({ target: 'preview', applied: LOCAL.slice(0, -1), interactive: false });
+  assert.equal(await applyTarget(TARGETS.preview, wrong.deps, AUTH_PROD([LOCAL.at(-1)!])), 1);
+  assert.deepEqual(wrong.calls.map(commandOf), ['d1 execute']);
+  // Destruktivní bez povolení → nic; s povolením → aplikace (na preview může být víc migrací najednou).
+  const d = fake({ target: 'preview', applied: [LOCAL[0]], interactive: false });
+  assert.equal(await applyTarget(TARGETS.preview, d.deps, auth(LOCAL.slice(1))), 1);
+  const dOk = fake({ target: 'preview', applied: [LOCAL[0]], interactive: false });
+  assert.equal(await applyTarget(TARGETS.preview, dOk.deps, auth(LOCAL.slice(1), ['0002_zruseni_uvolni_noci.sql'])), 0, dOk.out.join('\n'));
+});
+
+test('parseApplyArgs: autorizace jen s --non-interactive a povinnými údaji', () => {
+  assert.deepEqual(parseApplyArgs([]), {});
+  assert.deepEqual(parseApplyArgs(['--non-interactive', '--database=chalupa-vsetice-rezervace', '--expect=0009_a.sql, 0010_b.sql']), {
+    authorization: { database: 'chalupa-vsetice-rezervace', expect: ['0009_a.sql', '0010_b.sql'], allowDestructive: [] },
+  });
+  assert.deepEqual(parseApplyArgs(['--non-interactive', '--database=x', '--expect=0002_a.sql', '--allow-destructive=0002_a.sql']).authorization?.allowDestructive, ['0002_a.sql']);
+  const errors: [string[], RegExp][] = [
+    [['--database=x'], /jen s --non-interactive/],
+    [['--non-interactive'], /vyžaduje --database/],
+    [['--non-interactive', '--database=x'], /vyžaduje --expect/],
+    [['--non-interactive', '--database=x', '--expect='], /vyžaduje --expect/],
+    [['--non-interactive', '--database=x', '--expect=a.sql,a.sql'], /duplicitní/],
+    [['--non-interactive', '--database=x', '--database=y', '--expect=a.sql'], /vícekrát/],
+    [['--non-interactive', '--database=x', '--expect=a.sql', '--yes'], /neznámý argument: --yes/],
+    [['--non-interactive', '--database', 'x'], /neznámý argument/],
+  ];
+  for (const [args, expected] of errors) assert.match(parseApplyArgs(args).error ?? '', expected, args.join(' '));
+});
+
+test('authorizationProblems a exportProblems: přímé kontroly', () => {
+  const check = { ok: false, applied: [LOCAL[0]], pending: LOCAL.slice(1), unknown: [], destructive: new Map([['0002_zruseni_uvolni_noci.sql', ['DELETE']]]) };
+  assert.deepEqual(authorizationProblems(TARGETS.preview, check, { database: 'chalupa-vsetice-rezervace-test', expect: LOCAL.slice(1), allowDestructive: ['0002_zruseni_uvolni_noci.sql'] }), []);
+  assert.equal(authorizationProblems(TARGETS.production, check, AUTH_PROD(LOCAL.slice(1), ['0002_zruseni_uvolni_noci.sql'])).length, 1);
+  assert.deepEqual(exportProblems(validExport(LOCAL), LOCAL), []);
+  assert.deepEqual(exportProblems(null, LOCAL), ['export nejde přečíst']);
+  assert.deepEqual(exportProblems('CREATE TABLE "reservations" (id TEXT); CREATE TABLE IF NOT EXISTS `d1_migrations` (id INTEGER);', []), []);
+  assert.deepEqual(exportProblems('', [LOCAL[0]]), ['chybí schéma tabulky reservations', 'chybí schéma tabulky d1_migrations', `v exportu chybí záznam migrací: ${LOCAL[0]}`]);
+});
+
+test('backup: ověřená záloha bez migrace; v CI nic; nečitelný stav D1 → nic', async () => {
+  const f = fake({ target: 'preview' });
+  assert.equal(await backupOnly(TARGETS.preview, f.deps), 0, f.out.join('\n'));
+  assert.deepEqual(f.calls.map(commandOf), ['d1 execute', 'd1 time-travel info', 'd1 export']);
+  assert.deepEqual(f.calls[1], ['d1', 'time-travel', 'info', 'chalupa-vsetice-rezervace-test', '--config', 'wrangler.preview-migrations.jsonc', '--json']);
+  const ci = fake({ ci: true });
+  assert.equal(await backupOnly(TARGETS.production, ci.deps), 1);
+  assert.deepEqual(ci.calls, []);
+  const broken = fake({ executeCode: 1, executeStdout: '' });
+  assert.equal(await backupOnly(TARGETS.production, broken.deps), 1);
+  assert.deepEqual(broken.calls.map(commandOf), ['d1 execute']);
+});
+
+test('apply: selhání wrangler d1 migrations apply → exit 1; „úspěch“ bez změny v D1 → exit 1', async () => {
   const f = fake({ target: 'preview', applied: LOCAL.slice(0, -1), applyCode: 1 });
   assert.equal(await applyTarget(TARGETS.preview, f.deps), 1);
   assert.ok(f.out.some((l) => l.includes('skončil kódem 1')));
+  const noop = fake({ applied: LOCAL.slice(0, -1), interactive: false, applyNoop: true });
+  assert.equal(await applyTarget(TARGETS.production, noop.deps, AUTH_PROD([LOCAL.at(-1)!])), 1);
+  assert.ok(noop.out.some((l) => l.includes('nemá aplikované migrace')), noop.out.join('\n'));
 });
 
 test('package.json: deploy skripty spouští kontrolu migrací před nasazením', () => {

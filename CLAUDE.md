@@ -10,23 +10,46 @@ platí v každé session.
   nerozhodne uživatel. Nikdy ho nezapínat v rámci jiného PR.
 - `BOOKING_API_ENABLED` nesmí být v produkční konfiguraci (top-level `vars` ve `wrangler.jsonc`);
   je jen v bloku `previews`. Hlídá to `scripts/d1-migrations.ts check` i smoke test.
-- Nikdy nespouštět produkční deploy (`pnpm run deploy`, `wrangler deploy`) ani migrace sám.
+- Produkční deploy jen přes merge do `main` (Workers Builds: `check production` → deploy).
+  Nikdy nespouštět `pnpm run deploy` ani `wrangler deploy` přímo. PR mergovat jen s výslovným
+  souhlasem uživatele.
+- Migrace D1 jen podle pravidel v sekci „D1 a migrace“.
 
 ## D1 a migrace
 
 - Migrace se **nikdy** neaplikují automaticky – ani v CI, ani ve Workers Builds. Build token má
   k D1 jen **Read**: build stav jen kontroluje (`check`) a při nesouladu deploy zastaví.
-- Claude nesmí předpokládat, že může aplikovat produkční (ani testovací) migraci. Když PR
-  přidává migraci `migrations/NNNN_nazev.sql`, výslovně uživatele proveď:
-  1. `pnpm run db:migrate:preview` (Preview build PR do té doby záměrně selhává),
+- Claude migrace aplikuje **jen** neinteraktivním autorizovaným režimem skriptu (TTY ochranu
+  interaktivního režimu nikdy neobcházet, žádné podvržení terminálu):
+  `pnpm run db:migrate:<preview|production> --non-interactive --database=<název DB>
+  --expect=<přesný seznam čekajících migrací> [--allow-destructive=<migrace>]`.
+  Nevymýšlet vlastní varianty `wrangler d1 migrations apply`, `d1 execute` se zápisem ani
+  `time-travel restore`.
+- Kdy smí Claude migraci aplikovat:
+  - **Preview, aditivní:** samostatně, když PR přidává migraci (Preview build do té doby záměrně
+    selhává).
+  - **Produkce, aditivní:** jen když uživatel schválil nasazení daného PR (souhlas s mergem);
+    vždy před mergem, s ověřenou zálohou (skript ji vynutí) a s `--expect` přesně podle
+    `db:check:production`.
+  - **Destruktivní (Preview i produkce):** jen po výslovném souhlasu uživatele s konkrétní
+    migrací; v produkci samostatně (skript vynutí), s ověřenou zálohou.
+  - Jakákoli chyba (check, autorizace, záloha, aplikace, kontrola po aplikaci) = zastavit
+    a popsat; nic neopakovat jinou cestou.
+- Postup PR s migrací `migrations/NNNN_nazev.sql`:
+  1. `pnpm run db:check:preview` → Preview migrace (neinteraktivně, viz výše),
   2. ověřit Preview (retry buildu, `pnpm run smoke <preview-origin> --env preview`),
-  3. před mergem `pnpm run db:migrate:production`,
-  4. merge do `main` (build: `check production` → deploy),
-  5. po deployi `pnpm run smoke https://chalupavsetice.cz --env production`.
+  3. po souhlasu s nasazením: `pnpm run db:check:production` → produkční migrace
+     (neinteraktivně, `--expect` = čekající migrace) → `pnpm run db:check:production`,
+  4. merge do `main` (build: `check production` → deploy) a ověření buildu,
+  5. po deployi `pnpm run smoke https://chalupavsetice.cz --env production`,
+  6. uživateli předat Time Travel bookmark z výpisu zálohy; `.d1-backups/` po ověření smazat.
+- Obnova (`wrangler d1 time-travel restore`) maže novější data – jen na výslovný pokyn uživatele.
 - Příkazy: `pnpm run db:check:preview`, `pnpm run db:check:production`,
-  `pnpm run db:migrate:preview`, `pnpm run db:migrate:production`,
-  `pnpm run smoke <origin> --env production|preview`. Nevymýšlet vlastní varianty
-  `wrangler d1 migrations apply`.
+  `pnpm run db:backup:preview`, `pnpm run db:backup:production`,
+  `pnpm run db:migrate:preview`, `pnpm run db:migrate:production` (+ autorizace výše),
+  `pnpm run smoke <origin> --env production|preview` (v cloudové session s
+  `NODE_USE_ENV_PROXY=1`; wrangler s `CLOUDFLARE_API_TOKEN=proxy-injected`, skutečný token
+  doplňuje proxy).
 - Číslování migrací je souvislé (`0001`, `0002`, …); kontroluje to test.
 - Triggery v migracích na jednom řádku (testovací D1 dělí migrace podle `;` na konci řádku).
 
@@ -40,8 +63,10 @@ platí v každé session.
     deployů (nejdřív kód, který starou věc nepoužívá, až pak migrace, která ji odstraní).
 - `check` migrace, které jsou v DB, ale kód je nezná, jen **varuje** – na ochranu proti
   nekompatibilnímu schématu po rollbacku se nespoléhat.
-- Destruktivní produkční migrace (`DROP`, `DELETE`, `UPDATE`, `RENAME`, `REPLACE`) vyžadují
-  zálohu – `db:migrate:production` ji vynutí (Time Travel bookmark + export do `.d1-backups/`).
+- Každá produkční migrace (aditivní i destruktivní) vyžaduje ověřenou zálohu –
+  `db:migrate:production` ji vynutí (Time Travel bookmark + export do `.d1-backups/`, ověření
+  schématu a záznamů migrací). Destruktivní (`DROP`, `DELETE`, `UPDATE`, `RENAME`, `REPLACE`)
+  mají přísnější režim: výslovné povolení, v produkci samostatně.
 
 ## Cloudflare konfigurace mimo git
 
@@ -54,6 +79,9 @@ Skutečný stav (nastaveno ručně v dashboardu, v diffu není vidět):
   - API token: vlastní user token `chalupa-vsetice-web build token` (Account Settings Read,
     Workers Scripts Edit, D1 **Read**; Workers Routes Edit pro zónu `chalupavsetice.cz`; User
     Details Read, Memberships Read).
+- Token pro správu D1 (záloha a migrace, mimo build): samostatný user token s Account Settings
+  Read, **D1 Edit**, User Details Read, Memberships Read; v cloudové session Claude ho doplňuje
+  proxy pro `api.cloudflare.com`. Build token zůstává D1 **Read** – nikdy ho nerozšiřovat.
 - Secrets se nastavují jen přes `wrangler secret put` (produkce) a
   `wrangler preview base-config secret put` (sdílené všem Worker Previews). Preview potřebuje
   minimálně `ECHALUPY_ICAL_URL`, `BOOKING_ICAL_EXPORT_TOKEN`, `TURNSTILE_SECRET_KEY`
