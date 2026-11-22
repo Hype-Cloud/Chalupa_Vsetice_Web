@@ -13,8 +13,11 @@
 //   ale až po uložení zálohy – vytvořená záloha se kvůli upozornění nikdy neruší ani nemaže.
 // - Výsledky kroků obsahují jen metadata (klíč, velikost, MD5, bookmark) – nikdy podepsanou
 //   URL ani obsah zálohy (stav Workflow je vidět v dashboardu).
+// - Konfigurace: stejné proměnné BACKUP_* jako GitHub backend (lib/backup/config.ts), backend
+//   musí být výslovně `BACKUP_BACKEND=r2`.
 
-import { sendViaResend, MailError, RESEND_TEST_FROM } from '../email/resend.ts';
+import { alertsConfigured as alertSecretsConfigured, sendBackupAlert as sendAlert } from '../../lib/backup/alerts.ts';
+import { parseBackupConfig, type BackupConfig } from '../../lib/backup/config.ts';
 import {
   backupStatus,
   BackupError,
@@ -39,12 +42,17 @@ export const MONITOR_CRON = '45 14 * * *';
 
 export interface BackupEnv {
   BACKUPS: R2Bucket;
+  /** Musí být `r2` – přepnutí backendu je vždy explicitní. */
+  BACKUP_BACKEND?: string;
   /** production | preview – očekávané meta.environment v exportu. */
   BACKUP_ENV?: string;
-  DATABASE_NAME?: string;
-  DATABASE_ID?: string;
+  BACKUP_DATABASE_NAME?: string;
+  BACKUP_DATABASE_ID?: string;
   /** Secret: ID účtu Cloudflare (mimo veřejný repozitář). */
-  D1_EXPORT_ACCOUNT_ID?: string;
+  BACKUP_CLOUDFLARE_ACCOUNT_ID?: string;
+  BACKUP_KEEP_DAILY?: string;
+  BACKUP_KEEP_MONTHLY?: string;
+  BACKUP_MAX_EXPORT_BYTES?: string;
   /** Secret: API token s oprávněním exportu D1 (D1 Edit). */
   D1_EXPORT_API_TOKEN?: string;
   /** Secrets pro upozornění (v produkci povinné). */
@@ -90,13 +98,24 @@ export interface BackupResult {
   alerts: string[];
 }
 
-export function exportConfig(env: BackupEnv): ExportConfig {
+/** Konfigurace R2 backendu; chyby jen názvy proměnných (nikdy hodnoty) do logu → not-configured. */
+export function backupConfig(env: BackupEnv, mode: BackupMode, log: (message: string) => void): BackupConfig {
+  const { config, errors } = parseBackupConfig(env as unknown as Record<string, string | undefined>, { backend: 'r2', purpose: mode === 'backup' ? 'backup' : 'monitor' });
+  if (!config) {
+    log(`d1-backup: invalid configuration (${errors.join('; ')})`);
+    throw new BackupError('not-configured');
+  }
+  return config;
+}
+
+export function exportConfig(env: BackupEnv, config: BackupConfig): ExportConfig {
   return {
-    accountId: env.D1_EXPORT_ACCOUNT_ID?.trim() ?? '',
-    databaseId: env.DATABASE_ID?.trim() ?? '',
-    databaseName: env.DATABASE_NAME?.trim() ?? '',
-    environment: env.BACKUP_ENV?.trim() ?? '',
+    accountId: config.accountId,
+    databaseId: config.databaseId,
+    databaseName: config.databaseName,
+    environment: config.environment,
     apiToken: env.D1_EXPORT_API_TOKEN?.trim() ?? '',
+    maxExportBytes: config.maxExportBytes,
   };
 }
 
@@ -110,7 +129,7 @@ export function runMode(event: BackupEvent): BackupMode {
 export const runDate = (event: BackupEvent) => utcDate(event.schedule ? new Date(event.schedule.scheduledTime) : event.timestamp);
 
 /** Upozornění jsou nakonfigurovaná (oba secrets). */
-export const alertsConfigured = (env: BackupEnv) => !!env.RESEND_API_KEY?.trim() && !!env.CONFLICT_ALERT_EMAIL?.trim();
+export const alertsConfigured = (env: BackupEnv) => alertSecretsConfigured(env);
 /** V produkci jsou upozornění povinná. */
 export const alertsRequired = (env: BackupEnv) => env.BACKUP_ENV?.trim() === 'production';
 
@@ -123,7 +142,6 @@ export function capacityProblem(totalBytes: number): string | null {
 export async function runBackupWorkflow(event: BackupEvent, step: BackupStep, env: BackupEnv, deps: BackupDeps): Promise<BackupResult> {
   const mode = runMode(event);
   const date = runDate(event);
-  const config = exportConfig(env);
   const alerts: string[] = [];
   const undelivered: string[] = [];
   const alert = async (kind: string, status?: BackupStatus | null) => {
@@ -156,6 +174,14 @@ export async function runBackupWorkflow(event: BackupEvent, step: BackupStep, en
     return { mode, date, status: null, alerts };
   }
 
+  let backend: BackupConfig;
+  try {
+    backend = backupConfig(env, mode, deps.log);
+  } catch (error) {
+    await alert(mode === 'monitor' ? 'monitor-failed:not-configured' : 'backup-failed:not-configured');
+    throw error;
+  }
+
   if (mode === 'monitor') {
     const status = await step.do('kontrola záloh', STORAGE_STEP, async () => {
       await cleanPending(deps.bucket, deps.now());
@@ -166,6 +192,7 @@ export async function runBackupWorkflow(event: BackupEvent, step: BackupStep, en
     return finish({ mode, date, status: pick(status), alerts });
   }
 
+  const config = exportConfig(env, backend);
   const daily = dailyKey(date);
   const pending = pendingKey(event.instanceId);
   let result: Omit<BackupResult, 'status' | 'alerts'>;
@@ -213,7 +240,7 @@ export async function runBackupWorkflow(event: BackupEvent, step: BackupStep, en
     });
     // Retence až po úspěšném uložení – neúspěšný běh nic nemaže.
     const pruned = await step.do('retence', STORAGE_STEP, async () => {
-      const removed = [...(await pruneDaily(deps.bucket)), ...(await pruneMonthly(deps.bucket))];
+      const removed = [...(await pruneDaily(deps.bucket, backend.keepDaily)), ...(await pruneMonthly(deps.bucket, backend.keepMonthly))];
       return removed.length;
     });
     result = { mode, date, daily: dailyState, monthly, bytes: target.bytes, pruned };
@@ -240,70 +267,14 @@ export async function runBackupWorkflow(event: BackupEvent, step: BackupStep, en
 const pick = (s: BackupStatus): StatusSummary => ({ stale: s.stale, nearLimit: s.nearLimit, totalBytes: s.totalBytes, dailyCount: s.dailyCount, monthlyCount: s.monthlyCount, latest: s.latest });
 const hexOf = (buffer: ArrayBuffer) => Array.from(new Uint8Array(buffer), (b) => b.toString(16).padStart(2, '0')).join('');
 
-// --- Upozornění správci ------------------------------------------------------------------------
+// --- Upozornění správci (lib/backup/alerts.ts) --------------------------------------------------
 
-const KIND_TEXT: Record<string, string> = {
-  'backup-stale': 'Poslední úspěšná denní záloha D1 je starší než 48 hodin (nebo žádná neexistuje).',
-  'storage-near-limit': 'Objem záloh v R2 překročil 7 GB (bezplatná kvóta R2 Standard je 10 GB-month).',
-  'alert-test': 'Testovací upozornění zálohovacího Workeru – doručení upozornění funguje. Nic dalšího není potřeba.',
-};
-
-/** Text upozornění – jen prostředí, druh chyby, čas a stav záloh; žádná data z databáze. */
-export function buildBackupAlert(alert: { kind: string; env: string; database: string; date: string; status: BackupStatus | null; at: Date }): { subject: string; text: string } {
-  const prefix = alert.env === 'production' ? '' : '[TEST] ';
-  const [base, detail] = alert.kind.split(':');
-  const time = new Intl.DateTimeFormat('cs-CZ', { timeZone: 'Europe/Prague', dateStyle: 'short', timeStyle: 'medium' }).format(alert.at);
-  const description =
-    base === 'backup-failed'
-      ? `Automatická záloha D1 se nepodařila (${detail ?? 'unknown'}). Starší zálohy zůstávají beze změny.${detail === 'storage-limit' ? ' Objem bucketu je u stropu – nová záloha se nezapsala.' : ''}`
-      : (KIND_TEXT[base] ?? base);
-  const status = alert.status;
-  return {
-    subject: `${prefix}${base === 'alert-test' ? 'Test' : 'POZOR'}: záloha D1 ${alert.database} – ${base}`,
-    text: [
-      description,
-      '',
-      `Databáze: ${alert.database}`,
-      `Prostředí: ${alert.env}`,
-      `Datum zálohy: ${alert.date}`,
-      ...(status
-        ? [
-            `Poslední denní záloha: ${status.latest ? `${status.latest.key} (${status.latest.uploaded})` : 'žádná'}`,
-            `Snapshoty: ${status.dailyCount} denních, ${status.monthlyCount} měsíčních`,
-            `Objem záloh: ${(status.totalBytes / 1024 ** 2).toFixed(1)} MB`,
-          ]
-        : []),
-      `Čas: ${time} (${alert.at.toISOString()})`,
-      '',
-      'Postup: README, sekce „Automatické zálohy D1“.',
-    ].join('\n'),
-  };
-}
-
-/**
- * E-mail správci. Bez konfigurace `skipped` (o závažnosti rozhoduje volající – v produkci chyba
- * instance). Selhání odeslání vyhodí MailError, aby se krok Workflow zopakoval.
- */
-export async function sendBackupAlert(
+/** Upozornění R2 backendu; identita z konfigurace (i neúplné – upozornění musí odejít vždy). */
+export function sendBackupAlert(
   env: BackupEnv,
   deps: Pick<BackupDeps, 'fetch' | 'log' | 'now'>,
   alert: { kind: string; date: string; status: BackupStatus | null; idempotencyKey?: string },
 ): Promise<'sent' | 'skipped'> {
-  const apiKey = env.RESEND_API_KEY?.trim();
-  const to = env.CONFLICT_ALERT_EMAIL?.trim();
-  if (!apiKey || !to) {
-    deps.log('d1-backup: alert skipped (not configured)');
-    return 'skipped';
-  }
-  const environment = env.BACKUP_ENV?.trim() || 'unknown';
-  const { subject, text } = buildBackupAlert({ ...alert, env: environment, database: env.DATABASE_NAME?.trim() || 'D1', at: deps.now() });
-  const key = `d1-backup-${environment}-${alert.kind}-${alert.idempotencyKey ?? alert.date}`.replace(/[^A-Za-z0-9_-]/g, '-');
-  try {
-    await sendViaResend(apiKey, { from: env.CONFLICT_ALERT_FROM?.trim() || RESEND_TEST_FROM, to, subject, text, idempotencyKey: key }, deps.fetch);
-  } catch (error) {
-    deps.log(`d1-backup: alert failed (${error instanceof MailError ? error.kind : 'unknown'})`);
-    throw error;
-  }
-  deps.log(`d1-backup: alert sent (${alert.kind})`);
-  return 'sent';
+  const context = { env: env.BACKUP_ENV?.trim() || 'unknown', database: env.BACKUP_DATABASE_NAME?.trim() || 'D1', backend: 'Cloudflare R2' };
+  return sendAlert(env, context, deps, alert);
 }

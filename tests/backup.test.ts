@@ -26,10 +26,11 @@ const BOOKMARK = '00000503-00000000-0000512b-0011b73bb8df8447f976948c7f8b231a';
 const md5 = (bytes: Uint8Array | string) => createHash('md5').update(bytes).digest('hex');
 
 const ENV = {
+  BACKUP_BACKEND: 'r2',
   BACKUP_ENV: 'production',
-  DATABASE_NAME: 'chalupa-vsetice-rezervace',
-  DATABASE_ID,
-  D1_EXPORT_ACCOUNT_ID: ACCOUNT,
+  BACKUP_DATABASE_NAME: 'chalupa-vsetice-rezervace',
+  BACKUP_DATABASE_ID: DATABASE_ID,
+  BACKUP_CLOUDFLARE_ACCOUNT_ID: ACCOUNT,
   D1_EXPORT_API_TOKEN: TOKEN,
   // V produkci jsou upozornění povinná – výchozí testovací prostředí je má (falešný Resend).
   RESEND_API_KEY: 're_test_FAKE',
@@ -483,24 +484,24 @@ test('wrangler.backup.jsonc: samostatný Worker bez veřejné URL a sdílených 
   assert.deepEqual(backup.workflows, [{ name: 'chalupa-vsetice-d1-backup', binding: 'BACKUP_WORKFLOW', class_name: 'D1BackupWorkflow', schedules: [BACKUP_CRON, MONITOR_CRON] }]);
   assert.deepEqual(backup.r2_buckets, [{ binding: 'BACKUPS', bucket_name: 'chalupa-vsetice-d1-backups' }]);
   const prodDb = main.d1_databases.find((d: Cfg) => d.binding === 'DB');
-  assert.deepEqual(backup.vars, { BACKUP_ENV: 'production', DATABASE_NAME: prodDb.database_name, DATABASE_ID: prodDb.database_id });
+  assert.deepEqual(backup.vars, { BACKUP_BACKEND: 'r2', BACKUP_ENV: 'production', BACKUP_DATABASE_NAME: prodDb.database_name, BACKUP_DATABASE_ID: prodDb.database_id });
   // Test: testovací D1 → testovací bucket, bez rozvrhu.
   const testEnv = backup.env.test;
   assert.equal(testEnv.name, 'chalupa-vsetice-d1-backup-test');
-  assert.deepEqual(testEnv.vars, { BACKUP_ENV: 'preview', DATABASE_NAME: previewMigrations.d1_databases[0].database_name, DATABASE_ID: previewMigrations.d1_databases[0].database_id });
+  assert.deepEqual(testEnv.vars, { BACKUP_BACKEND: 'r2', BACKUP_ENV: 'preview', BACKUP_DATABASE_NAME: previewMigrations.d1_databases[0].database_name, BACKUP_DATABASE_ID: previewMigrations.d1_databases[0].database_id });
   assert.equal(testEnv.workflows[0].schedules, undefined);
   assert.equal(testEnv.workflows[0].name, 'chalupa-vsetice-d1-backup-test');
   assert.deepEqual(testEnv.r2_buckets, [{ binding: 'BACKUPS', bucket_name: 'chalupa-vsetice-d1-backups-test' }]);
   // Žádné secrets v konfiguraci; rezervační Worker zálohy nezná.
   const text = readFileSync(join(ROOT, 'wrangler.backup.jsonc'), 'utf8');
-  for (const name of ['D1_EXPORT_API_TOKEN', 'D1_EXPORT_ACCOUNT_ID', 'RESEND_API_KEY']) assert.ok(!(name in backup.vars) && !(name in testEnv.vars), name);
+  for (const name of ['D1_EXPORT_API_TOKEN', 'BACKUP_CLOUDFLARE_ACCOUNT_ID', 'RESEND_API_KEY']) assert.ok(!(name in backup.vars) && !(name in testEnv.vars), name);
   assert.ok(!/[0-9a-f]{32}/.test(text.replace(/"database_id"|DATABASE_ID": "[^"]+"/g, '')), 'žádné ID účtu');
   assert.ok(!JSON.stringify(main).includes('backup') && main.workflows === undefined);
   // Workers Builds rezervačního Workeru (deploy, deploy:preview) zálohovací Worker nenasazuje.
   const { scripts } = JSON.parse(readFileSync(join(ROOT, 'package.json'), 'utf8')) as { scripts: Record<string, string> };
   for (const name of ['build', 'deploy', 'deploy:preview']) assert.ok(!scripts[name].includes('wrangler.backup.jsonc'), name);
-  assert.equal(scripts['backup:deploy'], 'wrangler deploy --config wrangler.backup.jsonc --env=');
-  assert.equal(scripts['backup:deploy:test'], 'wrangler deploy --config wrangler.backup.jsonc --env test');
+  assert.equal(scripts['backup:r2:deploy'], 'wrangler deploy --config wrangler.backup.jsonc --env=');
+  assert.equal(scripts['backup:r2:deploy:test'], 'wrangler deploy --config wrangler.backup.jsonc --env test');
 });
 
 test('náklady: strop exportu a tvrdý strop bucketu drží zálohy pod bezplatnými 10 GB; větší export se neuloží', async () => {
@@ -519,7 +520,7 @@ test('náklady: strop exportu a tvrdý strop bucketu drží zálohy pod bezplatn
     fetch: async () => new Response(body, { headers: { 'content-length': String(MAX_EXPORT_BYTES + 1) } }),
     bucket: { put: async () => assert.fail('nic se nesmí ukládat') },
   } as unknown as BackupDeps;
-  await assert.rejects(downloadToPending({ accountId: 'a', databaseId: 'd', databaseName: 'n', environment: 'production', apiToken: 't' }, deps, SIGNED, 'pending/x.sql'), (error: { kind?: string }) => error.kind === 'export-too-large');
+  await assert.rejects(downloadToPending({ accountId: 'a', databaseId: 'd', databaseName: 'n', environment: 'production', apiToken: 't', maxExportBytes: MAX_EXPORT_BYTES }, deps, SIGNED, 'pending/x.sql'), (error: { kind?: string }) => error.kind === 'export-too-large');
   assert.equal(cancelled, true, 'stahování se ukončí');
 });
 

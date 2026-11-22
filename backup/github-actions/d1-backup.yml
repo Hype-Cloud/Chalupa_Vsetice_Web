@@ -1,0 +1,99 @@
+# Šablona GitHub Actions pro automatickou zálohu D1 do GitHub Releases.
+#
+# NEPATŘÍ do tohoto (veřejného) repozitáře jako aktivní workflow: kopíruje se do SOUKROMÉHO
+# zálohovacího repozitáře jako .github/workflows/d1-backup-<prostředí>.yml (jeden soubor na
+# prostředí). Postup: README, „Automatické zálohy D1“.
+#
+# Bezpečnost:
+# - Kód zálohy se stahuje z veřejného repozitáře aplikace na PEVNÉM auditovaném commitu
+#   (CODE_COMMIT). Nový kód s produkčními credentials nikdy neběží automaticky – změna verze
+#   = vědomá úprava tohoto souboru v soukromém repozitáři po kontrole diffu.
+# - Akce třetích stran jsou připnuté na SHA commitu (komentář = odpovídající tag).
+# - Workflow nemá spouštěč pull_request: cizí kód nikdy nedostane secrets.
+# - GITHUB_TOKEN má jen contents: write v tomto soukromém repozitáři (releasy).
+# - Secrets jsou jen v kroku zálohy; instalace závislostí běží bez nich a bez install skriptů.
+# - Soukromý klíč age sem nikdy nepatří (jen veřejný klíč příjemce v BACKUP_AGE_RECIPIENT).
+
+name: D1 záloha (production)
+
+on:
+  schedule:
+    # Mimo celou hodinu (GitHub plánované běhy při zátěži zpožďuje nebo vynechává).
+    - cron: '17 2 * * *'
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: 'run = záloha, monitor = kontrola stáří, alert-test = test upozornění'
+        type: choice
+        options: [run, monitor, alert-test]
+        default: run
+
+permissions:
+  contents: write
+
+concurrency:
+  group: d1-backup-production
+  cancel-in-progress: false
+
+env:
+  # Auditovaný kód zálohy: veřejný repozitář a přesný commit (40 znaků SHA).
+  CODE_REPOSITORY: hype-cloud/chalupa_vsetice_web
+  CODE_COMMIT: '0000000000000000000000000000000000000000'
+  # Necitlivá konfigurace (README, „Konfigurace“).
+  BACKUP_BACKEND: github
+  BACKUP_ENV: production
+  BACKUP_DATABASE_NAME: chalupa-vsetice-rezervace
+  BACKUP_DATABASE_ID: 08656b04-3ade-4a34-b9d3-94f7b8e154ef
+  BACKUP_KEEP_DAILY: '30'
+  BACKUP_KEEP_MONTHLY: '12'
+  BACKUP_ENCRYPTION: age
+  # Veřejný klíč age (age1…) – NIKDY soukromý klíč.
+  BACKUP_AGE_RECIPIENT: age1replacewithyourpublickey
+
+jobs:
+  backup:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - name: Kontrola konfigurace
+        env:
+          MODE: ${{ inputs.mode || 'run' }}
+        run: |
+          [[ "$CODE_COMMIT" =~ ^[0-9a-f]{40}$ && "$CODE_COMMIT" != 0000000000000000000000000000000000000000 ]] || { echo "CODE_COMMIT musí být auditovaný commit (40 znaků SHA)"; exit 1; }
+          [[ "$MODE" =~ ^(run|monitor|alert-test)$ ]] || { echo "neplatný mode"; exit 1; }
+
+      - name: Kód zálohy (auditovaný commit)
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+        with:
+          repository: ${{ env.CODE_REPOSITORY }}
+          ref: ${{ env.CODE_COMMIT }}
+          path: code
+          persist-credentials: false
+
+      - name: Ověření commitu
+        working-directory: code
+        run: test "$(git rev-parse HEAD)" = "$CODE_COMMIT"
+
+      - name: Node.js
+        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6.5.0
+        with:
+          node-version: '22'
+
+      - name: Závislosti (zamčené, bez install skriptů, bez secrets)
+        working-directory: code
+        run: |
+          corepack enable
+          pnpm install --frozen-lockfile --ignore-scripts
+
+      - name: Záloha
+        working-directory: code
+        env:
+          MODE: ${{ inputs.mode || 'run' }}
+          BACKUP_GITHUB_REPO: ${{ github.repository }}
+          BACKUP_GITHUB_TOKEN: ${{ github.token }}
+          BACKUP_CLOUDFLARE_ACCOUNT_ID: ${{ secrets.BACKUP_CLOUDFLARE_ACCOUNT_ID }}
+          D1_EXPORT_API_TOKEN: ${{ secrets.D1_EXPORT_API_TOKEN }}
+          RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}
+          CONFLICT_ALERT_EMAIL: ${{ secrets.CONFLICT_ALERT_EMAIL }}
+          CONFLICT_ALERT_FROM: ${{ secrets.CONFLICT_ALERT_FROM }}
+        run: node scripts/backup.ts "$MODE" --backend github

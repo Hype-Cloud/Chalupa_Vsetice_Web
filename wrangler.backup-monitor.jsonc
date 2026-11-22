@@ -1,0 +1,30 @@
+// Nezávislá kontrola záloh D1 v GitHub Releases (worker/backup-monitor). Samostatný Worker:
+// žádné bindingy rezervačního Workeru, žádná veřejná URL, jen Cron Trigger (Workers Free).
+// Nasazení jen se souhlasem uživatele: `pnpm run backup:monitor:deploy`. Viz README,
+// „Automatické zálohy D1“.
+//
+// Secrets (wrangler secret put … --config wrangler.backup-monitor.jsonc, nikdy v repozitáři):
+//   BACKUP_GITHUB_REPO   – owner/repo soukromého zálohovacího repozitáře
+//   BACKUP_GITHUB_TOKEN  – fine-grained token jen pro tento repozitář: Contents Read-only
+//   RESEND_API_KEY, CONFLICT_ALERT_EMAIL – upozornění (v produkci povinné)
+//   CONFLICT_ALERT_FROM  – volitelný odesílatel
+{
+  "$schema": "./node_modules/wrangler/config-schema.json",
+  "name": "chalupa-vsetice-d1-backup-monitor",
+  "main": "./worker/backup-monitor/index.ts",
+  "compatibility_date": "2026-09-28",
+  "workers_dev": false,
+  "preview_urls": false,
+  "observability": {
+    "enabled": true,
+    "logs": { "enabled": true, "invocation_logs": false },
+    "traces": { "enabled": false }
+  },
+  "vars": {
+    "BACKUP_BACKEND": "github",
+    "BACKUP_ENV": "production",
+    "BACKUP_DATABASE_NAME": "chalupa-vsetice-rezervace"
+  },
+  // 14:43 UTC denně – 12 h po plánované záloze (02:17 UTC); záloha starší než 48 h = upozornění.
+  "triggers": { "crons": ["43 14 * * *"] }
+}
