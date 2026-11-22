@@ -6,6 +6,7 @@ import { join } from 'node:path';
 import { generateX25519Identity, identityToRecipient } from 'age-encryption';
 import { Miniflare } from 'miniflare';
 import { sha256Hex } from '../lib/backup/core.ts';
+import { sealSnapshot } from '../lib/backup/seal.ts';
 import { GithubClient, identifySnapshot, publishSnapshot, RELEASE_MARKER, releaseTag, type GithubDeps } from '../lib/backup/github.ts';
 import { runGithubBackup, runGithubMonitor } from '../lib/backup/github-run.ts';
 import { buildManifest, type SnapshotManifest, type SnapshotRef } from '../lib/backup/snapshot.ts';
@@ -140,7 +141,9 @@ test('idempotence: opakovaný běh téhož dne → exists/kept bez exportu; dal�
 });
 
 async function sealedFor(ref: SnapshotRef, content: string) {
-  const bytes = new TextEncoder().encode(content);
+  const sql = new TextEncoder().encode(content);
+  const sealed = await sealSnapshot(sql, { mode: 'age', recipients: [recipient] });
+  const bytes = sealed.bytes;
   const manifest = buildManifest({
     database: DB,
     environment: 'production',
@@ -148,8 +151,8 @@ async function sealedFor(ref: SnapshotRef, content: string) {
     exportedAt: now.toISOString(),
     bookmark: BOOKMARK,
     migrations: 10,
-    sql: { bytes: bytes.length, sha256: await sha256Hex(bytes) },
-    file: { name: `${DB}-production-${ref.type}-${ref.date}.sql.gz`, bytes: bytes.length, sha256: await sha256Hex(bytes), compression: 'gzip', encryption: 'none', recipients: [] },
+    sql: { bytes: sql.length, sha256: await sha256Hex(sql) },
+    file: { name: `${DB}-production-${ref.type}-${ref.date}.sql.gz.age`, bytes: bytes.length, sha256: await sha256Hex(bytes), compression: 'gzip', encryption: 'age', recipients: [recipient] },
   });
   return { bytes, manifest };
 }
@@ -291,7 +294,10 @@ test('monitor: token jen pro čtení; záloha > 48 h nebo žádná → upozorně
   const empty = await runGithubMonitor(env, deps());
   assert.equal(empty.status?.stale, true);
   assert.deepEqual(empty.alerts, ['backup-stale']);
-  github.seed(await seededSnapshot('daily', '2030-01-14'));
+  now = new Date('2030-01-14T02:17:00Z');
+  await runGithubBackup(ENV, deps());
+  github.requests.length = 0; // pouze read-only volání samotného monitoru
+  now = new Date('2030-01-15T02:17:00Z');
   mails = [];
   const fresh = await runGithubMonitor(env, deps());
   assert.equal(fresh.status?.stale, false);
@@ -314,6 +320,46 @@ function assertNoSecrets(text: string) {
     assert.ok(!text.includes(secret), `obsahuje ${secret}`);
   }
 }
+
+async function seedPlaintextSnapshot(type: 'daily' | 'monthly', date: string): Promise<void> {
+  const ref = { type, date };
+  const sealed = await sealSnapshot(EXPORT, { mode: 'none', recipients: [] });
+  const manifest = buildManifest({
+    database: DB, environment: 'production', snapshot: ref,
+    exportedAt: now.toISOString(), bookmark: BOOKMARK, migrations: 10,
+    sql: { bytes: EXPORT.length, sha256: await sha256Hex(EXPORT) },
+    file: { name: `${DB}-production-${type}-${date}.sql.gz`, bytes: sealed.bytes.length, sha256: sealed.sha256, compression: 'gzip', encryption: 'none', recipients: [] },
+  });
+  await publishSnapshot(client(), ref, sealed.bytes, manifest, 'verify');
+}
+
+test('produkční idempotence: existující nešifrovaný denní snapshot se odmítne před exportem', async () => {
+  await seedPlaintextSnapshot('daily', '2030-01-15');
+  await assert.rejects(runGithubBackup(ENV, deps()), { kind: 'snapshot-encryption-invalid' });
+  assert.equal(exportCalls, 0);
+});
+
+test('produkční idempotence: nešifrovaný měsíční snapshot se odmítne', async () => {
+  await runGithubBackup(ENV, deps());
+  const tag = releaseTag(target, { type: 'monthly', date: '2030-01' });
+  const release = github.releases.find((r) => r.tag_name === tag)!;
+  github.releases.splice(github.releases.indexOf(release), 1);
+  github.tags.delete(tag);
+  await seedPlaintextSnapshot('monthly', '2030-01');
+  await assert.rejects(runGithubBackup(ENV, deps()), { kind: 'snapshot-encryption-invalid' });
+});
+
+test('monitor: poškozený nebo neúplný nejnovější release vyvolá monitor-failed', async () => {
+  await runGithubBackup(ENV, deps());
+  const env = { ...ENV, BACKUP_GITHUB_TOKEN: GH_READ_TOKEN, D1_EXPORT_API_TOKEN: '' };
+  github.corruptDownloads = true;
+  await assert.rejects(runGithubMonitor(env, deps()), { kind: 'checksum-mismatch' });
+  assert.ok(mails.some((mail) => mail.subject.includes('monitor-failed')));
+  github.corruptDownloads = false;
+  github.seed({ ...(await seededSnapshot('daily', '2030-01-16')), assets: [] });
+  now = new Date('2030-01-16T15:00:00Z');
+  await assert.rejects(runGithubMonitor(env, deps()), { kind: 'snapshot-invalid' });
+});
 
 // --- CLI a integrační obnova ---------------------------------------------------------------------------
 

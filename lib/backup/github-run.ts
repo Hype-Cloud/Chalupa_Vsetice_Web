@@ -70,6 +70,16 @@ function config(env: GithubEnv, purpose: 'backup' | 'monitor', deps: GithubDeps)
   return config;
 }
 
+/** Kontrola příjemců produkčních záloh proti právě schválené konfiguraci. */
+function assertExpectedEncryption(manifest: { file: { encryption: string; recipients: string[] } }, cfg: BackupConfig): void {
+  if (cfg.environment !== 'production') return;
+  if (manifest.file.encryption !== 'age' ||
+      !manifest.file.recipients.some((key) => cfg.encryption.recipients.includes(key)) ||
+      manifest.file.recipients.some((key) => !cfg.encryption.recipients.includes(key))) {
+    throw new BackupError('snapshot-recipient-mismatch');
+  }
+}
+
 function client(cfg: BackupConfig, env: GithubEnv, deps: GithubDeps) {
   return new GithubClient({ owner: cfg.github!.owner, repo: cfg.github!.repo, database: cfg.databaseName, environment: cfg.environment }, token(env), deps);
 }
@@ -106,6 +116,7 @@ export async function runGithubBackup(env: GithubEnv, deps: GithubDeps): Promise
       const snapshot = identifySnapshot(gh.target, existingDaily);
       if (!snapshot) throw new BackupError('snapshot-conflict');
       sealed = await downloadSnapshot(gh, snapshot);
+      assertExpectedEncryption(sealed.manifest, cfg);
       dailyState = 'exists';
     } else {
       const exported = await exportVerified(
@@ -134,8 +145,13 @@ export async function runGithubBackup(env: GithubEnv, deps: GithubDeps): Promise
     // Měsíční = první úspěšná záloha měsíce (stejný ověřený soubor); existující zůstává.
     let monthlyState: PublishState;
     const existingMonthly = await gh.releaseByTag(releaseTag(gh.target, monthly));
-    if (existingMonthly && identifySnapshot(gh.target, existingMonthly)) monthlyState = 'kept';
-    else if (existingMonthly) throw new BackupError('snapshot-conflict');
+    if (existingMonthly) {
+      const snapshot = identifySnapshot(gh.target, existingMonthly);
+      if (!snapshot) throw new BackupError('snapshot-conflict');
+      const stored = await downloadSnapshot(gh, snapshot);
+      assertExpectedEncryption(stored.manifest, cfg);
+      monthlyState = 'kept';
+    }
     else {
       const name = `${snapshotBaseName(cfg.databaseName, cfg.environment, monthly)}${sealed.manifest.file.name.endsWith('.age') ? '.sql.gz.age' : '.sql.gz'}`;
       monthlyState = await publishSnapshot(gh, monthly, sealed.bytes, manifestFor(sealed.manifest, monthly, name), 'keep');
@@ -178,7 +194,7 @@ export async function runGithubMonitor(env: GithubEnv, deps: GithubDeps): Promis
     const cfg = config(env, 'monitor', deps);
     const gh = client(cfg, env, deps);
     await gh.assertPrivateRepository('read');
-    status = await githubStatus(gh, deps.now(), STALE_AFTER_MS);
+    status = await githubStatus(gh, deps.now(), STALE_AFTER_MS, true);
   } catch (error) {
     const kind = errorKind(error);
     deps.log(`d1-backup: monitor failed (${kind})`);
