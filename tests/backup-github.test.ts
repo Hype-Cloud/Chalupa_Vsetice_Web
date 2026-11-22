@@ -352,10 +352,12 @@ test('produkční idempotence: nešifrovaný měsíční snapshot se odmítne', 
 test('monitor: poškozený nebo neúplný nejnovější release vyvolá monitor-failed', async () => {
   await runGithubBackup(ENV, deps());
   const env = { ...ENV, BACKUP_GITHUB_TOKEN: GH_READ_TOKEN, D1_EXPORT_API_TOKEN: '' };
-  github.corruptDownloads = true;
+  const daily = github.releases.find((r) => r.tag_name.endsWith('--daily--2030-01-15'))!;
+  const ageAsset = daily.assets.find((a) => a.name.endsWith('.sql.gz.age'))!;
+  ageAsset.bytes[ageAsset.bytes.length - 1] ^= 0xff;
   await assert.rejects(runGithubMonitor(env, deps()), { kind: 'checksum-mismatch' });
   assert.ok(mails.some((mail) => mail.subject.includes('monitor-failed')));
-  github.corruptDownloads = false;
+  ageAsset.bytes[ageAsset.bytes.length - 1] ^= 0xff;
   github.seed({ ...(await seededSnapshot('daily', '2030-01-16')), assets: [] });
   now = new Date('2030-01-16T15:00:00Z');
   await assert.rejects(runGithubMonitor(env, deps()), { kind: 'snapshot-invalid' });
