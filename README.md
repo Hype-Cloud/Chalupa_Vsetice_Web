@@ -1618,7 +1618,9 @@ zálohy nebo kontroly je odmítnuta.
   s AI asistentem. Více příjemců (např. záložní klíč): `BACKUP_AGE_RECIPIENT=age1…,age1…`.
 - **Ztráta soukromého klíče = ztráta všech záloh šifrovaných pro tento klíč** (nikdo, ani
   GitHub, je nerozšifruje). Výměna klíče: nový veřejný klíč do workflow; starší snapshoty
-  zůstávají čitelné jen starým klíčem až do odstranění retencí.
+  zůstávají čitelné jen starým klíčem až do odstranění retencí. Rotace nenutí
+  přepis již existující měsíční zálohy; pro obnovení historických souborů je proto
+  nutné uchovat všechny odpovídající staré soukromé klíče.
 
 ### GitHub Actions (zálohovací repozitář)
 
@@ -1654,8 +1656,10 @@ Workflow běží v **soukromém** repozitáři se zálohami, ne ve veřejném re
 
 - `worker/backup-monitor/` (`wrangler.backup-monitor.jsonc`): Cloudflare Worker s Cron
   Triggerem `43 14 * * *` (Workers Free), bez veřejné URL. Fine-grained GitHub token **jen pro
-  zálohovací repozitář, Contents: Read-only** (`BACKUP_GITHUB_TOKEN`), zálohy nestahuje ani
-  nemaže. Upozorní, když poslední denní záloha je starší než 48 h nebo žádná neexistuje
+  zálohovací repozitář, Contents: Read-only** (`BACKUP_GITHUB_TOKEN`), velké zálohy nestahuje
+  ani nemaže. Kontroluje manifest a SHA-256 digest assetu vrácený GitHub API.
+  Chybějící digest nebo nesoulad = monitor-failed. Upozorní, když poslední denní záloha
+  je starší než 48 h nebo žádná neexistuje
   (= workflow neběží: zakázaný rozvrh, chybějící secrets, vyčerpaná kvóta Actions, výpadek),
   a když se kontrola sama nepodaří (`monitor-failed`, např. vypršený token).
 - Upozornění (`lib/backup/alerts.ts`) jen při problému: selhání exportu, úložiště, integrity,
@@ -1742,7 +1746,8 @@ Postup: ověření integrity a manifestu → rozšifrování → kontrola SHA-25
 struktury SQL → kontrola, že cíl není zdrojová DB a **neexistuje** (`wrangler d1 list`) →
 potvrzení napsáním názvu cíle (neinteraktivně `--confirm <název>`) → `wrangler d1 create` +
 `d1 execute --file` (wrangler běží v prázdném dočasném adresáři, konfigurace projektu se
-nemění) → porovnání migrací a počtů řádků všech tabulek s exportem → smazání dočasného SQL.
+nemění) → porovnání migrací, počtů řádků všech tabulek a normalizovaných SQL definic
+tabulek/indexů/triggerů/pohledů (kromě interních tabulek D1) → smazání dočasného SQL.
 Potřebuje `BACKUP_CLOUDFLARE_ACCOUNT_ID` a přihlášený wrangler / token s D1 Edit. Výstup bez
 osobních údajů. Obnovenou D1 po ověření smazat (`wrangler d1 delete <název>`), pokud není
 potřeba. Produkce (jen na výslovný pokyn): v okně Time Travel přednostně Time Travel
@@ -1792,7 +1797,10 @@ jádrem; konfigurace stejnými `BACKUP_*` (`BACKUP_BACKEND=r2` ve vars).
   a při převzetí již existujícího měsíčního snapshotu. Nešifrovaný historický soubor se
   neakceptuje.
 - Nezávislý monitor pro GitHub při každé kontrole ověřuje aktuální denní snapshot
-  stažením zašifrovaného souboru, manifestu a kontrolou SHA-256. Nepotřebuje age soukromý klíč.
+  načtením malého manifestu a porovnáním SHA-256 proti `digest` metadatům assetu
+  vypočteným GitHubem při uploadu. Velký šifrovaný soubor nestahuje (limity CPU/RAM
+  Workers Free). Kontrola skutečných bajtů probíhá po uploadu, při stažení/ověření
+  a při obnově; nezávislý monitor není náhradou restore-testu.
 - Obnova kontroluje existenci tabulek včetně prázdných, indexů, triggerů
   a pohledů, počty řádků a normalizované CREATE definice ze sqlite_master.
   Nejde o kryptografickou garanci úplné obnovitelnosti všech databázových operací.
