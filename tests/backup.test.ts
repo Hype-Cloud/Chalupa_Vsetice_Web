@@ -300,8 +300,8 @@ test('idempotence: stejný den → export se nespouští (žádný duplikát); e
 test('retence: po úspěchu 30 denních a 12 měsíčních nejnovějších; cizí objekty zůstávají; neúspěšný běh nic nemaže', async () => {
   const days = Array.from({ length: 35 }, (_, i) => new Date(Date.UTC(2029, 11, 1 + i)).toISOString().slice(0, 10));
   const months = Array.from({ length: 14 }, (_, i) => new Date(Date.UTC(2028, 10 + i, 1)).toISOString().slice(0, 7));
-  for (const day of days) await bucket.put(`daily/${day}.sql`, 'starší záloha');
-  for (const month of months) await bucket.put(`monthly/${month}.sql`, 'starší záloha');
+  for (const day of days) await bucket.put(`daily/${day}.sql`, 'starší záloha', { customMetadata: { database: 'chalupa-vsetice-rezervace', environment: 'production' } });
+  for (const month of months) await bucket.put(`monthly/${month}.sql`, 'starší záloha', { customMetadata: { database: 'chalupa-vsetice-rezervace', environment: 'production' } });
   await bucket.put('daily/poznamka.txt', 'není snapshot');
 
   exportReplies = Array.from({ length: 4 }, () => ({ http: 500 }));
@@ -323,8 +323,22 @@ test('retence: po úspěchu 30 denních a 12 měsíčních nejnovějších; ciz�
   assert.equal(out.result!.pruned, 6 + 3);
 });
 
+test('retence R2: nikdy nesmaže snapshot cizí databáze nebo bez metadat ve společném bucketu', async () => {
+  await bucket.put('daily/2020-01-01.sql', 'cizí', { customMetadata: { database: 'jina-d1', environment: 'production' } });
+  await bucket.put('daily/2020-01-02.sql', 'legacy bez identity');
+  for (let i = 1; i <= 35; i++) {
+    const day = new Date(Date.UTC(2029, 10, i)).toISOString().slice(0, 10);
+    await bucket.put(`daily/${day}.sql`, 'vlastní', { customMetadata: { database: 'chalupa-vsetice-rezervace', environment: 'production' } });
+  }
+  const out = await run({ date: '2030-01-15' });
+  assert.equal(out.ok, true, JSON.stringify(out));
+  assert.equal(await text('daily/2020-01-01.sql'), 'cizí');
+  assert.equal(await text('daily/2020-01-02.sql'), 'legacy bez identity');
+  assert.equal((await keys('daily/')).filter((key) => key.endsWith('.sql')).length, 32);
+});
+
 test('pending: pozůstatky neúspěšných běhů starší než 24 h smaže úspěšná záloha', async () => {
-  await bucket.put('pending/stary-beh.sql', 'neúplný');
+  await bucket.put('pending/stary-beh.sql', 'neúplný', { customMetadata: { database: 'chalupa-vsetice-rezervace', environment: 'production' } });
   const now = new Date(Date.now() + 2 * 24 * 60 * 60 * 1000).toISOString();
   const out = await run({ now });
   assert.equal(out.ok, true, JSON.stringify(out));

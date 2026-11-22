@@ -21,6 +21,7 @@ import { parseBackupConfig, type BackupConfig } from '../../lib/backup/config.ts
 import {
   backupStatus,
   BackupError,
+  type BackupIdentity,
   cleanPending,
   copySnapshot,
   dailyKey,
@@ -182,10 +183,11 @@ export async function runBackupWorkflow(event: BackupEvent, step: BackupStep, en
     throw error;
   }
 
+  const identity: BackupIdentity = { database: backend.databaseName, environment: backend.environment };
   if (mode === 'monitor') {
     const status = await step.do('kontrola záloh', STORAGE_STEP, async () => {
-      await cleanPending(deps.bucket, deps.now());
-      return backupStatus(deps.bucket, deps.now());
+      await cleanPending(deps.bucket, deps.now(), undefined, identity);
+      return backupStatus(deps.bucket, deps.now(), identity);
     });
     if (status.stale) await alert('backup-stale', status);
     if (status.nearLimit) await alert('storage-near-limit', status);
@@ -199,9 +201,12 @@ export async function runBackupWorkflow(event: BackupEvent, step: BackupStep, en
   try {
     // Příprava: úklid pozůstatků neúspěšných běhů, stav dnešní zálohy a kapacita bucketu.
     const prepared = await step.do('příprava', STORAGE_STEP, async () => {
-      await cleanPending(deps.bucket, deps.now());
+      await cleanPending(deps.bucket, deps.now(), undefined, identity);
       const object = await deps.bucket.head(daily);
-      const status = await backupStatus(deps.bucket, deps.now());
+      if (object && (object.customMetadata?.database !== identity.database || object.customMetadata?.environment !== identity.environment)) {
+        throw new BackupError('snapshot-identity-mismatch');
+      }
+      const status = await backupStatus(deps.bucket, deps.now(), identity);
       return { existing: object?.checksums.md5 ? { bytes: object.size, md5: hexOf(object.checksums.md5) } : null, totalBytes: status.totalBytes };
     });
     let snapshot = prepared.existing;
@@ -223,6 +228,11 @@ export async function runBackupWorkflow(event: BackupEvent, step: BackupStep, en
     const monthly = await step.do('měsíční záloha', STORAGE_STEP, async () => {
       const source = await deps.bucket.head(daily);
       const custom = source?.customMetadata ?? {};
+      if (custom.database !== identity.database || custom.environment !== identity.environment) throw new BackupError('snapshot-identity-mismatch');
+      const existingMonthly = await deps.bucket.head(monthlyKey(date));
+      if (existingMonthly && (existingMonthly.customMetadata?.database !== identity.database || existingMonthly.customMetadata?.environment !== identity.environment)) {
+        throw new BackupError('snapshot-identity-mismatch');
+      }
       return copySnapshot(
         deps.bucket,
         daily,
@@ -240,7 +250,7 @@ export async function runBackupWorkflow(event: BackupEvent, step: BackupStep, en
     });
     // Retence až po úspěšném uložení – neúspěšný běh nic nemaže.
     const pruned = await step.do('retence', STORAGE_STEP, async () => {
-      const removed = [...(await pruneDaily(deps.bucket, backend.keepDaily)), ...(await pruneMonthly(deps.bucket, backend.keepMonthly))];
+      const removed = [...(await pruneDaily(deps.bucket, backend.keepDaily, identity)), ...(await pruneMonthly(deps.bucket, backend.keepMonthly, identity))];
       return removed.length;
     });
     result = { mode, date, daily: dailyState, monthly, bytes: target.bytes, pruned };
@@ -255,7 +265,7 @@ export async function runBackupWorkflow(event: BackupEvent, step: BackupStep, en
   // Kontrola objemu po úspěšné záloze; její selhání zálohu nezneplatní (hlídá ji i běh 14:45).
   let status: BackupStatus | null = null;
   try {
-    status = await step.do('kontrola objemu', STORAGE_STEP, () => backupStatus(deps.bucket, deps.now()));
+    status = await step.do('kontrola objemu', STORAGE_STEP, () => backupStatus(deps.bucket, deps.now(), identity));
   } catch (error) {
     deps.log(`d1-backup: status check failed (${error instanceof BackupError ? error.kind : 'unknown'})`);
   }

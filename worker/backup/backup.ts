@@ -37,6 +37,14 @@ export const STORAGE_HARD_LIMIT_BYTES = 9 * 1000 ** 3;
 const DAILY_KEY = /^daily\/(\d{4}-\d{2}-\d{2})\.sql$/;
 const MONTHLY_KEY = /^monthly\/(\d{4}-\d{2})\.sql$/;
 export type BackupBucket = Pick<R2Bucket, 'head' | 'get' | 'put' | 'list' | 'delete'>;
+export interface BackupIdentity { database: string; environment: string }
+
+/** Neznámá nebo chybějící metadata znamenají cizí objekt (fail closed). */
+async function belongsTo(bucket: BackupBucket, key: string, identity: BackupIdentity): Promise<boolean> {
+  const object = await bucket.head(key);
+  return !!object && object.customMetadata?.database === identity.database &&
+    object.customMetadata?.environment === identity.environment;
+}
 
 /** Streamové primitivy runtime (ve Workers DigestStream a FixedLengthStream). */
 export interface StreamPrimitives {
@@ -213,19 +221,26 @@ async function listAll(bucket: BackupBucket, prefix?: string): Promise<R2Object[
  * Retence podle počtu: ponechá `keep` nejnovějších snapshotů s názvem podle `pattern`, starší
  * smaže. Jiné objekty pod prefixem nechá být. Volat jen po úspěšné záloze.
  */
-export async function pruneSnapshots(bucket: BackupBucket, prefix: string, pattern: RegExp, keep: number): Promise<string[]> {
-  const keys = (await listAll(bucket, prefix)).map((o) => o.key).filter((key) => pattern.test(key)).sort().reverse();
+export async function pruneSnapshots(bucket: BackupBucket, prefix: string, pattern: RegExp, keep: number, identity?: BackupIdentity): Promise<string[]> {
+  const all = (await listAll(bucket, prefix)).map((o) => o.key).filter((key) => pattern.test(key)).sort().reverse();
+  // V produkčním Workflow se každá kandidátní záloha ověří přes HEAD:
+  // metadata nemusí být v R2 list() vrácená. Neoznačené / cizí objekty se nemažou.
+  const keys: string[] = [];
+  for (const key of all) if (!identity || await belongsTo(bucket, key, identity)) keys.push(key);
   const remove = keys.slice(keep);
   if (remove.length > 0) await bucket.delete(remove);
   return remove;
 }
 
-export const pruneDaily = (bucket: BackupBucket, keep: number) => pruneSnapshots(bucket, DAILY_PREFIX, DAILY_KEY, keep);
-export const pruneMonthly = (bucket: BackupBucket, keep: number) => pruneSnapshots(bucket, MONTHLY_PREFIX, MONTHLY_KEY, keep);
+export const pruneDaily = (bucket: BackupBucket, keep: number, identity?: BackupIdentity) => pruneSnapshots(bucket, DAILY_PREFIX, DAILY_KEY, keep, identity);
+export const pruneMonthly = (bucket: BackupBucket, keep: number, identity?: BackupIdentity) => pruneSnapshots(bucket, MONTHLY_PREFIX, MONTHLY_KEY, keep, identity);
 
 /** Smaže pozůstatky neúspěšných běhů v pending/ starší než 24 h (kromě `keepKey`). */
-export async function cleanPending(bucket: BackupBucket, now: Date, keepKey?: string): Promise<number> {
-  const stale = (await listAll(bucket, PENDING_PREFIX)).filter((o) => o.key !== keepKey && now.getTime() - o.uploaded.getTime() > 24 * 60 * 60 * 1000).map((o) => o.key);
+export async function cleanPending(bucket: BackupBucket, now: Date, keepKey?: string, identity?: BackupIdentity): Promise<number> {
+  const candidates = (await listAll(bucket, PENDING_PREFIX))
+    .filter((o) => o.key !== keepKey && now.getTime() - o.uploaded.getTime() > 24 * 60 * 60 * 1000);
+  const stale: string[] = [];
+  for (const object of candidates) if (!identity || await belongsTo(bucket, object.key, identity)) stale.push(object.key);
   if (stale.length > 0) await bucket.delete(stale);
   return stale.length;
 }
@@ -242,9 +257,13 @@ export interface BackupStatus {
 }
 
 /** Stav záloh: stáří poslední denní zálohy a celkový objem bucketu. */
-export async function backupStatus(bucket: BackupBucket, now: Date): Promise<BackupStatus> {
+export async function backupStatus(bucket: BackupBucket, now: Date, identity?: BackupIdentity): Promise<BackupStatus> {
   const objects = await listAll(bucket);
-  const daily = objects.filter((o) => DAILY_KEY.test(o.key)).sort((a, b) => b.key.localeCompare(a.key));
+  const own: R2Object[] = [];
+  for (const object of objects) {
+    if (!identity || (DAILY_KEY.test(object.key) || MONTHLY_KEY.test(object.key)) && await belongsTo(bucket, object.key, identity)) own.push(object);
+  }
+  const daily = own.filter((o) => DAILY_KEY.test(o.key)).sort((a, b) => b.key.localeCompare(a.key));
   const latest = daily[0] ?? null;
   const ageMs = latest ? now.getTime() - latest.uploaded.getTime() : null;
   const totalBytes = objects.reduce((sum, o) => sum + o.size, 0);
@@ -253,7 +272,7 @@ export async function backupStatus(bucket: BackupBucket, now: Date): Promise<Bac
     ageMs,
     stale: ageMs === null || ageMs > STALE_AFTER_MS,
     dailyCount: daily.length,
-    monthlyCount: objects.filter((o) => MONTHLY_KEY.test(o.key)).length,
+    monthlyCount: own.filter((o) => MONTHLY_KEY.test(o.key)).length,
     totalBytes,
     nearLimit: totalBytes > STORAGE_ALERT_BYTES,
   };
