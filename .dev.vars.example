@@ -17,5 +17,17 @@ TURNSTILE_SECRET_KEY=1x0000000000000000000000000000000AA
 # Upozornění správci na kolize rezervací (Cron, worker/booking/cron.ts). V Cloudflare jako secrets.
 RESEND_API_KEY=
 CONFLICT_ALERT_EMAIL=
-# Doporučený produkční odesílatel (interní adresa pro alerty): Chalupa Všetice <admin@chalupavsetice.cz>
+# Volitelný odesílatel interních alertů; není to odesílatel rezervací.
 CONFLICT_ALERT_FROM=
+
+# Lokální testy potvrzovacího e-mailu: bez RESEND_API_KEY se potvrzení přeskočí,
+# bez testovacího příjemce při BOOKING_ENV=local se také neodešle hostovi.
+BOOKING_CONFIRMATION_TEST_EMAIL=
+
+# Platební konfigurace: bez platného českého IBAN vrací zapnutý POST 503 not-configured.
+# Lokálně používejte jen fiktivní/testovací údaje; skutečný účet do repozitáře nepatří.
+PAYMENT_IBAN=
+
+# Výstupní iCal pro e-chalupy (samostatný od GET /calendar/<token>, který používají hosté).
+BOOKING_ICAL_EXPORT_ENABLED=true
+BOOKING_ICAL_EXPORT_TOKEN=
