@@ -1,8 +1,9 @@
-// Cloudflare Worker: obsluhuje pouze /api/* (assets.run_worker_first ve wrangler.jsonc).
+// Cloudflare Worker: obsluhuje pouze /api/* a /calendar/* (assets.run_worker_first ve wrangler.jsonc).
 // Všechny ostatní požadavky obsluhují statické assety z dist/client bez spuštění Workeru.
 import { getAvailability } from './availability.ts';
 import { runConflictReconciliation } from './booking/conflicts.ts';
 import { runScheduledConflictCheck, type CronEnv } from './booking/cron.ts';
+import { handleCalendar, isCalendarPath } from './booking/calendar.ts';
 import { handleBookingConfig, type BookingConfigEnv } from './booking/config.ts';
 import { listReservedNights } from './booking/db.ts';
 import { handleIcalExport, type ExportEnv } from './booking/export.ts';
@@ -52,6 +53,8 @@ export default {
     if (pathname === '/api/quote') return handleQuote(request, env, { now: () => new Date(), log: (message) => console.warn(message) });
     if (pathname === '/api/reservations.ics') return handleIcalExport(request, env, { log: (message) => console.warn(message) });
     if (pathname.startsWith('/api/')) return json({ error: 'not-found' }, { status: 404, cacheControl: 'no-store' });
+    // Odkaz „přidat do kalendáře“ (capability URL, viz booking/calendar.ts).
+    if (isCalendarPath(pathname)) return handleCalendar(request, env, { now: () => new Date(), log: (message) => console.warn(message) });
     return env.ASSETS.fetch(request);
   },
 

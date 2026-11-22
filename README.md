@@ -209,7 +209,7 @@ Projekt využívá Node.js Test Runner. Databázové testy probíhají nad loká
 | pricing.test.ts | 33 | Ceník: výchozí a vlastní ceny nocí, prahy slev, zaokrouhlení, přelom měsíce a roku, pevná cena pobytu (přesná shoda, priorita, neplatná data, beze vlivu na dostupnost), `/api/quote` (kontrakt, validace, neplatný ceník, výpadek D1, žádné zápisy), shoda ceny nabídky a rezervace, `price-mismatch`. |
 | reservation-note.test.ts | 17 | Poznámka hosta: NULL pro prázdné hodnoty, víceřádkový text, Unicode a NFC, limit 2000 znaků, zakázané řídicí a bidi znaky, SQL/HTML text jen jako text, není ve veřejné odpovědi ani v logách, idempotence, escapování v iCal exportu, CHECK v D1. |
 | d1-migrations.test.ts | 29 | Kontrola D1 migrací před deployem: číslování, konzistence konfigurací (oddělené D1, produkční POST vypnutý), čekající a neznámé migrace, fail-closed při chybě, detekce destruktivních migrací, interaktivní aplikace jen v terminálu s potvrzením, neinteraktivní jen s autorizací ověřenou proti stavu D1 (název DB, přesný seznam čekajících migrací, žádné neznámé migrace, nikdy v CI), destruktivní migrace přísněji (výslovné povolení, v produkci samostatně, fráze v terminálu), ověřená záloha před každou produkční migrací (bookmark, export se schématem a záznamy migrací), samostatná záloha, kontrola po aplikaci, parsování argumentů. |
-| smoke.test.ts | 8 | Smoke test veřejných endpointů proti skutečnému Workeru: produkce (POST 404, `booking-config` vypnutý) a Preview, bez tokenů a zápisů, odhalení zapnutého POST, výpadku D1, úniku osobních údajů a veřejného exportu. |
+| smoke.test.ts | 9 | Smoke test veřejných endpointů proti skutečnému Workeru: produkce (POST 404, `booking-config` vypnutý) a Preview, bez tokenů a zápisů, odhalení zapnutého POST, výpadku D1, úniku osobních údajů a veřejného exportu, `/calendar/*` s `X-Robots-Tag` přepsaným platformou v Preview. |
 | frontend-quote.test.ts | 14 | Frontend rezervační sekce: cena jen z `/api/quote` (kontrakt proti skutečnému handleru), nightly se slevou, exact-stay, 422 a chyby serveru/sítě jako české hlášky, načítání bez staré ceny, souběh (starší odpověď nepřepíše novější), nový požadavek při změně termínu a hostů, žádný klientský výpočet ceny. |
 | i18n.test.ts | 17 | Jazykové verze: úplnost katalogů cs/en/de/ua (klíče, parametry, plurály, žádný český text ani HTML), fallback, volba jazyka (?lang, localStorage, čeština) a persistence, množná čísla, data a CZK v každém jazyce, kalendář, rezervační panel po přepnutí, přepínač, žádné pevné texty v komponentách ani pevná cena noci (3 000 / 2 990 Kč); orientační cena jen z `PRICE_PER_NIGHT`. |
 | date-input.test.ts | 8 | Vstup data DD.MM.RRRR ↔ ISO: přestupný rok, neexistující den a měsíc, rozepsané datum bez chyby, odmítnutí amerického a ISO tvaru, všechna zobrazená data den → měsíc → rok (angličtina bez měsíc/den). |
@@ -218,7 +218,8 @@ Projekt využívá Node.js Test Runner. Databázové testy probíhají nad loká
 | stay-feedback.test.ts | 5 | Vizuální odezva na pobyt kratší než `MIN_NIGHTS`: validace a stav pobytu beze změny, nový trigger s kliknutým dnem při každém pokusu, validní klik ani jiné chyby flash nespustí, flash dne bez trvalého stavu a bez pohybu, pulse hlášky jen přes `transform`, `prefers-reduced-motion` bez animace. |
 | confirmation-email.test.ts | 34 | Potvrzovací e-mail: `locale` cs/en/de/ua (jiné → 422), nová rezervace = jeden e-mail s klíčem z interního UUID, replay i souběžný dvojklik znovu naplánují potvrzení se stejným klíčem a s uloženým e-mailem a jazykem, replay bez e-mailu (422, zrušená, bez jazyka), stejný veřejný kód po resetu čítače → různé klíče, UUID mimo API/e-mail/log, žádná synchronní práce před `ctx.waitUntil`, předgenerované ikony (bez rastrování ve Workeru), Preview → testovací schránka, produkce → host, odesílatel z business identity, business config (telefon E.164 → `tel:` a český zápis, validace), hlavička (jméno, značka, termín pobytu), kompaktní termín ve 4 jazycích, pořadí platební sekce a QR bez popisku, úvod se splatností, instrukcemi před příjezdem a kontaktem (bez věty o souhrnu), nadpis „Souhrn rezervace“ ve 4 jazycích, platba ve dvou sloupcích (QR vlevo, údaje vpravo) a na mobilu pod sebou, IBAN bez `nowrap` se zalomením po skupinách, patička bez oddělovacích znaků, nezměněná hlavička (otisk HTML a PNG) i patička (otisk HTML), QR 174 px se zaoblenými rohy a beze změny PNG, linka jen pod nadpisem „Platební údaje“ (nad „Těšíme se…“ žádná), nezměněný telefonický kontakt (otisk HTML), telefonický kontakt a patička (jméno → web, `mailto:`, `IČ` jako prostý text, žádný registr ani „IČO“), Preview bez banneru a adresy hosta (jen `[TEST]` v předmětu), domek bez vlastního pozadí a jméno jednotnou vahou, odkaz na registr odstraněný z konfigurace i dokumentace, výchozí světlá varianta, kontakty v plaintextu, renderer bez napevno zapsaných údajů provozovatele, chybějící konfigurace → skip bez upozornění, selhání providera (timeout, síť, HTTP 4xx/5xx) → 201 a jedno interní upozornění bez osobních a bankovních údajů, selhání upozornění nic dalšího nespouští, odložené odeslání, obsah HTML i textu ve 4 jazycích ze stejných dat jako API, QR příloha (cid) = SPAYD, escapování HTML, nové znění věty o e-mailu. |
 | payment.test.ts | 9 | Platby: pražské datum → `DDMMYY`, `NN` 01–99, splatnost (konec pražského dne po 24 h, změny času, vždy 24–48 h), IBAN (kontrolní součet, odvození čísla účtu), SPAYD (serverová cena, VS = kód, zpráva `Rezervace {kód}`), QR jako PNG (pixely = matice) se SVG fallbackem, kopírování do schránky, kontrola, že repozitář neobsahuje skutečný IBAN. |
-| **Celkem** | **378** | |
+| calendar.test.ts | 15 | Odkaz do kalendáře: unikátní neveřejný token oddělený od id/kódu/VS, replay a souběžný dvojklik → stejná `calendarUrl`, dvě rezervace → různé URL, legacy `NULL` token (replay, e-mail i web bez odkazu), origin (produkce vždy hlavní web, Preview origin požadavku), endpoint (pending/paid → událost, hlavičky, HEAD, 405; neplatný tvar bez dotazu do D1, neznámý a zrušený → 404; bez D1 503; token se neloguje), validní VCALENDAR/VEVENT (ical.js), CRLF, 75 oktetů, stabilní UID, 14:00/11:00 v zimě, v létě i přes přechod času, žádné osobní/bankovní/interní údaje, e-mail (hlavička a Termín = stejný href, splatnost bez odkazu, věta ve 4 jazycích; příloha `pobyt.ics` s `method=PUBLISH` = stejná událost jako odkaz, bez osobních údajů, replay stejný obsah, produkce hostovi, legacy bez přílohy), web přijme jen serverovou URL, Worker obsluhuje `/calendar/*`, žádná externí calendar služba, CHECK a UNIQUE migrace 0010. |
+| **Celkem** | **394** | |
 
 ### Testované scénáře
 
@@ -343,7 +344,9 @@ POST /api/reservations → validace → čerstvý export e-chalup → D1 batch (
   - splatnost platby `payment_due_at` (`migrations/0008_kod_rezervace_platba.sql`, UTC, NULL u starších),
   - stav a stabilní iCal UID (`rezervace-<uuid>@chalupavsetice.cz`, UNIQUE, spolu s `ical_sequence`),
   - volitelný `idempotency_key` pro opakované odeslání,
-  - volitelná poznámka hosta `note` (`migrations/0007_poznamka_hosta.sql`, NULL nebo 1–2000 znaků).
+  - volitelná poznámka hosta `note` (`migrations/0007_poznamka_hosta.sql`, NULL nebo 1–2000 znaků),
+  - neveřejný token odkazu do kalendáře `calendar_token` (`migrations/0010_kalendar_pobytu.sql`,
+    43 znaků base64url, UNIQUE; NULL u rezervací vzniklých před migrací), viz Odkaz do kalendáře.
 - **Stavy:** `pending_payment` (čeká na ruční ověření platby), `paid`, `cancelled`.
   Nezaplacené rezervace se automaticky neruší.
 - **`reserved_nights`:** jedna řádka na noc, `night` je PRIMARY KEY. Databáze tak sama
@@ -495,6 +498,66 @@ POST /api/reservations → validace → čerstvý export e-chalup → D1 batch (
 - **Bez fronty:** stav doručení se neukládá a e-mail se sám neopakuje (jen při replay). Renderer
   (`renderReservationEmail`) je obecný – stejný půjde použít pro potvrzení platby, zrušení
   nebo připomínku splatnosti s jinými texty.
+
+### Odkaz do kalendáře (`GET /calendar/<token>`, `worker/booking/calendar.ts`)
+
+Termín pobytu je klikací odkaz na vlastní URL `https://chalupavsetice.cz/calendar/<token>`,
+která vrátí jednu událost celého pobytu; potvrzovací e-mail navíc přikládá tutéž událost jako
+`pobyt.ics` (viz níže). Žádná externí služba (Google/Outlook/Apple odkazy, add-to-calendar SaaS)
+a žádné úložiště souborů – ICS se generuje při každém požadavku.
+
+- **Token:** při založení rezervace 32 bajtů z CSPRNG v base64url (43 znaků) do
+  `reservations.calendar_token` (UNIQUE). Oddělený od interního id, veřejného kódu i VS;
+  stabilní po celou dobu rezervace. Kolize (prakticky nemožná) = nový pokus jako u interního id.
+- **`calendarUrl`:** skládá jen server (`calendarUrl()`) a vrací ji odpověď
+  `POST /api/reservations` v `reservation.calendarUrl`; stejnou hodnotu používá potvrzovací
+  e-mail. Replay (stejný `Idempotency-Key` i souběžný dvojklik) vrací stejnou URL. Rezervace bez
+  tokenu (před migrací 0010) → `calendarUrl: null` a termín bez odkazu. Frontend URL nikdy
+  neskládá – přijme jen serverovou URL tvaru `http(s)://…/calendar/<token>` (i dříve vydaný tvar s `.ics`).
+- **Origin:** produkce vždy `BUSINESS_WEBSITE_URL` (`https://chalupavsetice.cz`), i když
+  požadavek přišel přes `workers.dev`; Preview origin požadavku (odkaz jde otestovat proti
+  Preview Workeru).
+- **Kde je odkaz:** termín v hlavičce e-mailu, řádek „Termín“ v e-mailovém souhrnu a řádek
+  „Termín“ v success summary na webu – všude stejná `calendarUrl`. Splatnost (souhrn i úvod)
+  odkaz není. Pod souhrnem e-mailu krátká věta „Kliknutím na termín pobytu si jej můžete přidat
+  do kalendáře.“ (cs/en/de/ua); plaintext obsahuje URL.
+- **Událost:** příjezd v `STAY_TIMES.checkIn` (14:00) → odjezd v `STAY_TIMES.checkOut` (11:00),
+  pásmo `STAY_TIMES.timeZone` (`Europe/Prague`) – `lib/booking/rules.ts`. Časy se převádí na UTC
+  (`DTSTART:…Z`) podle skutečného posunu v daný den, takže sedí v zimním i letním čase i přes
+  jeho přechod (např. 22. 12. 2026 14:00 → 24. 12. 2026 11:00). `METHOD:PUBLISH`, jedna
+  `VEVENT`, CRLF, skládání řádků po 75 oktetech, název „Pobyt – Chalupa Všetice“ a popis
+  s časy příjezdu a odjezdu v jazyce rezervace; stabilní `UID` z otisku tokenu (bez tokenu
+  i interního id).
+- **Obsah bez citlivých údajů:** žádné jméno, e-mail, telefon, poznámka, cena, účet, IBAN, SPAYD,
+  VS, kód rezervace ani interní id.
+- **HTTP:** `GET`/`HEAD`; `Content-Type: text/calendar; charset=utf-8`,
+  `Content-Disposition: inline; filename="pobyt.ics"`, `Cache-Control: private, no-store`,
+  `X-Robots-Tag: noindex, nofollow`. Neplatný tvar tokenu → 404 bez dotazu do D1; neznámý token
+  i **zrušená rezervace → 404** (zrušení se navenek neliší od neexistujícího odkazu, nic
+  neprozrazuje); `pending_payment` i `paid` → událost; bez D1 → 503. Worker cestu obsluhuje díky
+  `assets.run_worker_first` (`/api/*`, `/calendar/*`).
+- **`inline`, ne `attachment`:** prohlížeč s nativní obsluhou `text/calendar` (Safari na iOS/iPadOS)
+  může nabídnout přidání události přímo; ostatní (Chrome na všech platformách, obvykle i Safari
+  na macOS) soubor stáhnou a událost se přidá otevřením staženého souboru. Automatické otevření
+  kalendáře hlavička nezaručuje. `filename` zůstává, aby se stažený soubor nejmenoval podle
+  tokenu. Jde o jednorázový import (`https://`), ne o odběr kalendáře (`webcal://`).
+- **URL bez přípony `.ics`:** Apple Mail na iOS odkaz končící `.ics` nabízí jako odběr kalendáře
+  (ověřeno v Preview), příloha `text/calendar` a návrh Siri naopak jako jednorázovou událost.
+  Odkaz proto končí tokenem; obsah a hlavičky jsou stejné. Cesta `/calendar/<token>.ics` dál
+  vrací stejnou událost (dříve odeslané odkazy).
+- **Příloha `pobyt.ics` v potvrzovacím e-mailu:** `Content-Type: text/calendar; charset=utf-8;
+  method=PUBLISH` (Resend HTTP API, pole `content_type`), obsahem stejná událost jako odkaz
+  (`buildStayCalendar`: stejné `UID`, časy a texty, bez `ATTENDEE`, `ORGANIZER`, `STATUS` a osobních
+  údajů); `DTSTAMP` z `created_at`, takže replay posílá bajtově stejnou přílohu. Ověřeno v Preview:
+  Apple Mail na iOS z přílohy nabídne přidání jedné události a návrh Siri; bez přílohy Siri událost
+  v textu e-mailu nenašla. Rezervace bez tokenu (před migrací 0010) přílohu nedostane. Stejné `UID`
+  jako odkaz: přidání přes přílohu i odkaz nemá vytvořit duplicitu.
+- **Omezení:** přidaná událost je kopie – zrušení ani změna rezervace se do kalendáře hosta
+  nepropíše (platí pro přílohu i odkaz); řešením by byl e-mail s `METHOD:CANCEL` / vyšší
+  `SEQUENCE`, mimo rozsah.
+- **Capability URL:** kdokoli s odkazem stáhne událost – proto náhodný token a minimální obsah.
+  Kód tokenu ani URL neloguje. Pozor: Workers Logs (`invocation_logs`) ukládají URL požadavku
+  včetně cesty; `redact_query_string` cestu neskrývá. Logy jsou přístupné jen v účtu Cloudflare.
 
 ### Transakce v D1
 
@@ -1102,7 +1165,7 @@ vendor/                 základní styly shadcn/Tailwind importované z app/glob
 1. `pnpm run build` sestaví web (vinext) a předrenderuje ho do `dist/client`.
 2. `wrangler deploy` nahraje `dist/client` jako statické assety a sbalí Worker
    z `worker/index.ts`.
-3. Díky `assets.run_worker_first: ["/api/*"]` se Worker spouští jen pro API.
+3. Díky `assets.run_worker_first: ["/api/*", "/calendar/*"]` se Worker spouští jen pro API a odkazy do kalendáře.
    Všechny ostatní požadavky obsluhují statické assety přímo.
 
 ## Instalace a lokální vývoj
@@ -1140,7 +1203,7 @@ npx wrangler d1 execute chalupa-vsetice-rezervace --local \
   (`status` je `ok`).
 - **`wrangler.jsonc`:** `main: ./worker/index.ts`, assets z `./dist/client`
   s bindingem `ASSETS`, `not_found_handling: "404-page"`,
-  `run_worker_first: ["/api/*"]` a blok `previews` pro Worker Previews.
+  `run_worker_first: ["/api/*", "/calendar/*"]` a blok `previews` pro Worker Previews.
 - **`pnpm-workspace.yaml`:**
   - `allowBuilds` povoluje instalační skripty `esbuild` a `workerd`, které pnpm 11
     jinak blokuje.
@@ -1380,7 +1443,10 @@ Ověří web, `/api/availability` (status, žádné osobní údaje), `/api/quote
 termín, 405), `POST /api/reservations` (**v produkci musí vrátit 404**; nikde nesmí přijmout
 prázdný požadavek), `/api/booking-config` (v produkci `bookingEnabled: false`, v Preview zapnutý
 s veřejným site key), `/api/reservations.ics` bez tokenu (404) a neznámé API (404 JSON
-s bezpečnostními hlavičkami). Exit 1 při selhání; `stale`/`partial` obsazenost je jen varování.
+s bezpečnostními hlavičkami), `/calendar/<neznámý token>` (404 JSON z Workeru s `no-store`,
+ne statický 404; `X-Robots-Tag` v produkci přesně `noindex, nofollow`, v Preview stačí `noindex`,
+protože Cloudflare ho na Preview URL přepisuje u všech odpovědí). Exit 1 při selhání;
+`stale`/`partial` obsazenost je jen varování.
 
 Nepoužívá žádné tokeny ani secrets: přijme jen origin (https, http jen localhost) bez cesty,
 query a přihlašovacích údajů, neposílá `Authorization` ani cookies a nic nezapisuje (rezervační

@@ -23,6 +23,9 @@
 //   kreslí jen QR.
 //   Vložené <style> je jen vylepšení: užší okraje na mobilu, tmavý režim (Apple Mail,
 //   Outlook.com) a vypnutí automatických odkazů Apple Mail. Bez něj zůstává světlá varianta.
+// - Příloha `pobyt.ics` (text/calendar, METHOD:PUBLISH): stejná událost jako odkaz na termín
+//   (stejné UID, bez osobních údajů), DTSTAMP z created_at. Apple Mail z ní nabídne přidání
+//   události a návrh Siri. Rezervace bez tokenu (před migrací 0010) přílohu nedostane.
 
 import { businessIdentity, type BusinessIdentity } from '../../lib/business.ts';
 import { bytesToBase64, qrMatrix, qrPngBytes } from '../../lib/booking/qr.ts';
@@ -30,6 +33,7 @@ import { createI18n, type Locale } from '../../lib/i18n/index.ts';
 import { BRAND_MARK_PNG, PHONE_ICON_DARK_PNG, PHONE_ICON_LIGHT_PNG } from '../email/iconAssets.ts';
 import { CREAM, GREEN, WHITE } from '../email/palette.ts';
 import { MailError, RESEND_TEST_FROM, sendViaResend, type MailAttachment, type MailMessage } from '../email/resend.ts';
+import { buildStayCalendar, CALENDAR_CONTENT_TYPE, CALENDAR_FILENAME } from './calendar.ts';
 import type { ReservationResponse } from './response.ts';
 
 export interface ConfirmationEnv {
@@ -159,6 +163,9 @@ export function renderReservationEmail(
     [i18n.t('reservation.payment.variableSymbol'), p.variableSymbol],
   ];
   const stay = i18n.formatDateRange(r.arrival, r.departure);
+  // Odkaz „přidat do kalendáře“ ze stejné serverové calendarUrl jako odpověď API; termín
+  // v hlavičce i řádek Termín v souhrnu. Rezervace bez tokenu (null) zůstávají bez odkazu.
+  const calendarHref = r.calendarUrl ?? null;
   const paymentHeading = i18n.t('reservation.payment.details');
   const thanks = i18n.t('reservation.success.thanks');
   // Čeští hosté vidí číslo bez předvolby, ostatní mezinárodní zápis.
@@ -178,11 +185,12 @@ export function renderReservationEmail(
 
   const table = (content: string, attrs = 'width="100%"', style = '') =>
     `<table role="presentation" ${attrs} cellpadding="0" cellspacing="0" border="0" style="border-collapse:collapse;${style}">${content}</table>`;
-  const row = ([label, value]: [string, string], first: boolean, wrap = false) => {
+  const row = ([label, value]: [string, string], first: boolean, wrap = false, href: string | null = null) => {
     const line = first ? '' : `border-top:1px solid ${BORDER};`;
+    const content = wrap ? breakable(value) : escapeHtml(value);
     return (
       `<tr><td class="e-muted${first ? '' : ' e-line'}" style="padding:12px 0;${line}color:${MUTED};font-size:14px;line-height:21px;">${escapeHtml(label)}</td>` +
-      `<td class="e-text e-val${first ? '' : ' e-line'}" align="right" style="padding:12px 0 12px 24px;${line}color:${GREEN};font-size:15px;line-height:21px;text-align:right;${wrap ? 'overflow-wrap:anywhere;word-break:break-word;' : ''}">${wrap ? breakable(value) : escapeHtml(value)}</td></tr>`
+      `<td class="e-text e-val${first ? '' : ' e-line'}" align="right" style="padding:12px 0 12px 24px;${line}color:${GREEN};font-size:15px;line-height:21px;text-align:right;${wrap ? 'overflow-wrap:anywhere;word-break:break-word;' : ''}">${href ? `<a class="e-text" href="${escapeHtml(href)}" style="color:${GREEN};text-decoration:underline;">${content}</a>` : content}</td></tr>`
     );
   };
   // Číslo účtu a IBAN: zalomení jen mezi skupinami po 4 znacích (<wbr>, při kopírování bez
@@ -206,7 +214,7 @@ export function renderReservationEmail(
           '',
         ) +
         '</td>' +
-        `<td class="e-stay" align="right" valign="middle" style="padding:0 0 0 16px;color:${CREAM};font-family:${SANS};font-size:13px;line-height:20px;text-align:right;white-space:nowrap;">${escapeHtml(stay)}</td>` +
+        `<td class="e-stay" align="right" valign="middle" style="padding:0 0 0 16px;color:${CREAM};font-family:${SANS};font-size:13px;line-height:20px;text-align:right;white-space:nowrap;">${calendarHref ? `<a class="e-stay" href="${escapeHtml(calendarHref)}" style="color:${CREAM};text-decoration:none;">${escapeHtml(stay)}</a>` : escapeHtml(stay)}</td>` +
         '</tr>',
     ) +
     '</td></tr>';
@@ -222,10 +230,12 @@ export function renderReservationEmail(
     // Souhrn; celková cena jen tučněji, o stupeň větší a s výraznější linkou nad sebou.
     sectionHeading(texts.summaryHeading, '0 0 6px'),
     table(
-      summary.map((item, i) => row(item, i === 0)).join('') +
+      // Řádek 1 = Termín (odkaz do kalendáře); splatnost zůstává prostý text.
+      summary.map((item, i) => row(item, i === 0, false, i === 1 ? calendarHref : null)).join('') +
         `<tr><td class="e-text e-total" style="padding:14px 0 0;border-top:1px solid ${GREEN};color:${GREEN};font-size:16px;line-height:22px;font-weight:bold;">${escapeHtml(total[0])}</td>` +
         `<td class="e-text e-total" align="right" style="padding:14px 0 0 24px;border-top:1px solid ${GREEN};color:${GREEN};font-size:16px;line-height:22px;font-weight:bold;text-align:right;white-space:nowrap;">${escapeHtml(total[1])}</td></tr>`,
     ),
+    calendarHref ? `<p class="e-muted" style="margin:14px 0 0;font-size:13px;line-height:19px;color:${MUTED};">${escapeHtml(i18n.t('email.calendarHint'))}</p>` : '',
     // Platba: mezera po souhrnu, nadpis, pod ním jemná linka (1 px, BORDER; v tmavém režimu
     // přes .e-line), pak vnořená tabulka – na desktopu QR vlevo a ruční údaje vpravo (svisle
     // na střed), na mobilu (media query) pod sebou. Bez podpory media queries zůstávají dva
@@ -312,6 +322,7 @@ export function renderReservationEmail(
     ...texts.intro.flatMap((paragraph) => [paragraph.replace('{contact}', texts.contactLink ?? ''), '']),
     texts.summaryHeading,
     ...[...summary, total].map(([label, value]) => `${label}: ${value}`),
+    ...(calendarHref ? ['', i18n.t('email.calendarHint'), calendarHref] : []),
     '',
     paymentHeading,
     ...payment.map(([label, value]) => `${label}: ${value}`),
@@ -409,6 +420,18 @@ export interface ConfirmationTarget {
   /** E-mail a jazyk uložené u rezervace (při replay z DB, ne z opakovaného požadavku). */
   guestEmail: string;
   locale: Locale;
+  /** Token odkazu do kalendáře (null u rezervací před migrací 0010) a čas vytvoření – pro přílohu `pobyt.ics`. */
+  calendarToken?: string | null;
+  createdAt?: string;
+}
+
+/** Příloha `pobyt.ics` se stejnou událostí jako odkaz, nebo null (bez tokenu, zrušená rezervace). */
+async function calendarAttachment(data: ReservationResponse, target: ConfirmationTarget): Promise<MailAttachment | null> {
+  const { status, arrival, departure } = data.reservation;
+  const dtstamp = new Date(target.createdAt ?? '');
+  if (!target.calendarToken || Number.isNaN(dtstamp.getTime()) || (status !== 'pending_payment' && status !== 'paid')) return null;
+  const ics = await buildStayCalendar({ arrival, departure, locale: target.locale }, target.calendarToken, dtstamp);
+  return { filename: CALENDAR_FILENAME, content: bytesToBase64(new TextEncoder().encode(ics)), contentType: CALENDAR_CONTENT_TYPE };
 }
 
 /** Klíč idempotence potvrzení u Resend – stejný pro první pokus i replay téže rezervace. */
@@ -446,10 +469,12 @@ export async function sendReservationConfirmation(
       business,
       test: recipient.test,
     });
+    const calendar = await calendarAttachment(data, target);
     const message: MailMessage = {
       from: confirmationSender(business),
       to: recipient.to,
       ...email,
+      attachments: calendar ? [...email.attachments, calendar] : email.attachments,
       idempotencyKey: confirmationIdempotencyKey(env, target.reservationId),
     };
     await sendViaResend(apiKey, message, deps.fetch);

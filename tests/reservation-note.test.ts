@@ -157,7 +157,7 @@ test('13: poznámka není ve veřejné odpovědi rezervace ani v replay odpověd
   assert.equal(created.status, 201);
   const createdText = await created.text();
   assert.ok(!createdText.includes(MARKER) && !createdText.includes('"note"'), createdText);
-  assert.deepEqual(Object.keys(JSON.parse(createdText).reservation).sort(), ['arrival', 'departure', 'guests', 'nights', 'paymentDueAt', 'reservationCode', 'status', 'totalCzk']);
+  assert.deepEqual(Object.keys(JSON.parse(createdText).reservation).sort(), ['arrival', 'calendarUrl', 'departure', 'guests', 'nights', 'paymentDueAt', 'reservationCode', 'status', 'totalCzk']);
   assert.deepEqual(Object.keys(JSON.parse(createdText).payment).sort(), ['accountNumber', 'amountCzk', 'currency', 'dueAt', 'iban', 'message', 'spayd', 'variableSymbol']);
   const replayed = await s.post(stay({ note }), headers);
   assert.equal(replayed.status, 200);

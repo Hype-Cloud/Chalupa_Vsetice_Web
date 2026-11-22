@@ -381,6 +381,8 @@ test('odeslání je odložené (ctx.waitUntil): odpověď 201 nečeká na e-mail
   const response = await s.post(stay());
   assert.equal(response.status, 201);
   assert.equal(s.deferred.length, 1);
+  // Požadavek na Resend odejde až v odložené práci (render, příloha) – počkat na něj.
+  while (!release) await new Promise((resolve) => setTimeout(resolve, 1));
   release();
   await Promise.all(s.deferred);
   assert.ok(s.logs.includes('reservations: confirmation email failed (http-503)'));
@@ -425,7 +427,10 @@ test('obsah e-mailu: stejná data jako odpověď API (kód, cena, VS, splatnost,
     // jen cid:, odkazy jen tel:, mailto: a rejstřík provozovatele.
     assert.doesNotMatch(email.html, /<script|<link|@import|@font-face|url\(/i);
     assert.deepEqual([...email.html.matchAll(/src="([^"]*)"/g)].map((m) => m[1]), [BRAND_MARK_CONTENT_ID, QR_CONTENT_ID, PHONE_ICON_CONTENT_ID, PHONE_ICON_DARK_CONTENT_ID].map((id) => `cid:${id}`));
-    assert.deepEqual([...email.html.matchAll(/href="([^"]*)"/g)].map((m) => m[1]), ['tel:+420736125104', 'tel:+420736125104', 'https://chalupavsetice.cz', 'mailto:info@chalupavsetice.cz']);
+    // Termín v hlavičce a v souhrnu → stejná serverová calendarUrl (Preview origin požadavku).
+    const calendar = api.reservation.calendarUrl!;
+    assert.match(calendar, /^https:\/\/preview\.test\.invalid\/calendar\/[A-Za-z0-9_-]{43}$/);
+    assert.deepEqual([...email.html.matchAll(/href="([^"]*)"/g)].map((m) => m[1]), [calendar, 'tel:+420736125104', calendar, 'tel:+420736125104', 'https://chalupavsetice.cz', 'mailto:info@chalupavsetice.cz']);
   }
   assert.ok(!mail.text.includes('<'), 'plaintext bez HTML');
 });
