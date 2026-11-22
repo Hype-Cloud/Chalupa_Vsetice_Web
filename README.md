@@ -1699,7 +1699,7 @@ požadavků denně); na Free se překročení limitů projeví chybou, ne platbo
 
 ### CLI (Windows, macOS, Linux)
 
-Node.js ≥ 22.13 a `pnpm install` v repozitáři. Konfigurace z prostředí nebo `--env-file`
+Node.js ≥ 22.18 a `pnpm install` v repozitáři. Konfigurace z prostředí nebo `--env-file`
 (soubor **mimo repozitář**, např. `~/.config/d1-backup/production.env` s `BACKUP_BACKEND`,
 `BACKUP_ENV`, `BACKUP_DATABASE_NAME`, `BACKUP_GITHUB_REPO`, `BACKUP_GITHUB_TOKEN` – token jen
 pro čtení). Volby pnpm skriptů se předávají za `--`.

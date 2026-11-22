@@ -299,6 +299,17 @@ export function sqlStatements(sql: string): string[] {
 }
 
 /** Očekávané počty řádků podle INSERT příkazů exportu (bez interních tabulek SQLite). */
+/** SQL exportem definované uživatelské objekty; interní sqlite_* neověřujeme. */
+export function expectedSchema(sql: string): Map<string, string> {
+  const objects = new Map<string, string>();
+  const expression = /^CREATE\s+(?:UNIQUE\s+)?(TABLE|INDEX|TRIGGER|VIEW)\s+(?:IF\s+NOT\s+EXISTS\s+)?(?:"([^"]+)"|([A-Za-z_][\w]*))/gmi;
+  for (const match of sql.matchAll(expression)) {
+    const name = match[2] ?? match[3];
+    if (!name.startsWith('sqlite_')) objects.set(name, match[1].toLowerCase());
+  }
+  return objects;
+}
+
 export function expectedRowCounts(sql: string): Map<string, number> {
   const counts = new Map<string, number>();
   for (const statement of sqlStatements(sql)) {
@@ -371,8 +382,13 @@ async function restore(options: Record<string, string | true>, deps: CliDeps): P
     if (imported.code !== 0) throw new CliError(`import selhal – nová D1 „${target}“ může být neúplná; smažte ji (wrangler d1 delete ${target})`);
 
     // 6) Kontrola: migrace a počty řádků.
-    const counts = expectedRowCounts(new TextDecoder().decode(sql));
-    const tables = [...new Set(['d1_migrations', ...counts.keys()])];
+    const originalSql = new TextDecoder().decode(sql);
+    const counts = expectedRowCounts(originalSql);
+    const expectedObjects = expectedSchema(originalSql);
+    const tables = [...expectedObjects.entries()].filter(([, type]) => type === 'table').map(([name]) => name);
+    if (!tables.includes('d1_migrations')) throw new CliError('export neobsahuje d1_migrations');
+    // Ověřit i prázdné tabulky, které nemají žádné INSERT INTO.
+    for (const table of tables) if (!counts.has(table)) counts.set(table, 0);
     const query = tables.map((t) => `SELECT '${t.replace(/'/g, "''")}' AS t, COUNT(*) AS n FROM "${t.replace(/"/g, '""')}"`).join(' UNION ALL ');
     const checked = await run(['d1', 'execute', target, '--remote', '--json', `--command=${query}`]);
     if (checked.code !== 0) throw new CliError('kontrola obnovené D1 selhala');
@@ -380,7 +396,17 @@ async function restore(options: Record<string, string | true>, deps: CliDeps): P
     const actual = new Map(rows.map((r) => [r.t, Number(r.n)]));
     const mismatch = tables.filter((t) => (t === 'd1_migrations' ? manifest.migrations : (counts.get(t) ?? 0)) !== actual.get(t));
     if (mismatch.length > 0) throw new CliError(`obnovená D1 neodpovídá záloze (tabulky: ${mismatch.join(', ')})`);
-    deps.out(`Obnova ověřena: ${manifest.migrations} migrací, ${tables.length - 1} tabulek s daty odpovídá záloze.`);
+    const schemaResult = await run(['d1', 'execute', target, '--remote', '--json',
+      '--command=SELECT type, name FROM sqlite_master WHERE name NOT LIKE \'sqlite_%\'']);
+    if (schemaResult.code !== 0) throw new CliError('kontrola schématu obnovené D1 selhala');
+    const schemaResponse = wranglerJson(schemaResult.stdout);
+    if (!Array.isArray(schemaResponse) || !isObject(schemaResponse[0]) || !Array.isArray(schemaResponse[0].results)) {
+      throw new CliError('neplatná odpověď na kontrolu schématu');
+    }
+    const actualObjects = new Map((schemaResponse[0].results as { type: string; name: string }[]).map((r) => [r.name, r.type]));
+    const missing = [...expectedObjects].filter(([name, type]) => actualObjects.get(name) !== type).map(([name]) => name);
+    if (missing.length > 0) throw new CliError(`obnovená D1 postrádá objekty schématu: ${missing.join(', ')}`);
+    deps.out(`Obnova ověřena: ${manifest.migrations} migrací, ${tables.length} tabulek (včetně prázdných), ${expectedObjects.size} objektů schématu.`);
     deps.out(`Nová D1 „${target}“ je samostatná. Po ověření ji smažte (wrangler d1 delete ${target}), pokud ji nepotřebujete.`);
   } finally {
     // Dočasná data (osobní údaje) vždy pryč.

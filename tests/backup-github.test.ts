@@ -10,7 +10,7 @@ import { sealSnapshot } from '../lib/backup/seal.ts';
 import { GithubClient, identifySnapshot, publishSnapshot, RELEASE_MARKER, releaseTag, type GithubDeps } from '../lib/backup/github.ts';
 import { runGithubBackup, runGithubMonitor } from '../lib/backup/github-run.ts';
 import { buildManifest, type SnapshotManifest, type SnapshotRef } from '../lib/backup/snapshot.ts';
-import { expectedRowCounts, runCli, sqlStatements, type CliDeps } from '../scripts/lib/backup-cli.ts';
+import { expectedRowCounts, expectedSchema, runCli, sqlStatements, type CliDeps } from '../scripts/lib/backup-cli.ts';
 import { FakeGithub } from './fixtures/fake-github.ts';
 
 // Backend GitHub Releases: běh zálohy (export → gzip → age → draft → upload → ověření →
@@ -361,6 +361,18 @@ test('monitor: poškozený nebo neúplný nejnovější release vyvolá monitor-
   await assert.rejects(runGithubMonitor(env, deps()), { kind: 'snapshot-invalid' });
 });
 
+test('obnova: parser schématu počítá i prázdné tabulky, indexy a triggery', () => {
+  const sql = new TextDecoder().decode(EXPORT);
+  const objects = expectedSchema(sql);
+  assert.equal(objects.get('reserved_nights'), 'table');
+  assert.equal(objects.get('reservations_cancel_release_nights'), 'trigger');
+  assert.ok(objects.size >= 8);
+  const withEmpty = sql + '\nCREATE TABLE "empty_test" (id TEXT PRIMARY KEY);\nCREATE INDEX "empty_test_index" ON "empty_test" (id);\n';
+  assert.equal(expectedRowCounts(withEmpty).has('empty_test'), false);
+  assert.equal(expectedSchema(withEmpty).get('empty_test'), 'table');
+  assert.equal(expectedSchema(withEmpty).get('empty_test_index'), 'index');
+});
+
 // --- CLI a integrační obnova ---------------------------------------------------------------------------
 
 function cli(dir: string, d1?: D1Database, existing: string[] = []): CliDeps & { output: string[]; wranglerCalls: string[][] } {
@@ -460,7 +472,7 @@ test('integrace: export → gzip → age → GitHub → stažení → rozšifrov
     const ok = cli(dir, d1);
     assert.equal(await runCli([...args, '--confirm', 'restore-test-2030'], ok), 0, ok.output.join('\n'));
     assert.ok(ok.output.some((l) => l.startsWith('Obnova ověřena: 10 migrací')));
-    assert.deepEqual(ok.wranglerCalls.map((a) => a.slice(0, 2).join(' ')), ['d1 list', 'd1 create', 'd1 execute', 'd1 execute']);
+    assert.deepEqual(ok.wranglerCalls.map((a) => a.slice(0, 2).join(' ')), ['d1 list', 'd1 create', 'd1 execute', 'd1 execute', 'd1 execute']);
     assert.ok(ok.wranglerCalls.every((a) => !a.includes(DB)), 'zdrojová databáze se nikdy nepoužije');
     // Obnovená D1: migrace, počty, prostředí a funkční trigger.
     const count = async (sql: string) => (await d1.prepare(sql).first<{ n: number }>())!.n;
