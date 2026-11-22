@@ -195,7 +195,11 @@ test('šifrování: neplatný nebo chybějící příjemce → chyba, nikdy neš
 test('šifrování: soubor klíče z age-keygen; kompatibilita s nástrojem age (je-li nainstalovaný)', async (t) => {
   assert.equal(parseIdentityFile(`# created: 2030-01-01T00:00:00Z\n# public key: ${recipient}\n${identity}\n`), identity);
   assert.throws(() => parseIdentityFile(`# public key: ${recipient}\n`), { kind: 'identity-invalid' });
-  if (spawnSync('age', ['--version']).status !== 0) {
+  const ageCheck = spawnSync('age', ['--version']);
+  if (ageCheck.status !== 0) {
+    if (process.env.REQUIRE_AGE_INTEROP === '1') {
+      assert.fail(`CI vyžaduje age CLI, ale není dostupné: ${ageCheck.error?.message ?? ageCheck.stderr?.toString() ?? 'neznámá chyba'}`);
+    }
     t.skip('nástroj age není nainstalovaný');
     return;
   }
