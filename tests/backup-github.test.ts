@@ -480,7 +480,11 @@ test('integrace: export → gzip → age → GitHub → stažení → rozšifrov
     const ok = cli(dir, d1);
     assert.equal(await runCli([...args, '--confirm', 'restore-test-2030'], ok), 0, ok.output.join('\n'));
     assert.ok(ok.output.some((l) => l.startsWith('Obnova ověřena: 10 migrací')));
-    assert.deepEqual(ok.wranglerCalls.map((a) => a.slice(0, 2).join(' ')), ['d1 list', 'd1 create', 'd1 execute', 'd1 execute', 'd1 execute']);
+    assert.deepEqual(ok.wranglerCalls.slice(0, 3).map((a) => a.slice(0, 2).join(' ')), ['d1 list', 'd1 create', 'd1 execute']);
+    assert.equal(ok.wranglerCalls.length, expectedSchema(new TextDecoder().decode(EXPORT)).size > 0
+      ? [...expectedSchema(new TextDecoder().decode(EXPORT)).values()].filter((type) => type === 'table').length + 4
+      : 0);
+    assert.ok(ok.wranglerCalls.slice(3).every((a) => a[1] === 'execute'));
     assert.ok(ok.wranglerCalls.every((a) => !a.includes(DB)), 'zdrojová databáze se nikdy nepoužije');
     // Obnovená D1: migrace, počty, prostředí a funkční trigger.
     const count = async (sql: string) => (await d1.prepare(sql).first<{ n: number }>())!.n;

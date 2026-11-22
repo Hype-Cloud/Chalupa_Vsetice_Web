@@ -390,11 +390,20 @@ async function restore(options: Record<string, string | true>, deps: CliDeps): P
     if (manifest.schemaProfile !== 'generic' && !tables.includes('d1_migrations')) throw new CliError('export neobsahuje d1_migrations');
     // Ověřit i prázdné tabulky, které nemají žádné INSERT INTO.
     for (const table of tables) if (!counts.has(table)) counts.set(table, 0);
-    const query = tables.map((t) => `SELECT '${t.replace(/'/g, "''")}' AS t, COUNT(*) AS n FROM "${t.replace(/"/g, '""')}"`).join(' UNION ALL ');
-    const checked = await run(['d1', 'execute', target, '--remote', '--json', `--command=${query}`]);
-    if (checked.code !== 0) throw new CliError('kontrola obnovené D1 selhala');
-    const rows = (wranglerJson(checked.stdout) as { results?: { t: string; n: number }[] }[])[0]?.results ?? [];
-    const actual = new Map(rows.map((r) => [r.t, Number(r.n)]));
+    // D1 má omezený počet částí složeného SELECTu; jeden COUNT(*) na tabulku
+    // je spolehlivější než UNION ALL všech tabulek (včetně prázdných).
+    const actual = new Map<string, number>();
+    for (const table of tables) {
+      const quoted = table.replace(/"/g, '""');
+      const checked = await run(['d1', 'execute', target, '--remote', '--json', `--command=SELECT COUNT(*) AS n FROM "${quoted}"`]);
+      if (checked.code !== 0) throw new CliError(`kontrola tabulky ${table} selhala`);
+      const response = wranglerJson(checked.stdout);
+      if (!Array.isArray(response) || !isObject(response[0]) || !Array.isArray(response[0].results) ||
+          !isObject(response[0].results[0]) || !Number.isSafeInteger(Number(response[0].results[0].n))) {
+        throw new CliError(`neplatná odpověď při kontrole tabulky ${table}`);
+      }
+      actual.set(table, Number(response[0].results[0].n));
+    }
     const mismatch = tables.filter((t) => (t === 'd1_migrations' ? manifest.migrations : (counts.get(t) ?? 0)) !== actual.get(t));
     if (mismatch.length > 0) throw new CliError(`obnovená D1 neodpovídá záloze (tabulky: ${mismatch.join(', ')})`);
     const schemaResult = await run(['d1', 'execute', target, '--remote', '--json',
