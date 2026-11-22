@@ -1,0 +1,46 @@
+# Synthetic-only regression checks for D1 backup code. No Cloudflare or GitHub backup secrets.
+name: D1 backup regression tests
+
+on:
+  pull_request:
+    paths:
+      - 'lib/backup/**'
+      - 'worker/backup/**'
+      - 'worker/backup-monitor/**'
+      - 'scripts/backup.ts'
+      - 'scripts/lib/backup-cli.ts'
+      - 'tests/backup*.test.ts'
+      - 'tests/fixtures/**'
+      - 'backup/**'
+      - 'package.json'
+      - 'pnpm-lock.yaml'
+      - '.github/workflows/backup-regression-tests.yml'
+  push:
+    branches:
+      - 'claude/d1-r2-backups'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: d1-backup-tests-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  tests:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6.5.0
+        with:
+          node-version: '24'
+      - name: Install dependencies
+        run: |
+          corepack enable
+          pnpm install --frozen-lockfile
+      - name: Run synthetic backup regression suite
+        run: pnpm test
