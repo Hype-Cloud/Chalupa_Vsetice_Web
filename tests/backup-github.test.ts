@@ -404,8 +404,14 @@ function cli(dir: string, d1?: D1Database, existing: string[] = []): CliDeps & {
           return { code: 0, stdout: '' };
         }
         const command = args.find((a) => a.startsWith('--command='))!.slice(10);
-        const { results } = await d1.prepare(command).all();
-        return { code: 0, stdout: JSON.stringify([{ results, success: true }]) };
+        try {
+          const { results } = await d1.prepare(command).all();
+          return { code: 0, stdout: JSON.stringify([{ results, success: true }]) };
+        } catch (error) {
+          // Jen syntetická schémata/SQL; diagnostika testovacího wrapperu, žádná produkční data.
+          output.push(`synthetic D1 query failed: ${String(error)}; query: ${command}`);
+          throw error;
+        }
       }
       return { code: 1, stdout: '' };
     },

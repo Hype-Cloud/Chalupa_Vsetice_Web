@@ -15,9 +15,6 @@ on:
       - 'package.json'
       - 'pnpm-lock.yaml'
       - '.github/workflows/backup-regression-tests.yml'
-  push:
-    branches:
-      - 'claude/d1-r2-backups'
   workflow_dispatch:
 
 permissions:
