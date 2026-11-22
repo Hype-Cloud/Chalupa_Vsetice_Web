@@ -383,6 +383,8 @@ POST /api/reservations → validace → čerstvý export e-chalup → D1 batch (
   - stav a stabilní iCal UID (`rezervace-<uuid>@chalupavsetice.cz`, UNIQUE, spolu s `ical_sequence`),
   - volitelný `idempotency_key` pro opakované odeslání,
   - volitelná poznámka hosta `note` (`migrations/0007_poznamka_hosta.sql`, NULL nebo 1–2000 znaků),
+  - jazyk rezervace `locale` (`migrations/0009_jazyk_rezervace.sql`, cs/en/de/ua;
+    NULL u starších rezervací) pro potvrzovací e-mail,
   - neveřejný token odkazu do kalendáře `calendar_token` (`migrations/0010_kalendar_pobytu.sql`,
     43 znaků base64url, UNIQUE; NULL u rezervací vzniklých před migrací), viz Odkaz do kalendáře.
 - **Stavy:** `pending_payment` (čeká na ruční ověření platby), `paid`, `cancelled`.
@@ -414,7 +416,7 @@ POST /api/reservations → validace → čerstvý export e-chalup → D1 batch (
   `payment_due_at` = konec pražského dne (23:59:59 `Europe/Prague`), ve kterém uplyne 24 h od
   `created_at`, uložený v UTC (`paymentDueAt`). Host má vždy aspoň 24 h a srozumitelnou lhůtu
   („do 11. 10. 2026 23:59“) místo náhodného času vytvoření; např. vytvoření 10. 10. 2026 02:42 →
-  `2026-10-11T21:59:59.000Z`. API, success panel i budoucí e-mail používají uloženou hodnotu.
+  `2026-10-11T21:59:59.000Z`. API, success panel i potvrzovací e-mail používají uloženou hodnotu.
   Podle splatnosti se zatím nic neruší ani neuvolňuje.
 - **Částka:** 100 % serverem spočítané ceny rezervace (`price_czk` = `totalCzk` z `quoteStay`).
 - **Bankovní účet:** jen ze secretu `PAYMENT_IBAN` (český IBAN, ověřený kontrolní součet).
@@ -426,7 +428,7 @@ POST /api/reservations → validace → čerstvý export e-chalup → D1 batch (
   `SPD*1.0*ACC:<IBAN>*AM:<částka>.00*CC:CZK*MSG:Rezervace <kód>*X-VS:<kód>`. QR se vykresluje
   lokálně v prohlížeči (knihovna `uqr`, bez externí služby; bankovní údaje stránku neopouštějí).
 - **Sdílená data:** `paymentInstructions()` je jediný zdroj platebních údajů (částka, účet, IBAN,
-  VS, zpráva, splatnost, SPAYD) – používá ho odpověď API a má ho použít i budoucí potvrzovací e-mail.
+  VS, zpráva, splatnost, SPAYD) – používá ho odpověď API i potvrzovací e-mail.
 
 ### Potvrzovací e-mail (`worker/booking/confirmation.ts`)
 
@@ -471,7 +473,8 @@ POST /api/reservations → validace → čerstvý export e-chalup → D1 batch (
   - telefonický kontakt: plné tlačítko se sluchátkem a `tel:` odkazem,
   - patička pod kartou: jméno (odkaz na `BUSINESS_WEBSITE_URL`), info e-mail (`mailto:`)
     a `IČ: …` jako prostý text – buňky tabulky oddělené jen odsazením, bez oddělovacích znaků;
-    na mobilu pod sebou. Jediné odkazy v e-mailu jsou vlastní web, `mailto:` a `tel:`.
+    na mobilu pod sebou. Mimo patičku vede termín pobytu v hlavičce i souhrnu
+    na vlastní `/calendar/<token>`; další odkazy jsou web, `mailto:` a `tel:`.
     Patička je řádek položek; další sekundární odkaz (např. budoucí ubytovací řád) se přidá
     jako další řádek.
 - **Layout:** karta max. 680 px (Outlook přes podmíněnou tabulku s pevnou šířkou), na mobilu
@@ -1171,7 +1174,7 @@ lib/availability/       sdílená logika (klient i Worker)
   stay.ts               jediná validace výběru pobytu
   types.ts              typy odpovědi API
 worker/
-  index.ts              vstup Workeru: /api/availability, /api/quote, /api/reservations, /api/reservations.ics; ostatní → statické assety
+  index.ts              vstup Workeru: /api/* a /calendar/*; ostatní → statické assety
   availability.ts       stažení exportu, cache, stavy ok / stale / unavailable
   ical.ts               převod iCal na obsazené intervaly a události (UID, kódy rezervací)
   http.ts               JSON odpovědi s bezpečnostními hlavičkami
@@ -1186,15 +1189,19 @@ worker/
     cron.ts             Cron Trigger: čerstvý export → detekce kolizí → upozornění
     alerts.ts           e-mailové upozornění správci (Resend), outbox notified_at
     export.ts           GET /api/reservations.ics (soukromý iCal feed)
+    calendar.ts         GET/HEAD /calendar/<token>, dynamická jednorázová událost iCalendar
+    confirmation.ts     vícejazyčné potvrzení rezervace (HTML, text, QR a pobyt.ics)
+    response.ts         společný kontrakt úspěšné rezervace pro API a e-mail
     ics.ts              serializace iCalendar (escaping, zalamování, CRLF)
   secrets.ts            porovnání tokenů v konstantním čase
+  email/                odeslání přes Resend, předgenerované ikony a barevná paleta
 migrations/             SQL migrace D1
 tests/                  unit testy + syntetické fixtures (smyšlené rezervace), lokální D1 (Miniflare)
 public/                 fotografie, favicon
 scripts/finalize-static.mjs   úklid po buildu, ponechá statický výstup
-scripts/d1-migrations.ts      kontrola (před deployem) a ruční aplikace D1 migrací
+scripts/d1-migrations.ts      check, backup a autorizované apply (interaktivní / neinteraktivní, mimo CI)
 scripts/smoke.ts              smoke test veřejných endpointů po nasazení
-scripts/lib/                  logika obou skriptů (testovaná v tests/)
+scripts/lib/                  migrační kontroly a workflow, smoke test (testováno v tests/)
 vendor/                 základní styly shadcn/Tailwind importované z app/globals.css
 ```
 
@@ -1347,14 +1354,20 @@ Migrace musí být **zpětně kompatibilní** s předchozí verzí kódu:
 
 ### Neinteraktivní aplikace (autorizovaná)
 
-Pro automatizaci (agent, skript mimo CI) bez terminálu. Ochrana TTY interaktivního režimu se
+Pro automatizaci (agent, skript mimo CI) bez terminálu. Migrace `0009` a `0010` již byly
+22. 11. 2026 aplikovány na produkční D1; nejsou to další kroky k provedení. Ochrana
+TTY interaktivního režimu se
 neobchází – jde o samostatný režim, který místo opisování vyžaduje explicitní autorizaci
 a ověřuje ji proti skutečnému stavu D1:
 
 ```bash
+# Nejprve zjistit skutečně čekající migrace:
+pnpm run db:check:production
+
+# Příklad pro budoucí migraci NNNN (pouze pokud ji check hlásí jako čekající):
 pnpm run db:migrate:production --non-interactive \
   --database=chalupa-vsetice-rezervace \
-  --expect=0009_jazyk_rezervace.sql,0010_kalendar_pobytu.sql
+  --expect=NNNN_nova_migrace.sql
 ```
 
 - `--database` musí přesně odpovídat cílové databázi (produkce `chalupa-vsetice-rezervace`,
@@ -1392,9 +1405,10 @@ Před **každou** produkční migrací (aditivní i destruktivní, oba režimy),
 
 Bez platného bookmarku nebo ověřeného exportu se migrace neaplikuje. Export vyžaduje token
 s **D1 Edit** (s D1 Read selže a migrace se neprovede). **`.d1-backups/` obsahuje osobní
-údaje hostů:** je v `.gitignore`, nikam ho nenahrávej a po ověření migrace ho smaž. V dočasném
-prostředí (cloudová session agenta) export zaniká s prostředím – trvalou obnovou je Time
-Travel bookmark.
+údaje hostů:** je v `.gitignore`, nikam ho nenahrávej a po ověření migrace ho smaž. Ověření exportu kontroluje strukturu a záznamy migrací, nikoli každou hodnotu
+každého řádku. V dočasném prostředí (cloudová session agenta) export zaniká
+s prostředím. Time Travel je časově omezená obnova, nikoli trvalý archiv;
+pro dlouhodobou archivaci je nutné oddělené zabezpečené úložiště.
 
 Obnova při problému:
 
@@ -1486,6 +1500,7 @@ ne statický 404; `X-Robots-Tag` v produkci přesně `noindex, nofollow`, v Prev
 protože Cloudflare ho na Preview URL přepisuje u všech odpovědí). Exit 1 při selhání;
 `stale`/`partial` obsazenost je jen varování.
 
+Poslední produkční nasazení prošlo všemi **10/10 smoke kontrolami**.
 Nepoužívá žádné tokeny ani secrets: přijme jen origin (https, http jen localhost) bez cesty,
 query a přihlašovacích údajů, neposílá `Authorization` ani cookies a nic nezapisuje (rezervační
 POST jde bez údajů, nabídka je jen čtení).
