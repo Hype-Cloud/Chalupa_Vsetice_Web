@@ -23,6 +23,9 @@
 //   kreslí jen QR.
 //   Vložené <style> je jen vylepšení: užší okraje na mobilu, tmavý režim (Apple Mail,
 //   Outlook.com) a vypnutí automatických odkazů Apple Mail. Bez něj zůstává světlá varianta.
+// - Příloha `pobyt.ics` (text/calendar, METHOD:PUBLISH): stejná událost jako odkaz na termín
+//   (stejné UID, bez osobních údajů), DTSTAMP z created_at. Apple Mail z ní nabídne přidání
+//   události a návrh Siri. Rezervace bez tokenu (před migrací 0010) přílohu nedostane.
 
 import { businessIdentity, type BusinessIdentity } from '../../lib/business.ts';
 import { bytesToBase64, qrMatrix, qrPngBytes } from '../../lib/booking/qr.ts';
@@ -30,6 +33,7 @@ import { createI18n, type Locale } from '../../lib/i18n/index.ts';
 import { BRAND_MARK_PNG, PHONE_ICON_DARK_PNG, PHONE_ICON_LIGHT_PNG } from '../email/iconAssets.ts';
 import { CREAM, GREEN, WHITE } from '../email/palette.ts';
 import { MailError, RESEND_TEST_FROM, sendViaResend, type MailAttachment, type MailMessage } from '../email/resend.ts';
+import { buildStayCalendar, CALENDAR_CONTENT_TYPE, CALENDAR_FILENAME } from './calendar.ts';
 import type { ReservationResponse } from './response.ts';
 
 export interface ConfirmationEnv {
@@ -416,6 +420,18 @@ export interface ConfirmationTarget {
   /** E-mail a jazyk uložené u rezervace (při replay z DB, ne z opakovaného požadavku). */
   guestEmail: string;
   locale: Locale;
+  /** Token odkazu do kalendáře (null u rezervací před migrací 0010) a čas vytvoření – pro přílohu `pobyt.ics`. */
+  calendarToken?: string | null;
+  createdAt?: string;
+}
+
+/** Příloha `pobyt.ics` se stejnou událostí jako odkaz, nebo null (bez tokenu, zrušená rezervace). */
+async function calendarAttachment(data: ReservationResponse, target: ConfirmationTarget): Promise<MailAttachment | null> {
+  const { status, arrival, departure } = data.reservation;
+  const dtstamp = new Date(target.createdAt ?? '');
+  if (!target.calendarToken || Number.isNaN(dtstamp.getTime()) || (status !== 'pending_payment' && status !== 'paid')) return null;
+  const ics = await buildStayCalendar({ arrival, departure, locale: target.locale }, target.calendarToken, dtstamp);
+  return { filename: CALENDAR_FILENAME, content: bytesToBase64(new TextEncoder().encode(ics)), contentType: CALENDAR_CONTENT_TYPE };
 }
 
 /** Klíč idempotence potvrzení u Resend – stejný pro první pokus i replay téže rezervace. */
@@ -453,10 +469,12 @@ export async function sendReservationConfirmation(
       business,
       test: recipient.test,
     });
+    const calendar = await calendarAttachment(data, target);
     const message: MailMessage = {
       from: confirmationSender(business),
       to: recipient.to,
       ...email,
+      attachments: calendar ? [...email.attachments, calendar] : email.attachments,
       idempotencyKey: confirmationIdempotencyKey(env, target.reservationId),
     };
     await sendViaResend(apiKey, message, deps.fetch);

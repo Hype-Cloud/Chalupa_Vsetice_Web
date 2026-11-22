@@ -381,6 +381,8 @@ test('odeslání je odložené (ctx.waitUntil): odpověď 201 nečeká na e-mail
   const response = await s.post(stay());
   assert.equal(response.status, 201);
   assert.equal(s.deferred.length, 1);
+  // Požadavek na Resend odejde až v odložené práci (render, příloha) – počkat na něj.
+  while (!release) await new Promise((resolve) => setTimeout(resolve, 1));
   release();
   await Promise.all(s.deferred);
   assert.ok(s.logs.includes('reservations: confirmation email failed (http-503)'));

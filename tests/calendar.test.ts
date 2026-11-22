@@ -42,7 +42,7 @@ beforeEach(async () => {
 function setup(options: { db?: 'preview' | 'production'; origin?: string } = {}) {
   const t = options.db === 'production' ? production : preview;
   const logs: string[] = [];
-  const mails: { headers: Headers; body: { html: string; text: string; attachments?: { filename: string; content_id?: string }[] } }[] = [];
+  const mails: { headers: Headers; body: { to: string[]; html: string; text: string; attachments?: { filename: string; content: string; content_type?: string; content_id?: string }[] } }[] = [];
   let uuid = 0;
   const env: BookingEnv = {
     ECHALUPY_ICAL_URL: 'https://ical.test.invalid/x.ics', DB: t.db, BOOKING_ENV: options.db ?? 'preview', BOOKING_API_ENABLED: 'true',
@@ -257,12 +257,10 @@ test('ICS bez osobních, bankovních a interních údajů (jméno, e-mail, telef
   }
 });
 
-test('e-mail: termín v hlavičce a řádek Termín používají stejnou calendarUrl; splatnost bez odkazu; věta ve 4 jazycích; žádná .ics příloha', async () => {
+test('e-mail: termín v hlavičce a řádek Termín používají stejnou calendarUrl; splatnost bez odkazu; věta ve 4 jazycích; renderer bez .ics přílohy', async () => {
   const s = setup();
   const { body } = await s.post(stay());
   const url = body.reservation.calendarUrl!;
-  const sent = s.mails[0].body;
-  assert.deepEqual((sent.attachments ?? []).map((a) => a.filename).filter((name) => /\.ics$/i.test(name)), []);
   for (const locale of LOCALES) {
     const i18n = createI18n(locale);
     const email = renderConfirmationEmail(body, locale);
@@ -276,6 +274,7 @@ test('e-mail: termín v hlavičce a řádek Termín používají stejnou calenda
     assert.doesNotMatch(email.html, new RegExp(`<a [^>]*>[^<]*${due.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}`), locale);
     assert.ok(email.html.includes(i18n.t('email.calendarHint')) && email.text.includes(i18n.t('email.calendarHint')), locale);
     assert.ok(email.text.includes(url), `${locale}: URL v plaintextu`);
+    // Příloha pobyt.ics se přidává až při odeslání (sendReservationConfirmation), ne v rendereru.
     assert.ok(!email.attachments.some((a) => /\.ics$/i.test(a.filename)), locale);
   }
 });
@@ -327,4 +326,55 @@ test('migrace 0010: token jen ve správném tvaru, UNIQUE; starší zápis bez t
   await assert.rejects(insert('x3', existing, 'L3'), /UNIQUE constraint failed: reservations\.calendar_token/);
   await insert('x4', null, 'L4');
   await insert('x5', null, 'L5');
+});
+
+const decodeBase64 = (base64: string) => new TextDecoder().decode(Uint8Array.from(atob(base64), (c) => c.charCodeAt(0)));
+const icsProp = (ics: string, name: string) => ics.split('\r\n').filter((line) => line.startsWith(`${name}:`) || line.startsWith(`${name};`));
+
+test('e-mail: příloha pobyt.ics (text/calendar; method=PUBLISH) = stejná událost jako odkaz; bez osobních údajů; replay stejný obsah', async () => {
+  const s = setup();
+  const { body } = await s.post(stay(), 'kalendar-priloha-00000001');
+  const sent = s.mails[0].body;
+  const parts = (sent.attachments ?? []).filter((a) => /\.ics$/i.test(a.filename) || /calendar/i.test(a.content_type ?? ''));
+  assert.equal(parts.length, 1);
+  const [part] = parts;
+  assert.equal(part.filename, 'pobyt.ics');
+  assert.equal(part.content_type, 'text/calendar; charset=utf-8; method=PUBLISH');
+  assert.equal(part.content_id, undefined, 'běžná příloha, ne inline obrázek');
+  const ics = decodeBase64(part.content);
+  // Parametr method v MIME odpovídá METHOD v ICS; validní VCALENDAR s jednou událostí.
+  const calendar = new ICAL.Component(ICAL.parse(ics));
+  assert.equal(calendar.getFirstPropertyValue('method'), 'PUBLISH');
+  assert.equal(calendar.getAllSubcomponents('vevent').length, 1);
+  assert.ok(ics.endsWith('\r\n'));
+  assert.doesNotMatch(ics.replace(/\r\n/g, ''), /[\r\n]/);
+  // Stejná událost jako odkaz (UID, časy, texty); DTSTAMP z created_at.
+  const link = await (await s.calendar(pathOf(body.reservation.calendarUrl!))).text();
+  for (const name of ['METHOD', 'UID', 'DTSTART', 'DTEND', 'SUMMARY', 'DESCRIPTION', 'URL', 'TRANSP']) assert.deepEqual(icsProp(ics, name), icsProp(link, name), name);
+  assert.deepEqual(icsProp(ics, 'DTSTAMP'), ['DTSTAMP:20300110T100000Z']);
+  for (const name of ['ATTENDEE', 'ORGANIZER', 'STATUS']) assert.deepEqual(icsProp(ics, name), [], name);
+  // Žádné osobní, bankovní ani interní údaje.
+  const token = TOKEN_URL.exec(body.reservation.calendarUrl!)![1];
+  const unfolded = ics.replace(/\r\n[ \t]/g, '');
+  for (const forbidden of ['Testovací', GUEST.email, '000 000', NOTE, '8970', FAKE_PAYMENT_IBAN, FAKE_ACCOUNT_NUMBER, 'SPD*', body.reservation.reservationCode, token, '00000000-0000-4000-8000']) {
+    assert.ok(!unfolded.includes(forbidden), forbidden);
+  }
+  // Replay: stejný klíč idempotence i bajtově stejná příloha.
+  await s.post(stay(), 'kalendar-priloha-00000001');
+  assert.equal(s.mails.length, 2);
+  assert.equal(s.mails[1].headers.get('idempotency-key'), s.mails[0].headers.get('idempotency-key'));
+  assert.equal(s.mails[1].body.attachments!.find((a) => a.filename === 'pobyt.ics')!.content, part.content);
+});
+
+test('e-mail: produkce přikládá pobyt.ics hostovi; legacy rezervace bez tokenu přílohu nedostane', async () => {
+  const p = setup({ db: 'production' });
+  await p.post(stay());
+  assert.deepEqual(p.mails[0].body.to, [GUEST.email]);
+  assert.equal(p.mails[0].body.attachments!.filter((a) => a.filename === 'pobyt.ics').length, 1);
+  const s = setup();
+  await s.post(stay(), 'kalendar-priloha-legacy-01');
+  await s.t.db.prepare('UPDATE reservations SET calendar_token = NULL').run();
+  await s.post(stay(), 'kalendar-priloha-legacy-01');
+  assert.equal(s.mails.length, 2);
+  assert.ok(!s.mails[1].body.attachments!.some((a) => /\.ics$/i.test(a.filename)));
 });

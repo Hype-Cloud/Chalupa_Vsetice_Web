@@ -25,6 +25,11 @@ import { json } from '../http.ts';
 import { sha256 } from '../secrets.ts';
 import { escapeText, foldLine } from './ics.ts';
 
+/** MIME typ přílohy v potvrzovacím e-mailu; `method` odpovídá `METHOD:PUBLISH` v ICS (RFC 6047). */
+export const CALENDAR_CONTENT_TYPE = 'text/calendar; charset=utf-8; method=PUBLISH';
+/** Název souboru (příloha i stažení přes odkaz) – nikdy podle tokenu. */
+export const CALENDAR_FILENAME = 'pobyt.ics';
+
 /** Token: 43 znaků base64url (32 bajtů). */
 export const CALENDAR_TOKEN = /^[A-Za-z0-9_-]{43}$/;
 /** `/calendar/<token>` (aktuální tvar) i `/calendar/<token>.ics` (dříve odeslané odkazy). */
@@ -119,7 +124,7 @@ export async function handleCalendar(request: Request, env: CalendarEnv, deps: {
     if (!row || (row.status !== 'pending_payment' && row.status !== 'paid')) return notFound();
     const body = await buildStayCalendar(row, token, deps.now());
     return new Response(request.method === 'HEAD' ? null : body, {
-      headers: { 'content-type': 'text/calendar; charset=utf-8', 'content-disposition': 'inline; filename="pobyt.ics"', ...HEADERS },
+      headers: { 'content-type': 'text/calendar; charset=utf-8', 'content-disposition': `inline; filename="${CALENDAR_FILENAME}"`, ...HEADERS },
     });
   } catch {
     // Do logu jen druh chyby – nikdy token ani URL.

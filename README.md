@@ -218,8 +218,8 @@ Projekt využívá Node.js Test Runner. Databázové testy probíhají nad loká
 | stay-feedback.test.ts | 5 | Vizuální odezva na pobyt kratší než `MIN_NIGHTS`: validace a stav pobytu beze změny, nový trigger s kliknutým dnem při každém pokusu, validní klik ani jiné chyby flash nespustí, flash dne bez trvalého stavu a bez pohybu, pulse hlášky jen přes `transform`, `prefers-reduced-motion` bez animace. |
 | confirmation-email.test.ts | 34 | Potvrzovací e-mail: `locale` cs/en/de/ua (jiné → 422), nová rezervace = jeden e-mail s klíčem z interního UUID, replay i souběžný dvojklik znovu naplánují potvrzení se stejným klíčem a s uloženým e-mailem a jazykem, replay bez e-mailu (422, zrušená, bez jazyka), stejný veřejný kód po resetu čítače → různé klíče, UUID mimo API/e-mail/log, žádná synchronní práce před `ctx.waitUntil`, předgenerované ikony (bez rastrování ve Workeru), Preview → testovací schránka, produkce → host, odesílatel z business identity, business config (telefon E.164 → `tel:` a český zápis, validace), hlavička (jméno, značka, termín pobytu), kompaktní termín ve 4 jazycích, pořadí platební sekce a QR bez popisku, úvod se splatností, instrukcemi před příjezdem a kontaktem (bez věty o souhrnu), nadpis „Souhrn rezervace“ ve 4 jazycích, platba ve dvou sloupcích (QR vlevo, údaje vpravo) a na mobilu pod sebou, IBAN bez `nowrap` se zalomením po skupinách, patička bez oddělovacích znaků, nezměněná hlavička (otisk HTML a PNG) i patička (otisk HTML), QR 174 px se zaoblenými rohy a beze změny PNG, linka jen pod nadpisem „Platební údaje“ (nad „Těšíme se…“ žádná), nezměněný telefonický kontakt (otisk HTML), telefonický kontakt a patička (jméno → web, `mailto:`, `IČ` jako prostý text, žádný registr ani „IČO“), Preview bez banneru a adresy hosta (jen `[TEST]` v předmětu), domek bez vlastního pozadí a jméno jednotnou vahou, odkaz na registr odstraněný z konfigurace i dokumentace, výchozí světlá varianta, kontakty v plaintextu, renderer bez napevno zapsaných údajů provozovatele, chybějící konfigurace → skip bez upozornění, selhání providera (timeout, síť, HTTP 4xx/5xx) → 201 a jedno interní upozornění bez osobních a bankovních údajů, selhání upozornění nic dalšího nespouští, odložené odeslání, obsah HTML i textu ve 4 jazycích ze stejných dat jako API, QR příloha (cid) = SPAYD, escapování HTML, nové znění věty o e-mailu. |
 | payment.test.ts | 9 | Platby: pražské datum → `DDMMYY`, `NN` 01–99, splatnost (konec pražského dne po 24 h, změny času, vždy 24–48 h), IBAN (kontrolní součet, odvození čísla účtu), SPAYD (serverová cena, VS = kód, zpráva `Rezervace {kód}`), QR jako PNG (pixely = matice) se SVG fallbackem, kopírování do schránky, kontrola, že repozitář neobsahuje skutečný IBAN. |
-| calendar.test.ts | 13 | Odkaz do kalendáře: unikátní neveřejný token oddělený od id/kódu/VS, replay a souběžný dvojklik → stejná `calendarUrl`, dvě rezervace → různé URL, legacy `NULL` token (replay, e-mail i web bez odkazu), origin (produkce vždy hlavní web, Preview origin požadavku), endpoint (pending/paid → událost, hlavičky, HEAD, 405; neplatný tvar bez dotazu do D1, neznámý a zrušený → 404; bez D1 503; token se neloguje), validní VCALENDAR/VEVENT (ical.js), CRLF, 75 oktetů, stabilní UID, 14:00/11:00 v zimě, v létě i přes přechod času, žádné osobní/bankovní/interní údaje, e-mail (hlavička a Termín = stejný href, splatnost bez odkazu, věta ve 4 jazycích, žádná `.ics` příloha), web přijme jen serverovou URL, Worker obsluhuje `/calendar/*`, žádná externí calendar služba, CHECK a UNIQUE migrace 0010. |
-| **Celkem** | **384** | |
+| calendar.test.ts | 15 | Odkaz do kalendáře: unikátní neveřejný token oddělený od id/kódu/VS, replay a souběžný dvojklik → stejná `calendarUrl`, dvě rezervace → různé URL, legacy `NULL` token (replay, e-mail i web bez odkazu), origin (produkce vždy hlavní web, Preview origin požadavku), endpoint (pending/paid → událost, hlavičky, HEAD, 405; neplatný tvar bez dotazu do D1, neznámý a zrušený → 404; bez D1 503; token se neloguje), validní VCALENDAR/VEVENT (ical.js), CRLF, 75 oktetů, stabilní UID, 14:00/11:00 v zimě, v létě i přes přechod času, žádné osobní/bankovní/interní údaje, e-mail (hlavička a Termín = stejný href, splatnost bez odkazu, věta ve 4 jazycích; příloha `pobyt.ics` s `method=PUBLISH` = stejná událost jako odkaz, bez osobních údajů, replay stejný obsah, produkce hostovi, legacy bez přílohy), web přijme jen serverovou URL, Worker obsluhuje `/calendar/*`, žádná externí calendar služba, CHECK a UNIQUE migrace 0010. |
+| **Celkem** | **386** | |
 
 ### Testované scénáře
 
@@ -502,9 +502,9 @@ POST /api/reservations → validace → čerstvý export e-chalup → D1 batch (
 ### Odkaz do kalendáře (`GET /calendar/<token>`, `worker/booking/calendar.ts`)
 
 Termín pobytu je klikací odkaz na vlastní URL `https://chalupavsetice.cz/calendar/<token>`,
-která vrátí jednu událost celého pobytu. Žádná příloha e-mailu, žádná externí služba
-(Google/Outlook/Apple odkazy, add-to-calendar SaaS) a žádné úložiště souborů – ICS se generuje
-při každém požadavku.
+která vrátí jednu událost celého pobytu; potvrzovací e-mail navíc přikládá tutéž událost jako
+`pobyt.ics` (viz níže). Žádná externí služba (Google/Outlook/Apple odkazy, add-to-calendar SaaS)
+a žádné úložiště souborů – ICS se generuje při každém požadavku.
 
 - **Token:** při založení rezervace 32 bajtů z CSPRNG v base64url (43 znaků) do
   `reservations.calendar_token` (UNIQUE). Oddělený od interního id, veřejného kódu i VS;
@@ -545,10 +545,16 @@ při každém požadavku.
   (ověřeno v Preview), příloha `text/calendar` a návrh Siri naopak jako jednorázovou událost.
   Odkaz proto končí tokenem; obsah a hlavičky jsou stejné. Cesta `/calendar/<token>.ics` dál
   vrací stejnou událost (dříve odeslané odkazy).
-- **Bez `.ics` přílohy v e-mailu:** Preview test přílohy `text/calendar` (`METHOD:PUBLISH`) přidal
-  v Apple Mailu na iOS také jednu událost, ale po opravě URL nepřinášel nic navíc a měl by vlastní
-  údržbu (stav `TENTATIVE` po zaplacení, zrušení, druhá cesta k téže události). E-mail proto
-  obsahuje jen odkaz.
+- **Příloha `pobyt.ics` v potvrzovacím e-mailu:** `Content-Type: text/calendar; charset=utf-8;
+  method=PUBLISH` (Resend HTTP API, pole `content_type`), obsahem stejná událost jako odkaz
+  (`buildStayCalendar`: stejné `UID`, časy a texty, bez `ATTENDEE`, `ORGANIZER`, `STATUS` a osobních
+  údajů); `DTSTAMP` z `created_at`, takže replay posílá bajtově stejnou přílohu. Ověřeno v Preview:
+  Apple Mail na iOS z přílohy nabídne přidání jedné události a návrh Siri; bez přílohy Siri událost
+  v textu e-mailu nenašla. Rezervace bez tokenu (před migrací 0010) přílohu nedostane. Stejné `UID`
+  jako odkaz: přidání přes přílohu i odkaz nemá vytvořit duplicitu.
+- **Omezení:** přidaná událost je kopie – zrušení ani změna rezervace se do kalendáře hosta
+  nepropíše (platí pro přílohu i odkaz); řešením by byl e-mail s `METHOD:CANCEL` / vyšší
+  `SEQUENCE`, mimo rozsah.
 - **Capability URL:** kdokoli s odkazem stáhne událost – proto náhodný token a minimální obsah.
   Kód tokenu ani URL neloguje. Pozor: Workers Logs (`invocation_logs`) ukládají URL požadavku
   včetně cesty; `redact_query_string` cestu neskrývá. Logy jsou přístupné jen v účtu Cloudflare.
