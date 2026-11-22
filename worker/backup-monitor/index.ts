@@ -2,8 +2,8 @@
 //
 // Běží mimo GitHub Actions: upozorní i tehdy, když zálohovací workflow vůbec neproběhne
 // (zakázaný rozvrh, chybějící secrets, výpadek Actions, vyčerpaná kvóta). Kontroluje stáří
-// poslední denní zálohy (> 48 h) a čitelnost výpisu; token jen pro čtení obsahu zálohovacího
-// repozitáře – zálohy nestahuje ani nemaže. Žádné veřejné HTTP rozhraní (fetch → 404).
+// poslední denní zálohy (> 48 h), manifest a GitHub SHA-256 digest assetu.
+ // Velké age assety nestahuje ani nemaže; toto není náhrada úplného restore-testu. Žádné veřejné HTTP rozhraní (fetch → 404).
 
 import { runGithubMonitor, type GithubEnv } from '../../lib/backup/github-run.ts';
 

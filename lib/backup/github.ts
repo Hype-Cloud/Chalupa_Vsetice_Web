@@ -41,6 +41,8 @@ export interface GithubAsset {
   id: number;
   name: string;
   size: number;
+  /** GitHub computes SHA-256 when an asset is uploaded (sha256:<64 hex>). */
+  digest?: string | null;
   state?: string;
 }
 
@@ -279,12 +281,13 @@ export async function listSnapshots(client: GithubClient): Promise<{ snapshots: 
   return { snapshots, drafts };
 }
 
-/** Stažený a ověřený snapshot: manifest odpovídá identitě, soubor velikosti a SHA-256 manifestu. */
-export async function downloadSnapshot(client: GithubClient, snapshot: GithubSnapshot): Promise<{ manifest: SnapshotManifest; bytes: Uint8Array }> {
-  const raw = await client.downloadAsset(snapshot.manifest, 1024 ** 2);
+/** Malý manifest. Monitor kontroluje skutečná GitHub asset metadata, bez stahování
+ * velikého age souboru (Workers Free: 128 MB RAM a 10 ms CPU na Cron Trigger). */
+async function readSnapshotManifest(client: GithubClient, snapshot: GithubSnapshot): Promise<SnapshotManifest> {
+  const raw = await client.downloadAsset(snapshot.manifest, 64 * 1024);
   let manifest: unknown;
   try {
-    manifest = JSON.parse(new TextDecoder().decode(raw));
+    manifest = JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(raw));
   } catch {
     throw new BackupError('manifest-invalid');
   }
@@ -294,13 +297,28 @@ export async function downloadSnapshot(client: GithubClient, snapshot: GithubSna
     throw new BackupError('manifest-invalid');
   }
   const m = manifest as SnapshotManifest;
-  // Produkční snapshot musí být zašifrovaný také při opakovaném běhu a stažení.
   if (client.target.environment === 'production' && (
     m.file.encryption !== 'age' || m.file.compression !== 'gzip' ||
     !m.file.name.endsWith('.sql.gz.age') || m.file.recipients.length === 0 ||
-    !m.file.recipients.every((recipient) => typeof recipient === 'string' && recipient.startsWith('age1'))
+    !m.file.recipients.every((recipient) => typeof recipient === 'string' && /^age1[0-9a-z]+$/.test(recipient))
   )) throw new BackupError('snapshot-encryption-invalid');
   if (m.file.bytes !== snapshot.file.size) throw new BackupError('size-mismatch');
+  return m;
+}
+
+/** Jen kontrola metadat v GitHubu: digest GitHubu + obsah malého manifestu.
+ * Není to nezávislá byte-for-byte verifikace age assetu; tu dělá běh zálohy a CLI. */
+export async function verifySnapshotMetadata(client: GithubClient, snapshot: GithubSnapshot): Promise<SnapshotManifest> {
+  const m = await readSnapshotManifest(client, snapshot);
+  // GitHub REST releases assets vrací digest odvozený z uploadnutých bajtů.
+  // Chybějící digest nesmí být tichý úspěch; nezkoušíme drahý download souboru.
+  if (snapshot.file.digest !== `sha256:${m.file.sha256}`) throw new BackupError('asset-digest-mismatch');
+  return m;
+}
+
+/** Stažený a ověřený celý soubor – CLI a fáze publikování, nikoli Workers Free monitor. */
+export async function downloadSnapshot(client: GithubClient, snapshot: GithubSnapshot): Promise<{ manifest: SnapshotManifest; bytes: Uint8Array }> {
+  const m = await readSnapshotManifest(client, snapshot);
   const bytes = await client.downloadAsset(snapshot.file);
   if ((await sha256Hex(bytes)) !== m.file.sha256) throw new BackupError('checksum-mismatch');
   if (client.target.environment === 'production' && !isAgeFile(bytes)) throw new BackupError('snapshot-encryption-invalid');
@@ -404,19 +422,20 @@ export interface GithubStatus {
 
 /** Stav záloh pro kontrolu stáří (> 48 h) a upozornění. */
 export async function githubStatus(client: GithubClient, now: Date, staleAfterMs: number, verifyStored = false): Promise<GithubStatus> {
-  const { snapshots } = await listSnapshots(client);
+  // Jeden výpis místo dvou: drží monitor v limitu CPU i síťových operací.
+  const releases = await client.listReleases();
+  const snapshots = releases.filter((r) => !r.draft).map((r) => identifySnapshot(client.target, r)).filter((s): s is GithubSnapshot => s !== null);
   const daily = snapshots.filter((s) => s.type === 'daily').sort((a, b) => b.date.localeCompare(a.date));
   const latest = daily[0];
   const published = latest?.release.published_at ?? null;
   if (verifyStored) {
     // Neúplný nejnovější release nesmí zmizet z monitoringu jen proto, že mu chybí asset.
     const prefix = `d1backup--${client.target.environment}--${client.target.database}--daily--`;
-    const releases = await client.listReleases();
     const candidates = releases.filter((r) => !r.draft && (r.body ?? '').includes(RELEASE_MARKER) &&
       r.tag_name.startsWith(prefix) && parseSnapshotId(`daily/${r.tag_name.slice(prefix.length)}`));
     candidates.sort((a, b) => b.tag_name.localeCompare(a.tag_name));
     if (candidates.length > 0 && (!latest || candidates[0].id !== latest.id)) throw new BackupError('snapshot-invalid');
-    if (latest) await downloadSnapshot(client, latest);
+    if (latest) await verifySnapshotMetadata(client, latest);
   }
   return {
     latest: latest && published ? { id: snapshotId(latest), published } : null,

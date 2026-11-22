@@ -349,15 +349,17 @@ test('produkční idempotence: nešifrovaný měsíční snapshot se odmítne', 
   await assert.rejects(runGithubBackup(ENV, deps()), { kind: 'snapshot-encryption-invalid' });
 });
 
-test('monitor: poškozený nebo neúplný nejnovější release vyvolá monitor-failed', async () => {
+test('monitor: nesouhlas GitHub digestu nebo neúplný nejnovější release vyvolá monitor-failed', async () => {
   await runGithubBackup(ENV, deps());
   const env = { ...ENV, BACKUP_GITHUB_TOKEN: GH_READ_TOKEN, D1_EXPORT_API_TOKEN: '' };
   const daily = github.releases.find((r) => r.tag_name.endsWith('--daily--2030-01-15'))!;
   const ageAsset = daily.assets.find((a) => a.name.endsWith('.sql.gz.age'))!;
-  ageAsset.bytes[ageAsset.bytes.length - 1] ^= 0xff;
-  await assert.rejects(runGithubMonitor(env, deps()), { kind: 'checksum-mismatch' });
+  ageAsset.digest = `sha256:${'0'.repeat(64)}`;
+  github.requests.length = 0;
+  await assert.rejects(runGithubMonitor(env, deps()), { kind: 'asset-digest-mismatch' });
   assert.ok(mails.some((mail) => mail.subject.includes('monitor-failed')));
-  ageAsset.bytes[ageAsset.bytes.length - 1] ^= 0xff;
+  assert.ok(!github.requests.some((r) => r.url.includes(`/releases/assets/${ageAsset.id}`)), 'monitor nesmí stahovat age soubor');
+  ageAsset.digest = `sha256:${await sha256Hex(ageAsset.bytes)}`;
   github.seed({ ...(await seededSnapshot('daily', '2030-01-16')), assets: [] });
   now = new Date('2030-01-16T15:00:00Z');
   await assert.rejects(runGithubMonitor(env, deps()), { kind: 'snapshot-invalid' });
@@ -375,7 +377,51 @@ test('obnova: parser schématu počítá i prázdné tabulky, indexy a triggery'
   assert.equal(expectedSchema(withEmpty).get('empty_test_index'), 'index');
 });
 
-// --- CLI a integrační obnova ---------------------------------------------------------------------------
+test('monitor nezatíží Workers paměť: kontrola SHA-256 z GitHub metadat bez stahování age assetu', async () => {
+  await runGithubBackup(ENV, deps());
+  const daily = github.releases.find((r) => r.tag_name.endsWith('--daily--2030-01-15'))!;
+  const asset = daily.assets.find((a) => a.name.endsWith('.age'))!;
+  // Simulujeme 300 MiB asset – žádné načtení bajtů do Workeru.
+  asset.size = 300 * 1024 * 1024;
+  github.requests.length = 0;
+  const env = { ...ENV, BACKUP_GITHUB_TOKEN: GH_READ_TOKEN };
+  await assert.rejects(runGithubMonitor(env, deps()), { kind: 'size-mismatch' });
+  assert.ok(!github.requests.some((r) => r.url.endsWith(`/releases/assets/${asset.id}`)));
+  asset.size = asset.bytes.length;
+  github.requests.length = 0;
+  const healthy = await runGithubMonitor(env, deps());
+  assert.equal(healthy.status?.stale, false);
+  assert.ok(!github.requests.some((r) => r.url.endsWith(`/releases/assets/${asset.id}`)));
+});
+
+test('rotace age klíče nemění existující měsíční snapshot ani neblokuje další denní zálohu', async () => {
+  const first = await runGithubBackup(ENV, deps());
+  assert.equal(first.daily, 'stored');
+  const monthBefore = await manifestOf(releaseTag(target, { type: 'monthly', date: '2030-01' }));
+  const secondIdentity = await generateX25519Identity();
+  const secondRecipient = await identityToRecipient(secondIdentity);
+  const rotated = { ...ENV, BACKUP_AGE_RECIPIENT: secondRecipient };
+  now = new Date('2030-01-16T02:17:00Z');
+  const next = await runGithubBackup(rotated, deps());
+  assert.equal(next.daily, 'stored');
+  assert.equal(next.monthly, 'kept');
+  const current = await manifestOf(releaseTag(target, { type: 'daily', date: '2030-01-16' }));
+  assert.deepEqual(current.file.recipients, [secondRecipient]);
+  const monthAfter = await manifestOf(releaseTag(target, { type: 'monthly', date: '2030-01' }));
+  assert.equal(monthAfter.file.sha256, monthBefore.file.sha256);
+  assert.deepEqual(monthAfter.file.recipients, [recipient]);
+});
+
+test('monitor s digestem assetu odmítá chybějící digest, bez fallbacku na velké stažení', async () => {
+  await runGithubBackup(ENV, deps());
+  const release = github.releases.find((r) => r.tag_name.endsWith('--daily--2030-01-15'))!;
+  const asset = release.assets.find((a) => a.name.endsWith('.age'))!;
+  asset.digest = '' as string;
+  const env = { ...ENV, BACKUP_GITHUB_TOKEN: GH_READ_TOKEN };
+  await assert.rejects(runGithubMonitor(env, deps()), { kind: 'asset-digest-mismatch' });
+});
+
+ // --- CLI a integrační obnova ---------------------------------------------------------------------------
 
 function cli(dir: string, d1?: D1Database, existing: string[] = []): CliDeps & { output: string[]; wranglerCalls: string[][] } {
   const output: string[] = [];

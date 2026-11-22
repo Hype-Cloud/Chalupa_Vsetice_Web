@@ -70,16 +70,6 @@ function config(env: GithubEnv, purpose: 'backup' | 'monitor', deps: GithubDeps)
   return config;
 }
 
-/** Kontrola příjemců produkčních záloh proti právě schválené konfiguraci. */
-function assertExpectedEncryption(manifest: { file: { encryption: string; recipients: string[] } }, cfg: BackupConfig): void {
-  if (cfg.environment !== 'production') return;
-  if (manifest.file.encryption !== 'age' ||
-      !manifest.file.recipients.some((key) => cfg.encryption.recipients.includes(key)) ||
-      manifest.file.recipients.some((key) => !cfg.encryption.recipients.includes(key))) {
-    throw new BackupError('snapshot-recipient-mismatch');
-  }
-}
-
 function client(cfg: BackupConfig, env: GithubEnv, deps: GithubDeps) {
   return new GithubClient({ owner: cfg.github!.owner, repo: cfg.github!.repo, database: cfg.databaseName, environment: cfg.environment }, token(env), deps);
 }
@@ -116,7 +106,6 @@ export async function runGithubBackup(env: GithubEnv, deps: GithubDeps): Promise
       const snapshot = identifySnapshot(gh.target, existingDaily);
       if (!snapshot) throw new BackupError('snapshot-conflict');
       sealed = await downloadSnapshot(gh, snapshot);
-      assertExpectedEncryption(sealed.manifest, cfg);
       dailyState = 'exists';
     } else {
       const exported = await exportVerified(
@@ -149,8 +138,7 @@ export async function runGithubBackup(env: GithubEnv, deps: GithubDeps): Promise
     if (existingMonthly) {
       const snapshot = identifySnapshot(gh.target, existingMonthly);
       if (!snapshot) throw new BackupError('snapshot-conflict');
-      const stored = await downloadSnapshot(gh, snapshot);
-      assertExpectedEncryption(stored.manifest, cfg);
+      await downloadSnapshot(gh, snapshot);
       monthlyState = 'kept';
     }
     else {

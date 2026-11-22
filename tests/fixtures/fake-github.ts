@@ -1,4 +1,6 @@
-// Falešné REST API GitHub Releases pro testy záloh (in-memory). Chová se jako GitHub v bodech,
+// Falešné REST API GitHub Releases pro testy záloh (in-memory).
+import { createHash } from 'node:crypto';
+const digestOf = (bytes: Uint8Array) => `sha256:${createHash('sha256').update(bytes).digest('hex')}`; Chová se jako GitHub v bodech,
 // na kterých záloha závisí: drafty bez tagu, 422 při duplicitním tagu publikovaného releasu
 // i duplicitním názvu assetu, stránkování výpisu, mazání releasu a tagu zvlášť.
 
@@ -6,6 +8,7 @@ export interface FakeAsset {
   id: number;
   name: string;
   size: number;
+  digest: string;
   state: string;
   bytes: Uint8Array;
 }
@@ -60,7 +63,7 @@ export class FakeGithub {
       body: release.body ?? '',
       created_at: created,
       published_at: release.draft ? null : (release.published_at ?? created),
-      assets: (release.assets ?? []).map((a) => ({ id: this.nextId++, name: a.name, size: a.bytes.length, state: 'uploaded', bytes: a.bytes })),
+      assets: (release.assets ?? []).map((a) => ({ id: this.nextId++, name: a.name, size: a.bytes.length, digest: digestOf(a.bytes), state: 'uploaded', bytes: a.bytes })),
     };
     this.releases.push(stored);
     if (!stored.draft) this.tags.add(stored.tag_name);
@@ -92,11 +95,11 @@ export class FakeGithub {
       const failure = this.failUpload.get(name);
       if (failure) {
         // Přerušený upload zanechá neúplný asset (jako GitHub – stav „starter“).
-        release.assets.push({ id: this.nextId++, name, size: 0, state: 'starter', bytes: new Uint8Array() });
+        release.assets.push({ id: this.nextId++, name, size: 0, digest: digestOf(new Uint8Array()), state: 'starter', bytes: new Uint8Array() });
         return json({ message: 'upload failed' }, failure);
       }
       const bytes = new Uint8Array(await request.arrayBuffer());
-      const asset = { id: this.nextId++, name, size: bytes.length, state: 'uploaded', bytes };
+      const asset = { id: this.nextId++, name, size: bytes.length, digest: digestOf(bytes), state: 'uploaded', bytes };
       release.assets.push(asset);
       const { bytes: _b, ...view } = asset;
       return json(view, 201);
