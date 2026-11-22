@@ -85,10 +85,16 @@ platí v každé session.
   nenasazuje). Testovací prostředí (`pnpm run backup:deploy:test`, Preview D1 → testovací
   bucket) smí Claude nasadit a spouštět samostatně.
 - Export vždy `dump_options.compatibility: "d1"` (obnovitelný); nikdy `sqlite3_cli_only`.
+- Snapshoty (`daily/`, `monthly/`) se zapisují jen podmíněně (`If-None-Match: *`) – nikdy
+  nepodmíněný `put()` ani mazání existujícího snapshotu kvůli zápisu nového.
 - Retence podle počtu (30 denních, 12 měsíčních) až po úspěšné záloze; lifecycle R2 jen pro
-  `pending/`. Jen R2 Standard, žádný Infrequent Access. Strop exportu 200 MiB a upozornění nad
-  7 GB neměnit bez souhlasu (drží zálohy v bezplatné kvótě). Žádný placený tarif ani změna
-  billingu bez souhlasu uživatele.
+  `pending/`. Jen R2 Standard, žádný Infrequent Access. Strop exportu 150 MiB, tvrdý strop
+  bucketu 9 GB a upozornění nad 7 GB neměnit bez souhlasu. Netvrdit absolutní záruku nulových
+  nákladů (kvóta R2 je společná pro účet). Žádný placený tarif ani změna billingu bez souhlasu
+  uživatele.
+- Upozornění jsou v produkci povinná (`RESEND_API_KEY`, `CONFLICT_ALERT_EMAIL`); bez nich
+  instance končí chybou. Před produkčním nasazením ověřit doručení `{"mode":"alert-test"}` –
+  jen na správcovskou adresu, nikdy hostům.
 - Bucket nikdy neveřejný (žádná vlastní doména, žádné `r2.dev`). Zálohy nikam mimo R2.
 - Do logů, výsledků kroků Workflow, PR ani výstupů nikdy token, podepsanou URL, obsah SQL ani
   osobní údaje. Stažený snapshot (osobní údaje) jen dočasně mimo repozitář a po použití smazat.
@@ -111,9 +117,15 @@ Skutečný stav (nastaveno ručně v dashboardu, v diffu není vidět):
   Read, **D1 Edit**, User Details Read, Memberships Read; v cloudové session Claude ho doplňuje
   proxy pro `api.cloudflare.com`. Build token zůstává D1 **Read** – nikdy ho nerozšiřovat.
 - Zálohovací Worker (`wrangler.backup.jsonc`): secrets `D1_EXPORT_API_TOKEN` (samostatný user
-  token jen Account → D1 → Edit), `D1_EXPORT_ACCOUNT_ID`, volitelně `RESEND_API_KEY`,
-  `CONFLICT_ALERT_EMAIL`, `CONFLICT_ALERT_FROM` – přes `wrangler secret put … --config
-  wrangler.backup.jsonc [--env test]`. R2 musí být na účtu aktivované (dashboard).
+  token **B** jen Account → D1 → Edit; D1 nejde omezit na jednu databázi), `D1_EXPORT_ACCOUNT_ID`,
+  `RESEND_API_KEY`, `CONFLICT_ALERT_EMAIL` (v produkci povinné), volitelně `CONFLICT_ALERT_FROM`
+  – přes `wrangler secret put … --config wrangler.backup.jsonc [--env test]` nebo dashboard.
+  Nikdy jako secret nepoužít administrátorský token ani token pro správu.
+- Token **A** pro správu zálohovací infrastruktury (Claude): Workers R2 Storage Edit, Workers
+  Scripts Edit, Account Settings Read, User Details Read, Memberships Read (+ D1 Edit pro
+  migrace). Oprávnění jsou na úrovni účtu – Workers Scripts Edit technicky dovolí měnit i
+  rezervační Worker; ten Claude přímo nenasazuje (jen přes merge). R2 musí být na účtu
+  aktivované (dashboard, rozhodnutí uživatele).
 - Secrets se nastavují jen přes `wrangler secret put` (produkce) a
   `wrangler preview base-config secret put` (sdílené všem Worker Previews). Preview potřebuje
   minimálně `ECHALUPY_ICAL_URL`, `BOOKING_ICAL_EXPORT_TOKEN`, `TURNSTILE_SECRET_KEY`
