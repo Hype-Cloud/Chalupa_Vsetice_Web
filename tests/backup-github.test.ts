@@ -187,6 +187,28 @@ test('souběh: dvě současné publikace stejného snapshotu → právě jedna u
   }
 });
 
+test('ztracená odpověď na PATCH po úspěšné publikaci nesmaže zveřejněný release', async () => {
+  const ref = { type: 'daily' as const, date: '2030-01-15' };
+  const sealed = await sealedFor(ref, 'syntetický obsah');
+  const injected: GithubDeps = {
+    ...deps(),
+    fetch: async (input, init) => {
+      const req = new Request(input, init);
+      if (req.method === 'PATCH' && /\\/releases\\/\\d+$/.test(new URL(req.url).pathname)) {
+        const committed = await route(input, init);
+        assert.ok(committed.ok, 'fake GitHub provedl publikaci');
+        throw new Error('simulovaná ztráta odpovědi po úspěšném PATCH');
+      }
+      return route(input, init);
+    },
+  };
+  await assert.rejects(publishSnapshot(new GithubClient(target, GH_TOKEN, injected), ref, sealed.bytes, sealed.manifest, 'verify'), { kind: 'github-unavailable' });
+  const published = github.releases.filter((r) => r.tag_name === releaseTag(target, ref));
+  assert.equal(published.length, 1);
+  assert.equal(published[0].draft, false, 'zveřejněný release musí přežít nejistý výsledek PATCH');
+  assert.equal((await manifestOf(releaseTag(target, ref))).file.sha256, sealed.manifest.file.sha256);
+});
+
 test('selhání uploadu: draft se smaže, nic se nepublikuje ani nemaže, upozornění bez citlivých údajů', async () => {
   github.seed(await seededSnapshot('daily', '2030-01-14'));
   github.failUpload.set(`${DB}-production-daily-2030-01-15.sql.gz.age`, 502);
