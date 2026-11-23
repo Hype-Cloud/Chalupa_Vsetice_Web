@@ -588,6 +588,8 @@ function wranglerJson(stdout: string): unknown {
   }
 }
 
+const D1_INTERNAL_OBJECTS = new Set(['_cf_METADATA', '_cf_KV']);
+
 async function restore(options: Record<string, string | true>, deps: CliDeps): Promise<void> {
   const target = str(options, 'target');
   if (!target || !/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(target) || target.length > 64) throw new CliError('zadejte --target <název nové D1> (malá písmena, číslice, pomlčky)');
@@ -688,9 +690,10 @@ async function restore(options: Record<string, string | true>, deps: CliDeps): P
     if (missing.length > 0) throw new CliError(`obnovená D1 postrádá objekty schématu: ${missing.join(', ')}`);
     const changed = [...expectedDefinitions].filter(([name, sql]) => restored.get(name)?.sql !== sql).map(([name]) => name);
     if (changed.length > 0) throw new CliError(`obnovená D1 má změněné definice schématu: ${changed.join(', ')}`);
-    // Miniflare/Cloudflare D1 si vytváří vlastní interní metadata tabulku,
-    // která v exportu aplikace není. Ignorujeme pouze přesný systémový název.
-    const extra = [...restored.keys()].filter((name) => name !== '_cf_METADATA' && !expectedDefinitions.has(name));
+    // Interní tabulky D1, které v exportu aplikace nejsou: `_cf_METADATA` (lokální D1/Miniflare)
+    // a `_cf_KV` (vzdálená D1 v Cloudflare – ověřeno zkušební obnovou 23. 11. 2026). Výjimka jen
+    // pro tyto přesné názvy; jakýkoli jiný objekt navíc (i s prefixem `_cf_`) obnovu zastaví.
+    const extra = [...restored.keys()].filter((name) => !D1_INTERNAL_OBJECTS.has(name) && !expectedDefinitions.has(name));
     if (extra.length > 0) throw new CliError(`obnovená D1 má neočekávané objekty schématu: ${extra.join(', ')}`);
     deps.out(`Obnova ověřena: ${manifest.migrations} migrací, ${tables.length} tabulek (včetně prázdných), ${expectedObjects.size} objektů schématu.`);
     deps.out(`Nová D1 „${target}“ je samostatná. Po ověření ji smažte (wrangler d1 delete ${target}), pokud ji nepotřebujete.`);
