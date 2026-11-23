@@ -10,7 +10,7 @@
 // - Do výstupu jen identifikátory, velikosti a kontrolní součty – nikdy tokeny, obsah SQL ani klíče.
 
 import { createHash, randomBytes } from 'node:crypto';
-import { closeSync, existsSync, linkSync, mkdirSync, mkdtempSync, openSync, readFileSync, realpathSync, renameSync, rmSync, writeSync } from 'node:fs';
+import { closeSync, existsSync, fsyncSync, linkSync, mkdirSync, mkdtempSync, openSync, readFileSync, realpathSync, renameSync, rmSync, writeSync } from 'node:fs';
 import { basename, dirname, isAbsolute, join, relative, resolve } from 'node:path';
 import { parseBackupConfig, type BackupBackend, type BackupConfig } from '../../lib/backup/config.ts';
 import { BackupError, errorKind, inspectSql, isObject, sha256Hex } from '../../lib/backup/core.ts';
@@ -111,25 +111,51 @@ export function assertSafeOutput(dir: string, deps: CliDeps): string {
   return absolute;
 }
 
-/** Atomický zápis (dočasný soubor 0600 → přejmenování); existující cíl jen s force. */
-export function writeAtomic(path: string, bytes: Uint8Array, force: boolean): void {
+/** Operace publikace souboru – injektovatelné jen kvůli testům selhání a souběhu. */
+export interface AtomicWriteOps {
+  rename: (from: string, to: string) => void;
+  link: (existing: string, created: string) => void;
+  /** Testovací háček těsně před publikací (simulace souběžně vzniklého cíle). */
+  beforePublish?: () => void;
+}
+const NODE_WRITE_OPS: AtomicWriteOps = { rename: renameSync, link: linkSync };
+/** Filesystém bez hardlinků (FAT/exFAT, některá síťová úložiště). */
+const NO_HARDLINKS = new Set(['EPERM', 'ENOTSUP', 'EOPNOTSUPP', 'ENOSYS', 'EXDEV']);
+
+function writeAll(fd: number, bytes: Uint8Array): void {
+  let offset = 0;
+  while (offset < bytes.length) offset += writeSync(fd, bytes, offset, bytes.length - offset);
+  fsyncSync(fd);
+}
+
+/**
+ * Zápis souboru 0600: dočasný soubor (zapsaný a fsync) → publikace.
+ * - `force`: atomické `rename` přes existující soubor; originál se nikdy předem nemaže, takže
+ *   selhání publikace ho zachová.
+ * - bez `force`: atomické create-only `link` (existující cíl, i vzniklý souběžně, nikdy
+ *   nepřepíše). Na filesystému bez hardlinků exkluzivní vytvoření `open(path, 'wx')`
+ *   – také nikdy nepřepíše; při chybě se vlastní neúplný soubor smaže a vrací se chyba.
+ */
+export function writeAtomic(path: string, bytes: Uint8Array, force: boolean, ops: AtomicWriteOps = NODE_WRITE_OPS): void {
   if (existsSync(path) && !force) throw new CliError(`soubor už existuje: ${path} (přepsání jen s --force)`);
   mkdirSync(dirname(path), { recursive: true, mode: 0o700 });
   const temp = join(dirname(path), `.${basename(path)}.${randomBytes(6).toString('hex')}.tmp`);
   const fd = openSync(temp, 'wx', 0o600);
   try {
-    let offset = 0;
-    while (offset < bytes.length) offset += writeSync(fd, bytes, offset, bytes.length - offset);
+    writeAll(fd, bytes);
     closeSync(fd);
+    ops.beforePublish?.();
     if (force) {
-      // Node's rename replaces an existing file atomically on the same filesystem.
-      // Never unlink the original first: a failed rename must preserve it.
-      renameSync(temp, path);
+      ops.rename(temp, path);
     } else {
-      // Atomic create-only publication: no race between existsSync and rename
-      // can accidentally overwrite a newly created destination.
-      linkSync(temp, path);
-      rmSync(temp);
+      try {
+        ops.link(temp, path);
+      } catch (error) {
+        const code = (error as NodeJS.ErrnoException).code ?? '';
+        if (!NO_HARDLINKS.has(code)) throw error;
+        createExclusive(path, bytes);
+      }
+      rmSync(temp, { force: true });
     }
   } catch (error) {
     try {
@@ -138,6 +164,25 @@ export function writeAtomic(path: string, bytes: Uint8Array, force: boolean): vo
       // už zavřený
     }
     rmSync(temp, { force: true });
+    if ((error as NodeJS.ErrnoException).code === 'EEXIST') throw new CliError(`soubor už existuje: ${path} (přepsání jen s --force)`);
+    throw error;
+  }
+}
+
+/** Exkluzivní vytvoření a zápis (fallback bez hardlinků); neúplný vlastní soubor po chybě smaže. */
+function createExclusive(path: string, bytes: Uint8Array): void {
+  const fd = openSync(path, 'wx', 0o600);
+  try {
+    writeAll(fd, bytes);
+    closeSync(fd);
+  } catch (error) {
+    try {
+      closeSync(fd);
+    } catch {
+      // už zavřený
+    }
+    // Soubor vznikl tímto voláním ('wx'), smazání nemůže odstranit cizí obsah.
+    rmSync(path, { force: true });
     throw error;
   }
 }

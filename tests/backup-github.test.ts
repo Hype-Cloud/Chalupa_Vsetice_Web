@@ -1,6 +1,6 @@
 import test, { beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { existsSync, linkSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, renameSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { generateX25519Identity, identityToRecipient } from 'age-encryption';
@@ -11,7 +11,7 @@ import { sealSnapshot } from '../lib/backup/seal.ts';
 import { GithubClient, identifySnapshot, publishSnapshot, RELEASE_MARKER, releaseTag, type GithubDeps } from '../lib/backup/github.ts';
 import { runGithubBackup, runGithubMonitor } from '../lib/backup/github-run.ts';
 import { buildManifest, type SnapshotManifest, type SnapshotRef } from '../lib/backup/snapshot.ts';
-import { assertSafeOutput, expectedRowCounts, expectedSchema, expectedSchemaDefinitions, normalizedSchemaSql, runCli, sqlStatements, writeAtomic, type CliDeps } from '../scripts/lib/backup-cli.ts';
+import { assertSafeOutput, type AtomicWriteOps, expectedRowCounts, expectedSchema, expectedSchemaDefinitions, normalizedSchemaSql, runCli, sqlStatements, writeAtomic, type CliDeps } from '../scripts/lib/backup-cli.ts';
 import { FakeGithub } from './fixtures/fake-github.ts';
 
 // Backend GitHub Releases: běh zálohy (export → gzip → age → draft → upload → ověření →
@@ -540,6 +540,41 @@ test('CLI: symlink mimo checkout nesmí obejít ochranu proti zápisu SQL do Git
     const d = cli(dir);
     assert.throws(() => assertSafeOutput(alias, d), /ignorované Gitem/);
     assert.throws(() => assertSafeOutput(join(alias, 'new-subfolder'), d), /ignorované Gitem/);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('lokální zápis (M1/M2): selhání publikace s --force zachová původní soubor; souběžně vzniklý cíl se bez --force nikdy nepřepíše', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'backup-atomic-race-'));
+  const file = join(dir, 'snapshot.sql.gz.age');
+  const real: AtomicWriteOps = { rename: (a, b) => renameSync(a, b), link: (a, b) => linkSync(a, b) };
+  const temps = () => readdirSync(dir).filter((name) => name.endsWith('.tmp'));
+  try {
+    // M1: publikace nového obsahu selže → původní soubor beze změny (žádné předchozí smazání).
+    writeFileSync(file, 'původní');
+    const failing: AtomicWriteOps = { ...real, rename: () => { throw Object.assign(new Error('simulované selhání rename'), { code: 'EIO' }); } };
+    assert.throws(() => writeAtomic(file, new TextEncoder().encode('nový'), true, failing), /simulované selhání/);
+    assert.equal(readFileSync(file, 'utf8'), 'původní', 'selhání --force publikace nesmí smazat ani změnit originál');
+    assert.deepEqual(temps(), []);
+
+    // M2: cíl vznikne (jiným procesem) mezi kontrolou existence a publikací → bez --force chyba, cizí obsah zůstane.
+    const target = join(dir, 'race.sql');
+    const racing: AtomicWriteOps = { ...real, beforePublish: () => writeFileSync(target, 'cizí obsah') };
+    assert.throws(() => writeAtomic(target, new TextEncoder().encode('náš obsah'), false, racing), /už existuje/);
+    assert.equal(readFileSync(target, 'utf8'), 'cizí obsah', 'create-only zápis nesmí přepsat souběžně vzniklý soubor');
+    assert.deepEqual(temps(), []);
+
+    // Filesystém bez hardlinků (FAT/exFAT): exkluzivní vytvoření; souběžný cíl ani tak nepřepíše.
+    const noLinks: AtomicWriteOps = { ...real, link: () => { throw Object.assign(new Error('hardlinky nepodporovány'), { code: 'EPERM' }); } };
+    const fat = join(dir, 'fat.sql');
+    writeAtomic(fat, new TextEncoder().encode('obsah'), false, noLinks);
+    assert.equal(readFileSync(fat, 'utf8'), 'obsah');
+    assert.equal(statSync(fat).mode & 0o777, 0o600);
+    const fatRace = join(dir, 'fat-race.sql');
+    assert.throws(() => writeAtomic(fatRace, new TextEncoder().encode('náš'), false, { ...noLinks, beforePublish: () => writeFileSync(fatRace, 'cizí') }), /už existuje/);
+    assert.equal(readFileSync(fatRace, 'utf8'), 'cizí');
+    assert.deepEqual(temps(), []);
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
