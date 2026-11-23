@@ -1,0 +1,53 @@
+# Synthetic-only regression checks for D1 backup code. No Cloudflare or GitHub backup secrets.
+name: D1 backup regression tests
+
+# Spouští se u každého PR a pushe do main (bez filtru cest – zálohování závisí i na sdílených
+# souborech, např. worker/email/resend.ts, wrangler.backup*.jsonc, tsconfig.json).
+# `pull_request` (nikoli `pull_request_target`): PR z forků nedostanou secrets ani zápisový token.
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: d1-backup-tests-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  tests:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6.5.0
+        with:
+          # Stejná hlavní verze jako produkční zálohovací workflow (backup/github-actions/d1-backup.yml).
+          node-version: '22'
+      - name: Install dependencies
+        run: |
+          corepack enable
+          pnpm install --frozen-lockfile
+      - name: Install age CLI for interoperability tests
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends age
+          age --version
+      - name: Run synthetic backup regression suite
+        env:
+          REQUIRE_AGE_INTEROP: '1'
+        run: pnpm test
+      - name: TypeScript (selže na jakoukoli novou diagnostiku; baseline jen vite.config.ts shodná s main)
+        run: bash scripts/check-typescript.sh
+      - name: Build production bundle (no deployment)
+        run: pnpm run build
+      - name: Dry-run main Worker, backup monitor and optional R2 Worker
+        run: |
+          pnpm exec wrangler deploy --dry-run --config wrangler.jsonc
+          pnpm run backup:monitor:check
+          pnpm run backup:r2:check

@@ -193,6 +193,7 @@ Backend pro budoucí přímé rezervace prostřednictvím webu Chalupa Všetice.
 - Cloudflare Observability: Logs a Traces s oddělenou konfigurací produkčního a testovacího prostředí.
 - Vícejazyčný potvrzovací e-mail (cs/en/de/ua) s QR Platbou a kalendářový odkaz `GET /calendar/<token>` s přílohou `pobyt.ics`.
 - Autorizované neinteraktivní D1 migrace mimo CI a ověřená záloha před každou produkční migrací.
+- Denní šifrované zálohy D1 do soukromých GitHub Releases (volitelně Cloudflare R2) s CLI pro stažení, ověření a obnovu do nové D1.
 
 Produkční endpoint pro vytváření rezervací zůstává vypnutý. V Preview je rezervační endpoint určený jen k vývoji: používá Turnstile, rate limit a volitelný Bearer token `BOOKING_API_TOKEN`.
 
@@ -219,6 +220,9 @@ Aktuální stav ověřuje `pnpm test`; počty v tabulce odpovídají tomuto běh
 | reservation-note.test.ts | 17 | Poznámka hosta: NULL pro prázdné hodnoty, víceřádkový text, Unicode a NFC, limit 2000 znaků, zakázané řídicí a bidi znaky, SQL/HTML text jen jako text, není ve veřejné odpovědi ani v logách, idempotence, escapování v iCal exportu, CHECK v D1. |
 | d1-migrations.test.ts | 29 | Kontrola D1 migrací před deployem: číslování, konzistence konfigurací (oddělené D1, produkční POST vypnutý), čekající a neznámé migrace, fail-closed při chybě, detekce destruktivních migrací, interaktivní aplikace jen v terminálu s potvrzením, neinteraktivní jen s autorizací ověřenou proti stavu D1 (název DB, přesný seznam čekajících migrací, žádné neznámé migrace, nikdy v CI), destruktivní migrace přísněji (výslovné povolení, v produkci samostatně, fráze v terminálu), ověřená záloha před každou produkční migrací (bookmark, export se schématem a záznamy migrací), samostatná záloha, kontrola po aplikaci, parsování argumentů. |
 | smoke.test.ts | 9 | Smoke test veřejných endpointů proti skutečnému Workeru: produkce (POST 404, `booking-config` vypnutý) a Preview, bez tokenů a zápisů, odhalení zapnutého POST, výpadku D1, úniku osobních údajů a veřejného exportu, `/calendar/*` s `X-Robots-Tag` přepsaným platformou v Preview. |
+| backup.test.ts | 26 | Automatická záloha D1 → R2 ve workerd (Miniflare: skutečné R2, DigestStream, FixedLengthStream): export a dotazování, chyby API (HTTP, JSON, `status: error`, chybějící/neplatná URL či bookmark), vypršená URL, výpadek a chybějící délka streamu, validace obsahu (prostředí, schéma, migrace, zkrácení, UTF-8, cizí soubor), MD5, idempotence, souběžné zápisy do stejného snapshotu (podmíněný put `If-None-Match: *`, právě jeden uspěje, žádné přepsání; dvě souběžné instance Workflow), retence 30/12 jen po úspěchu, úklid `pending/`, kontrola stáří 48 h a objemu, povinná upozornění v produkci (chybějící konfigurace, výpadek Resend bez ztráty zálohy, test doručení), tvrdý strop kapacity, obnova snapshotu do samostatné D1, konfigurace samostatného Workeru. |
+| backup-core.test.ts | 14 | Společné jádro záloh: konfigurace `BACKUP_*` (explicitní backend, fail closed bez šifrování v produkci, odmítnutí soukromého klíče age, chyby bez hodnot, nepovinné hodnoty jiných backendů), identifikátory snapshotů, manifest, retence 30/12, gzip + age se syntetickými klíči (špatný klíč, poškozený soubor, neplatný příjemce), kompatibilita s nástrojem `age`. |
+| backup-github.test.ts | 36 | Backend GitHub Releases nad falešným API: šifrovaný denní i měsíční snapshot s manifestem, idempotence, nepřepisování, souběžné publikace (právě jedna uspěje), selhání a ověření uploadu (draft smazán), povinně soukromý repozitář, retence jen vlastních snapshotů (cizí releasy, drafty), chyba výpisu nic nemaže, monitor stáří s tokenem jen pro čtení, žádné secrets v logu a upozorněních, CLI (list, download, verify, decrypt, odmítnutí přepsání a poškozeného souboru), integrační obnova do nové lokální D1 (migrace, počty řádků), obnova z lokálního souboru, šablona GitHub Actions a konfigurace monitoru; schéma obnovy ze skutečného exportu D1 proti SQLite (U+2028/U+2029, klíčová slova jako sloupce), selhání a souběh lokálního zápisu, přerušení nekonečného streamu, stderr skutečného procesu Wrangleru, nejednoznačný PATCH/422. |
 | frontend-quote.test.ts | 14 | Frontend rezervační sekce: cena jen z `/api/quote` (kontrakt proti skutečnému handleru), nightly se slevou, exact-stay, 422 a chyby serveru/sítě jako české hlášky, načítání bez staré ceny, souběh (starší odpověď nepřepíše novější), nový požadavek při změně termínu a hostů, žádný klientský výpočet ceny. |
 | i18n.test.ts | 17 | Jazykové verze: úplnost katalogů cs/en/de/ua (klíče, parametry, plurály, žádný český text ani HTML), fallback, volba jazyka (?lang, localStorage, čeština) a persistence, množná čísla, data a CZK v každém jazyce, kalendář, rezervační panel po přepnutí, přepínač, žádné pevné texty v komponentách ani pevná cena noci (3 000 / 2 990 Kč); orientační cena jen z `PRICE_PER_NIGHT`. |
 | date-input.test.ts | 8 | Vstup data DD.MM.RRRR ↔ ISO: přestupný rok, neexistující den a měsíc, rozepsané datum bez chyby, odmítnutí amerického a ISO tvaru, všechna zobrazená data den → měsíc → rok (angličtina bez měsíc/den). |
@@ -228,7 +232,7 @@ Aktuální stav ověřuje `pnpm test`; počty v tabulce odpovídají tomuto běh
 | confirmation-email.test.ts | 34 | Potvrzovací e-mail: `locale` cs/en/de/ua (jiné → 422), nová rezervace = jeden e-mail s klíčem z interního UUID, replay i souběžný dvojklik znovu naplánují potvrzení se stejným klíčem a s uloženým e-mailem a jazykem, replay bez e-mailu (422, zrušená, bez jazyka), stejný veřejný kód po resetu čítače → různé klíče, UUID mimo API/e-mail/log, žádná synchronní práce před `ctx.waitUntil`, předgenerované ikony (bez rastrování ve Workeru), Preview → testovací schránka, produkce → host, odesílatel z business identity, business config (telefon E.164 → `tel:` a český zápis, validace), hlavička (jméno, značka, termín pobytu), kompaktní termín ve 4 jazycích, pořadí platební sekce a QR bez popisku, úvod se splatností, instrukcemi před příjezdem a kontaktem (bez věty o souhrnu), nadpis „Souhrn rezervace“ ve 4 jazycích, platba ve dvou sloupcích (QR vlevo, údaje vpravo) a na mobilu pod sebou, IBAN bez `nowrap` se zalomením po skupinách, patička bez oddělovacích znaků, nezměněná hlavička (otisk HTML a PNG) i patička (otisk HTML), QR 174 px se zaoblenými rohy a beze změny PNG, linka jen pod nadpisem „Platební údaje“ (nad „Těšíme se…“ žádná), nezměněný telefonický kontakt (otisk HTML), telefonický kontakt a patička (jméno → web, `mailto:`, `IČ` jako prostý text, žádný registr ani „IČO“), Preview bez banneru a adresy hosta (jen `[TEST]` v předmětu), domek bez vlastního pozadí a jméno jednotnou vahou, odkaz na registr odstraněný z konfigurace i dokumentace, výchozí světlá varianta, kontakty v plaintextu, renderer bez napevno zapsaných údajů provozovatele, chybějící konfigurace → skip bez upozornění, selhání providera (timeout, síť, HTTP 4xx/5xx) → 201 a jedno interní upozornění bez osobních a bankovních údajů, selhání upozornění nic dalšího nespouští, odložené odeslání, obsah HTML i textu ve 4 jazycích ze stejných dat jako API, QR příloha (cid) = SPAYD, escapování HTML, nové znění věty o e-mailu. |
 | payment.test.ts | 9 | Platby: pražské datum → `DDMMYY`, `NN` 01–99, splatnost (konec pražského dne po 24 h, změny času, vždy 24–48 h), IBAN (kontrolní součet, odvození čísla účtu), SPAYD (serverová cena, VS = kód, zpráva `Rezervace {kód}`), QR jako PNG (pixely = matice) se SVG fallbackem, kopírování do schránky, kontrola, že repozitář neobsahuje skutečný IBAN. |
 | calendar.test.ts | 15 | Odkaz do kalendáře: unikátní neveřejný token oddělený od id/kódu/VS, replay a souběžný dvojklik → stejná `calendarUrl`, dvě rezervace → různé URL, legacy `NULL` token (replay, e-mail i web bez odkazu), origin (produkce vždy hlavní web, Preview origin požadavku), endpoint (pending/paid → událost, hlavičky, HEAD, 405; neplatný tvar bez dotazu do D1, neznámý a zrušený → 404; bez D1 503; token se neloguje), validní VCALENDAR/VEVENT (ical.js), CRLF, 75 oktetů, stabilní UID, 14:00/11:00 v zimě, v létě i přes přechod času, žádné osobní/bankovní/interní údaje, e-mail (hlavička a Termín = stejný href, splatnost bez odkazu, věta ve 4 jazycích; příloha `pobyt.ics` s `method=PUBLISH` = stejná událost jako odkaz, bez osobních údajů, replay stejný obsah, produkce hostovi, legacy bez přílohy), web přijme jen serverovou URL, Worker obsluhuje `/calendar/*`, žádná externí calendar služba, CHECK a UNIQUE migrace 0010. |
-| **Celkem** | **394** | |
+| **Celkem** | **471** | |
 
 ### Testované scénáře
 
@@ -1504,6 +1508,399 @@ Poslední produkční nasazení prošlo všemi **10/10 smoke kontrolami**.
 Nepoužívá žádné tokeny ani secrets: přijme jen origin (https, http jen localhost) bez cesty,
 query a přihlašovacích údajů, neposílá `Authorization` ani cookies a nic nezapisuje (rezervační
 POST jde bez údajů, nabídka je jen čtení).
+
+## Automatické zálohy D1
+
+Denní zálohy D1 s jedním společným jádrem a dvěma volitelnými úložišti (backendy):
+
+| | **GitHub Releases** (výchozí) | **Cloudflare R2** (volitelný, neaktivní) |
+|---|---|---|
+| Úložiště | assety releasů v **soukromém** zálohovacím repozitáři | soukromý R2 bucket |
+| Spouštění | GitHub Actions v zálohovacím repozitáři (cron) + ruční CLI | Cloudflare Workflows (`schedules`) + ruční CLI |
+| Šifrování | gzip + **age** (veřejný klíč; soukromý klíč jen u uživatele) | R2 at-rest (klíče Cloudflare), vlastní šifrování ne |
+| Nezávislá kontrola | Cloudflare Worker s cronem (`worker/backup-monitor/`) | běh Workflow 14:45 UTC |
+| Potřebuje | soukromý repozitář, Actions secrets | aktivované R2, nasazený Worker |
+
+Zálohy doplňují ruční zálohy před migracemi (`db:backup:*`, Time Travel), nenahrazují je.
+Rezervační Worker, jeho schéma, secrets ani Workers Builds se zálohováním nemění. Přepnutí
+backendu je vždy výslovné (`BACKUP_BACKEND`); R2 se nevytváří ani nenasazuje automaticky.
+
+### Architektura
+
+```
+lib/backup/core.ts      export D1 (REST API, polling), stažení, kontrola SQL, SHA-256, chyby
+lib/backup/config.ts    konfigurace BACKUP_* (validace, bez hodnot v chybách)
+lib/backup/snapshot.ts  snapshoty daily/monthly, manifest, retence (čisté funkce)
+lib/backup/seal.ts      gzip + age (šifrování / rozšifrování), Node i Workers
+lib/backup/alerts.ts    upozornění správci (Resend) – společné pro všechny spouštěče
+lib/backup/github.ts    backend GitHub Releases (publikace, výpis, stažení, retence, stav)
+lib/backup/github-run.ts  běh zálohy a kontroly pro GitHub (Actions, CLI, monitor)
+worker/backup/          backend R2 (Cloudflare Workflows; export a kontroly z jádra)
+worker/backup-monitor/  nezávislá kontrola GitHub záloh (Cloudflare cron)
+scripts/backup.ts       CLI: list, download, verify, decrypt, restore, run, monitor, alert-test
+backup/github-actions/d1-backup.yml  šablona workflow pro SOUKROMÝ zálohovací repozitář
+```
+
+Nový backend = nový modul se stejným rozhraním (publikace, výpis, stažení, retence, stav) nad
+stejným jádrem; export, kontroly, manifest, šifrování ani upozornění se nepřepisují.
+
+### Konfigurace
+
+Necitlivé hodnoty jsou v konfiguraci spouštěče (workflow v soukromém repozitáři,
+`wrangler.backup*.jsonc`, lokální `--env-file` mimo repozitář); credentials jen v GitHub
+Actions Secrets, Cloudflare Secrets nebo lokálním prostředí – nikdy ve verzovaných souborech.
+Hodnoty, které backend nebo operace nepotřebuje, nejsou povinné (GitHub backend nepotřebuje
+nic z R2 a naopak).
+
+| Proměnná | Význam | Povinná |
+|---|---|---|
+| `BACKUP_BACKEND` | `github` \| `r2` | vždy (spouštěč musí odpovídat) |
+| `BACKUP_ENV` | `production` \| `preview` (musí odpovídat `meta.environment` exportu) | vždy |
+| `BACKUP_SCHEMA_PROFILE` | `chalupa` (výchozí: kontrola rezervací, migrací a prostředí) nebo `generic` (obecná D1 se strukturou tabulek) | ne |
+| `BACKUP_DATABASE_NAME` | název D1 (malá písmena, číslice, pomlčky) | vždy |
+| `BACKUP_DATABASE_ID` | UUID D1 | záloha |
+| `BACKUP_CLOUDFLARE_ACCOUNT_ID` | ID účtu Cloudflare (secret) | záloha; čtení R2; obnova |
+| `BACKUP_GITHUB_REPO` | `owner/repo` nebo `https://github.com/owner/repo` | GitHub |
+| `BACKUP_KEEP_DAILY` / `BACKUP_KEEP_MONTHLY` | retence, výchozí 30 / 12 | ne |
+| `BACKUP_MAX_EXPORT_BYTES` | strop exportu; GitHub max. 1 GiB, R2 max. a výchozí 150 MiB | ne |
+| `BACKUP_ENCRYPTION` | `age` (výchozí GitHub) \| `none` (jen Preview / R2) | ne |
+| `BACKUP_AGE_RECIPIENT` | veřejný klíč(e) `age1…`, oddělené čárkou | GitHub záloha s `age` |
+| `BACKUP_R2_BUCKET` | název bucketu (CLI čte přes REST API) | R2 čtení |
+| `BACKUP_R2_WORKFLOW` | název Workflow pro `run --backend r2` | ne |
+
+Credentials: `D1_EXPORT_API_TOKEN` (export), `BACKUP_GITHUB_TOKEN` (GitHub; v Actions
+`github.token`), `BACKUP_R2_API_TOKEN` (CLI čtení R2), `RESEND_API_KEY`,
+`CONFLICT_ALERT_EMAIL` (+ volitelně `CONFLICT_ALERT_FROM`). Produkce a Preview mají oddělenou
+konfiguraci (vlastní workflow soubor / prostředí wrangleru / env soubor) a oddělené snapshoty
+(prostředí je v tagu, názvu souboru i manifestu). Neplatná konfigurace = chyba
+`not-configured` před exportem (fail closed); produkce v GitHubu bez platného veřejného klíče
+age se nikdy nespustí. Hodnota obsahující soukromý klíč age (`AGE-SECRET-KEY-…`) v prostředí
+zálohy nebo kontroly je odmítnuta.
+
+**Stav ověření (23. 11. 2026):** lokálně `pnpm test` 471/471 s povinnou interoperabilitou
+`age` (`REQUIRE_AGE_INTEROP=1`, bez přeskočených testů); build a dry-runy veřejného Workeru,
+backup monitoru a R2 Workeru prošly. CI (`.github/workflows/backup-regression-tests.yml`) běží
+u každého PR a pushe do `main` bez filtru cest a bez secrets (`pull_request`, `contents: read`),
+na Node 22 jako produkční zálohovací workflow. TypeScript kontroluje `scripts/check-typescript.sh`:
+projde jen bez chyb, nebo s jedinou známou diagnostikou `TS2322` ve `vite.config.ts`
+(`configPath: false`, shodná s `main`, mimo rozsah zálohování); jakákoli jiná či další
+diagnostika CI zastaví. Integrační testy používají syntetická data, lokální D1 a fake GitHub
+API – proti skutečné vzdálené D1 ani skutečnému GitHub Releases API zálohování ověřeno není.
+**Automatické zálohování je neaktivní:** produkční workflow v soukromém repozitáři má jen ruční
+spouštěč a nulový `CODE_COMMIT`, schedule není nastavený a monitor ani R2 Worker nejsou nasazené.
+
+### Backend GitHub Releases
+
+- **Snapshot = release** (ne commit – repozitář neroste, retence maže skutečně):
+  tag `d1backup--<prostředí>--<databáze>--daily--RRRR-MM-DD` (resp. `monthly--RRRR-MM`), assety
+  `<databáze>-<prostředí>-<typ>-<datum>.sql.gz.age` a `….manifest.json`, v popisu značka
+  `<!-- d1-backup:v1 -->`, `make_latest: false` (release aplikace se nemění).
+- **Průběh:** export D1 → kontrola SQL (struktura, migrace, `meta.environment`, velikost =
+  `Content-Length`) → SHA-256 → gzip (ověřený zpětným rozbalením) → age → manifest → **draft**
+  → upload obou assetů → stažení zpět a ověření SHA-256 → **publikace** (`draft=false`) →
+  kontrola, že tag patří tomuto releasu. Při chybě **před pokusem o publikaci** se draft
+  smaže. Pokud se ztratí odpověď na PATCH, stav publikace není jistý: release se nemaže,
+  aby se neodstranila již vytvořená záloha. Při 422 na PATCH se nejdřív ověří stav releasu
+  (`GET /releases/{id}`): smaže se jen prokazatelný draft, publikovaný release se ověří jako po
+  úspěšné publikaci, nedostupné ověření skončí chybou bez mazání. Další běh znovu ověří
+  uložený snapshot; opuštěné drafty uklidí retence po 24 h.
+- **Měsíční** snapshot = první úspěšná záloha měsíce, stejný ověřený soubor (bez nového exportu).
+- **Meze kontroly úplnosti:** kontrola hlavičky, schématu, migrací a prostředí odhalí některé
+  zkrácené či chybné exporty. SHA-256 prokazuje integritu stažených bajtů, nikoli to,
+  že zdrojová D1 obsahovala právě a pouze řádky v souboru. Chybějící kompletní INSERT
+  může být syntakticky neodhalitelný. Nezávislá obnova do nové D1 ověřuje, že **to, co je
+  ve snapshotu**, lze importovat, ale bez kontroly proti zdroji nedokazuje úplnost zdroje.
+- **Manifest:** databáze, prostředí, typ a datum snapshotu, čas exportu, bookmark, počet
+  migrací, velikost a SHA-256 SQL i souboru, komprese, šifrování a veřejné klíče příjemců,
+  verze formátu. Žádná credentials ani osobní údaje.
+- **Idempotence a souběh:** existující snapshot se nikdy nepřepíše. Opakovaný běh téhož dne
+  export nespustí (`exists`); stejný obsah = idempotentní úspěch, jiný obsah denního =
+  `snapshot-conflict` (upozornění), existující měsíční zůstává (`kept`). Dvě souběžné
+  publikace téhož tagu: GitHub druhou odmítne (422), její draft se smaže a vyhodnotí se
+  existující snapshot. Workflow má navíc `concurrency` (běhy se neprolínají).
+- **Soukromý repozitář je podmínka:** před každým zápisem i čtením se ověří `private: true`;
+  veřejný repozitář = chyba `repository-not-private` ještě před exportem.
+- **Limity GitHubu** (dokumentace 11/2026): asset < 2 GiB, max. 1000 assetů na release,
+  celková velikost releasů ani přenos omezené nejsou; duplicitní název assetu = 422. Strop
+  exportu pro GitHub je proto 1 GiB. Zálohy se počítají do úložiště repozitáře jen jako
+  releasy (ne Git historie ani Actions artifacts).
+
+### Šifrování (age)
+
+- [age](https://age-encryption.org) s veřejným klíčem (X25519): záloha (Actions, Worker) zná
+  jen veřejný klíč `age1…`; rozšifrovat umí jen držitel soukromého klíče. Knihovna
+  `age-encryption` (oficiální TypeScript implementace autora formátu), kompatibilní s nástrojem
+  `age` (ověřeno testem v obou směrech).
+- Produkční SQL se do GitHubu nikdy nenahraje nešifrované (konfigurace i běh to vynucují).
+  `BACKUP_ENCRYPTION=none` je povolené jen mimo produkci.
+- **Klíč:** `age-keygen -o d1-backup-key.txt` (vypíše veřejný klíč `age1…`). Soubor
+  s klíčem uložit offline: správce hesel (příloha) + kopie mimo počítač (šifrovaný USB disk,
+  tištěná kopie v trezoru). Nikdy do repozitáře, GitHub Secrets, Cloudflare, e-mailu ani chatu
+  s AI asistentem. Více příjemců (např. záložní klíč): `BACKUP_AGE_RECIPIENT=age1…,age1…`.
+- **Ztráta soukromého klíče = ztráta všech záloh šifrovaných pro tento klíč** (nikdo, ani
+  GitHub, je nerozšifruje). Výměna klíče: nový veřejný klíč do workflow; starší snapshoty
+  zůstávají čitelné jen starým klíčem až do odstranění retencí. Rotace nenutí
+  přepis již existující měsíční zálohy; pro obnovení historických souborů je proto
+  nutné uchovat všechny odpovídající staré soukromé klíče.
+
+### GitHub Actions (zálohovací repozitář)
+
+Workflow běží v **soukromém** repozitáři se zálohami, ne ve veřejném repozitáři aplikace
+(šablona `backup/github-actions/d1-backup.yml`, jeden soubor na prostředí):
+
+- **Auditovaný kód:** krok checkout stáhne veřejný repozitář na **pevném commitu**
+  (`CODE_COMMIT`, 40 znaků SHA) a ověří ho (`git rev-parse HEAD`). Nový kód aplikace s
+  produkčními credentials automaticky nikdy neběží – změna verze = vědomá úprava
+  `CODE_COMMIT` v soukromém repozitáři po kontrole diffu
+  (`git diff <starý>..<nový> -- lib/backup scripts worker/email package.json pnpm-lock.yaml`).
+- Akce třetích stran připnuté na SHA (`actions/checkout` v6.1.0, `actions/setup-node`
+  v6.5.0); závislosti `pnpm install --frozen-lockfile --ignore-scripts` bez secrets.
+- Spouštěče jen `schedule` (`17 2 * * *`, mimo celou hodinu – GitHub plánované běhy při zátěži
+  zpožďuje nebo vynechá) a `workflow_dispatch`; žádný `pull_request` – cizí kód secrets nikdy
+  nedostane. `concurrency` bez rušení běžícího, `timeout-minutes: 20`.
+- `permissions: contents: write` – `GITHUB_TOKEN` platí jen pro tento repozitář a jen po dobu
+  běhu. Secrets jen v kroku zálohy; logy obsahují jen druh chyby a metadata.
+- **Token D1 (`D1_EXPORT_API_TOKEN`)** jako Actions secret: samostatný user token jen
+  **Account → D1 → Edit**. Export vyžaduje Edit (s Read API vrací `Authentication error
+  10000`) a Cloudflare D1 oprávnění na jednu databázi omezit neumí – token technicky může
+  zapisovat do všech D1 v účtu. Nikdy globální API klíč, administrátorský token, build token
+  Workers Builds ani token pro migrace.
+- Selhání běhu oznámí upozornění (Resend) i e-mail GitHubu o neúspěšném workflow.
+- **Porovnání alternativ:** (1) Actions ve veřejném repozitáři – D1 token by byl v repozitáři,
+  do kterého směřují cizí PR, a zálohy i kód by sdílely oprávnění; zamítnuto. (2) Cloudflare
+  Worker s cronem nahrávající do GitHubu – Worker by potřeboval zápisový GitHub token
+  a šifrování+gzip MB dat neprojde limitem 10 ms CPU na Workers Free; zamítnuto.
+  (3) Lokální cron na počítači uživatele – závisí na zapnutém počítači; jen nouzově (CLI
+  `run`). (4) **Actions v soukromém repozitáři s auditovaným commitem – zvoleno.**
+
+### Nezávislý monitoring
+
+- `worker/backup-monitor/` (`wrangler.backup-monitor.jsonc`): Cloudflare Worker s Cron
+  Triggerem `43 14 * * *` (Workers Free), bez veřejné URL. Fine-grained GitHub token **jen pro
+  zálohovací repozitář, Contents: Read-only** (`BACKUP_GITHUB_TOKEN`), velké zálohy nestahuje
+  ani nemaže. Kontroluje manifest a SHA-256 digest assetu vrácený GitHub API.
+  Chybějící digest nebo nesoulad = monitor-failed. Upozorní, když poslední denní záloha
+  je starší než 48 h nebo žádná neexistuje
+  (= workflow neběží: zakázaný rozvrh, chybějící secrets, vyčerpaná kvóta Actions, výpadek),
+  a když se kontrola sama nepodaří (`monitor-failed`, např. vypršený token).
+- Upozornění (`lib/backup/alerts.ts`) jen při problému: selhání exportu, úložiště, integrity,
+  šifrování, odmítnutí GitHub API, retence, zastaralá záloha. Obsahují prostředí, databázi,
+  úložiště, čas, druh chyby, poslední úspěšnou zálohu a doporučenou akci; nikdy token,
+  podepsanou URL, SQL, osobní údaje ani klíče.
+- V produkci jsou upozornění povinná: bez `RESEND_API_KEY` / `CONFLICT_ALERT_EMAIL` běh
+  skončí chybou `alerts-not-configured` (záloha se přesto uloží) – chybějící konfigurace se
+  nikdy netváří jako fungující monitoring. Test doručení: `alert-test` (workflow_dispatch nebo
+  CLI), jen na správcovskou adresu.
+- Zbytkové riziko: když neběží ani Actions, ani monitor Worker (výpadek obou platforem, zrušený
+  účet), upozornění nepřijde. Další nezávislá možnost: externí služba typu healthchecks.io
+  (ping po úspěšné záloze) – zatím nezavedeno.
+
+### Retence
+
+Podle počtu (`BACKUP_KEEP_DAILY` 30, `BACKUP_KEEP_MONTHLY` 12), až po **úspěšném a ověřeném**
+uložení denního snapshotu; neúspěšný běh nic nemaže. Maže se jen release, který je
+jednoznačně snapshot této databáze a prostředí (přesný tag, značka v popisu, manifest
+a soubor), nikdy jiné releasy; release i jeho tag zvlášť (404 = už smazané souběžným během).
+Chyba výpisu kterékoli stránky = nic se nemaže (`retention-failed`, upozornění). Vlastní
+drafty starší než 24 h (pozůstatky přerušených běhů) se uklidí.
+
+### Náklady a finance
+
+**GitHub (výchozí backend):**
+
+- GitHub Free (osobní účet i organizace) zahrnuje **12 USD měsíčně** výpočetního času Actions
+  pro soukromé repozitáře; Linux 2-core (`ubuntu-24.04`) stojí 0,006 USD/min (≈ 2000 min),
+  každý job se zaokrouhluje nahoru na celé minuty, počítá se i neúspěšný běh. Záloha trvá
+  řádově 1–3 min → ≈ 30–90 min měsíčně (≈ 1,5–4,5 % kvóty). Releasy nespotřebovávají
+  úložiště Actions artifacts / Packages.
+- **Bez platební metody** GitHub po vyčerpání zahrnuté kvóty Actions zablokuje (nic neúčtuje).
+  S platební metodou: Settings → Billing and licensing → Budgets and alerts → nový budget pro
+  **Actions** 0 USD se zapnutým **Stop usage when budget limit is reached** a alerty
+  „included usage 90 % a 100 %“. Bez „Stop usage“ GitHub jen upozorní a dál účtuje.
+- Zbytková rizika: kvóta je společná pro všechny soukromé repozitáře účtu; zablokované Actions
+  = zálohy neběží (zachytí monitor); GitHub může ceník změnit. Nic placeného se nezapíná.
+
+**Cloudflare:** monitor Worker a (volitelně) R2 Worker běží na Workers Free (cron, jednotky
+požadavků denně); na Free se překročení limitů projeví chybou, ne platbou. R2 viz níže.
+
+### CLI (Windows, macOS, Linux)
+
+Node.js ≥ 22.18 a `pnpm install` v repozitáři. Konfigurace z prostředí nebo `--env-file`
+(soubor **mimo repozitář**, např. `~/.config/d1-backup/production.env` s `BACKUP_BACKEND`,
+`BACKUP_ENV`, `BACKUP_DATABASE_NAME`, `BACKUP_GITHUB_REPO`, `BACKUP_GITHUB_TOKEN` – token jen
+pro čtení). Volby pnpm skriptů se předávají za `--`.
+
+```bash
+pnpm backup:list -- --backend github --env-file ~/.config/d1-backup/production.env
+pnpm backup:download -- --backend github --snapshot latest --env-file …   # nebo daily/RRRR-MM-DD, monthly/RRRR-MM
+pnpm backup:verify -- --file ~/d1-backups/<db>-production/<soubor>.sql.gz.age
+pnpm backup:decrypt -- --file <soubor>.sql.gz.age --identity ~/klice/d1-backup-key.txt
+```
+
+- Stažení ověří manifest (databáze, prostředí, snapshot, název), velikost a SHA-256 – poškozený
+  nebo neúplný soubor odmítne. Výchozí výstup `~/d1-backups/<databáze>-<prostředí>/`; uvnitř
+  repozitáře jen do cesty ignorované Gitem (`.d1-backups/`). Nic se nepřepíše bez `--force`,
+  zápis: dočasný soubor 0600 (fsync) → create-only hardlink, který existující ani souběžně
+  vzniklý soubor nikdy nepřepíše; na filesystému bez hardlinků (FAT/exFAT, část síťových
+  úložišť) exkluzivní vytvoření `open(…, 'wx')` (neúplný soubor se po chybě smaže); s `--force`
+  atomické přejmenování bez předchozího smazání cíle. Stažení nic nemaže. Výstup do
+  repozitáře se pozná i přes symlink či jinou velikost písmen (kanonická cesta, inode).
+  Žádné veřejné HTTP stahování (Worker zálohy neposkytuje).
+- stderr Wrangleru se nikdy nevypisuje: u importu SQL (`d1 execute --file`) se zahodí celý,
+  u ostatních příkazů se z něj odvodí jen pevná klasifikace (oprávnění/token, existující
+  název databáze, účet, síť).
+- `verify --identity` i `decrypt` ověří i rozšifrované SQL (SHA-256, struktura, migrace).
+  Rozšifrované `.sql` obsahuje osobní údaje – po použití smazat.
+- R2: `--backend r2` s `BACKUP_R2_BUCKET`, `BACKUP_CLOUDFLARE_ACCOUNT_ID` a `BACKUP_R2_API_TOKEN`
+  (Workers R2 Storage Read); ověří velikost, MD5 a SQL.
+- Windows (PowerShell): `pnpm backup:list -- --backend github --env-file $HOME\.config\d1-backup\production.env`;
+  cesty s `\` fungují. Instalace `age` (jen pro ruční práci mimo CLI, CLI ho nepotřebuje):
+  Windows `winget install --id FiloSottile.age`, macOS `brew install age`,
+  Linux `apt install age` (Debian/Ubuntu) / `dnf install age` (Fedora) nebo binárka z
+  github.com/FiloSottile/age/releases. Klíč: `age-keygen -o d1-backup-key.txt`.
+
+### Obnova
+
+Produkční D1 se nikdy nepřepisuje ani do ní neimportuje; CLI obnovuje **jen do nové D1**.
+
+```bash
+pnpm backup:restore -- --backend github --snapshot latest --target chalupa-obnova-2026-11-23 \
+  --identity ~/klice/d1-backup-key.txt --env-file ~/.config/d1-backup/production.env
+# z lokálního souboru (bez přístupu ke GitHubu; manifest vedle souboru):
+pnpm backup:restore -- --file <soubor>.sql.gz.age --identity <klíč> --target chalupa-obnova-2026-11-23
+```
+
+Postup: ověření integrity a manifestu → rozšifrování → kontrola SHA-256, prostředí a
+struktury SQL → kontrola, že cíl není zdrojová DB a **neexistuje** (`wrangler d1 list`) →
+potvrzení napsáním názvu cíle (neinteraktivně `--confirm <název>`) → `wrangler d1 create` +
+`d1 execute --file` (wrangler běží v prázdném dočasném adresáři, konfigurace projektu se
+nemění) → porovnání migrací, počtů řádků všech tabulek a normalizovaných SQL definic
+tabulek/indexů/triggerů/pohledů (kromě interních tabulek D1) → smazání dočasného SQL.
+Potřebuje `BACKUP_CLOUDFLARE_ACCOUNT_ID` a přihlášený wrangler / token s D1 Edit. Výstup bez
+osobních údajů. Obnovenou D1 po ověření smazat (`wrangler d1 delete <název>`), pokud není
+potřeba. Produkce (jen na výslovný pokyn): v okně Time Travel přednostně Time Travel
+(bookmark je v manifestu); jinak přepnutí na obnovenou D1 PR změnou `database_id`
+v `wrangler.jsonc` → merge → `check production` → deploy.
+
+### Backend Cloudflare R2 (volitelný)
+
+Neaktivní, dokud ho uživatel výslovně nezvolí: R2 musí být aktivované na účtu (rozhodnutí
+uživatele), Worker `chalupa-vsetice-d1-backup` (`wrangler.backup.jsonc`, `worker/backup/`)
+se nasazuje jen ručně `pnpm run backup:r2:deploy` (Workers Builds ho nenasazuje) a buckety
+se nevytvářejí automaticky. Export, kontroly SQL, retence a upozornění sdílí se společným
+jádrem; konfigurace stejnými `BACKUP_*` (`BACKUP_BACKEND=r2` ve vars).
+
+- **Spouštění:** `workflows[].schedules` `15 2 * * *` (záloha) a `45 14 * * *` (kontrola stáří
+  a objemu); ručně `wrangler workflows trigger <workflow> '{"mode":"backup|monitor|alert-test"}'`
+  nebo `pnpm backup:run -- --backend r2` (s `BACKUP_R2_WORKFLOW`). Bez veřejného HTTP rozhraní.
+- **Uložení:** podepsaná URL exportu se streamuje přes `FixedLengthStream` do
+  `pending/<instance>.sql` (MD5 přes `DigestStream`, kontrola struktury), pak podmíněná kopie
+  (`If-None-Match: *`) do `daily/RRRR-MM-DD.sql` a první úspěšná záloha měsíce do
+  `monthly/RRRR-MM.sql`. Snapshot se nikdy nepřepíše ani při souběhu (rozhoduje R2; ověřeno
+  testy souběžných zápisů). `pending/` starší než 24 h se maže na začátku každého běhu.
+- **Opakování:** export 3× (každý pokus nový export), kroky R2 5×, upozornění 4×.
+- **Náklady** (R2 Standard, bezplatná kvóta 10 GB-month, 1 mil. Class A, 10 mil. Class B
+  měsíčně; Workflows 3000 kroků/den na Free): spotřeba řádově jednotky MB a desítky operací
+  denně. Ochrana kvóty, kterou R2 sama nevynucuje: strop exportu 150 MiB, tvrdý strop
+  bucketu 9 GB (nad ním se export nespustí), upozornění nad 7 GB. Nejde o absolutní záruku
+  nulových nákladů (kvóta R2 je společná pro účet, počítá se z denního maxima, ceník se může
+  změnit). Jen R2 Standard; lifecycle pravidlo jen `pending/` (smazat po 1 dni).
+- **Bezpečnost:** bucket neveřejný (bez vlastní domény a `r2.dev`), šifrování at-rest klíči
+  Cloudflare (kdo má R2 přístup v účtu, čte osobní údaje). Token **A** pro správu
+  infrastruktury (Workers R2 Storage Edit, Workers Scripts Edit, Account Settings Read, User
+  Details Read, Memberships Read; oprávnění celého účtu – krátké TTL), token **B**
+  `D1_EXPORT_API_TOKEN` jen D1 Edit. Secrets `wrangler secret put <NÁZEV> --config
+  wrangler.backup.jsonc [--env test]`: `D1_EXPORT_API_TOKEN`, `BACKUP_CLOUDFLARE_ACCOUNT_ID`,
+  `RESEND_API_KEY`, `CONFLICT_ALERT_EMAIL`, volitelně `CONFLICT_ALERT_FROM`. Logy jen druh
+  chyby; traces a invocation logs vypnuté (zaznamenaly by podepsanou URL).
+- **Zprovoznění** (jen po rozhodnutí uživatele): aktivace R2 → buckety
+  `wrangler r2 bucket create chalupa-vsetice-d1-backups` (a `…-test`), lifecycle
+  `wrangler r2 bucket lifecycle add <bucket> pending-cleanup pending/ --expire-days 1` →
+  `pnpm run backup:r2:deploy:test` + secrets s `--env test` → `alert-test` a `backup` →
+  produkce `pnpm run backup:r2:deploy` jen se souhlasem.
+
+### Bezpečnostní doplnění po nezávislém auditu
+
+- Produkční GitHub snapshoty se kontrolují na `age` šifrování také při opakovaných bězích
+  a při převzetí již existujícího měsíčního snapshotu. Nešifrovaný historický soubor se
+  neakceptuje.
+- Nezávislý monitor pro GitHub při každé kontrole ověřuje aktuální denní snapshot
+  načtením malého manifestu a porovnáním SHA-256 proti `digest` metadatům assetu
+  vypočteným GitHubem při uploadu. Velký šifrovaný soubor nestahuje (limity CPU/RAM
+  Workers Free). Kontrola skutečných bajtů probíhá po uploadu, při stažení/ověření
+  a při obnově; nezávislý monitor není náhradou restore-testu.
+- Obnova kontroluje existenci tabulek včetně prázdných, indexů, triggerů
+  a pohledů, počty řádků a normalizované CREATE definice ze sqlite_master.
+  Nejde o kryptografickou garanci úplné obnovitelnosti všech databázových operací.
+  Očekávané objekty se odvozují jen ze začátků rozdělených SQL příkazů, takže obsah
+  textových hodnot (např. U+2028/U+2029 nebo „CREATE …“ v řetězci) je neovlivní.
+- **Otevřené riziko – interní tabulky vzdálené D1:** kontrola „neočekávaných objektů“ vyjímá
+  jen `_cf_METADATA` (lokální D1). Pokud skutečná vzdálená D1 v `sqlite_master` ukazuje další
+  interní tabulky (např. `_cf_KV`), obnova skončí falešným selháním kontroly schématu.
+  Ověří se při první zkušební obnově do nové D1 v Cloudflare; výjimky se rozšíří jen podle
+  skutečně zjištěných názvů, kontrola se neobchází.
+- R2 retence se při automatických bězích řídí metadaty databáze a prostředí.
+  Objekty bez metadat nebo patřící jiné databázi nejsou automaticky mazány.
+  Při kolizi denního či měsíčního klíče s neoznačeným objektem běh selže.
+  Pro více databází i nadále používej samostatné R2 buckety, protože jejich
+  denní klíče mají společný formát `daily/YYYY-MM-DD.sql`.
+- `BACKUP_SCHEMA_PROFILE=chalupa` (výchozí) zachovává přísné kontroly projektu.
+  V generic profilu se před exportem přes Cloudflare D1 GET API ověřuje, že UUID databáze
+  odpovídá požadovanému názvu (chyba = žádný export). Pokud databáze nemá vlastní marker
+  prostředí, `BACKUP_ENV` je pouze administrativní označení; generic profil neumí
+  sám dokázat, zda je databáze skutečně production nebo preview.
+  Používej proto oddělené účty/databáze a kontroluj UUID před aktivací.
+  `generic` dovoluje jinou D1 bez tabulky rezervací či migrační tabulky,
+  ale nedává stejnou garanci aplikační integrity jako profil Chalupy.
+  Pro R2 backend nastav stejný profil také v CLI při obnově.
+- CLI spouští přímo TypeScript, proto požaduje Node.js alespoň 22.18.
+
+### Zprovoznění GitHub zálohy (jednorázově, uživatel)
+
+1. **Soukromý repozitář** (např. `<owner>/chalupa-vsetice-d1-backups`): GitHub → New
+   repository → **Private**, zaškrtnout „Add a README“ (releasy potřebují výchozí větev
+   s commitem). Settings → Actions → General: „Allow <owner>, and select non-<owner>, actions“
+   s povolenými `actions/checkout@*`, `actions/setup-node@*`; Workflow permissions „Read
+   repository contents“ (workflow si zápis vyžádá sám přes `permissions`).
+2. **Klíč age** lokálně: `age-keygen -o d1-backup-key.txt`; soubor uložit offline (viz
+   Šifrování), veřejný klíč `age1…` použít v kroku 4.
+3. **Token D1 (B):** Cloudflare → My Profile → API Tokens → Create Custom Token → jen
+   Account → D1 → Edit, jen účet chalupy, bez TTL (vypršení by zastavilo zálohy – zachytí
+   monitor). Hodnotu rovnou do secretu, nikam jinam.
+4. **Workflow:** `backup/github-actions/d1-backup.yml` zkopírovat do soukromého repozitáře jako
+   `.github/workflows/d1-backup-production.yml`; doplnit `CODE_COMMIT` (auditovaný commit
+   `main` tohoto repozitáře), `BACKUP_AGE_RECIPIENT`. Pro Preview druhá kopie s
+   `BACKUP_ENV: preview`, Preview D1 (`chalupa-vsetice-rezervace-test`), jinou `concurrency`
+   skupinou a cronem.
+5. **Actions secrets** (Settings → Secrets and variables → Actions → New repository secret):
+   `D1_EXPORT_API_TOKEN`, `BACKUP_CLOUDFLARE_ACCOUNT_ID`, `RESEND_API_KEY`,
+   `CONFLICT_ALERT_EMAIL`, volitelně `CONFLICT_ALERT_FROM`.
+6. **Finance:** Settings → Billing and licensing → budget Actions 0 USD se „Stop usage“
+   (pokud je uložená platební metoda) a alerty included usage 90/100 %.
+7. **Test:** Actions → D1 záloha → Run workflow: `alert-test` (e-mail jen správci), pak `run`;
+   lokálně `backup:list`, `backup:download`, `backup:decrypt` a zkušební `backup:restore` do
+   nové D1 (po ověření smazat).
+8. **Monitor** (souhlas uživatele s nasazením): fine-grained token (Resource owner = vlastník
+   repozitáře, Only select repositories = zálohovací repozitář, Contents: Read-only, expirace
+   např. 1 rok – vypršení ohlásí `monitor-failed`), secrets `wrangler secret put … --config
+   wrangler.backup-monitor.jsonc` (`BACKUP_GITHUB_REPO`, `BACKUP_GITHUB_TOKEN`,
+   `RESEND_API_KEY`, `CONFLICT_ALERT_EMAIL`), `pnpm run backup:monitor:deploy`.
+
+### Prevence úniku credentials při vývoji s AI asistentem
+
+- Hodnoty tokenů, klíčů a secrets nikdy nevkládat do chatu, promptu, issue, PR ani commitu;
+  asistent je nepotřebuje – secrets se nastavují interaktivně (`wrangler secret put`, GitHub
+  Settings → Secrets) nebo přes zabezpečené úložiště prostředí (proxy doplňuje token).
+- Soukromý klíč age nikdy nesdílet s asistentem ani ho nedávat do jeho pracovního prostředí;
+  rozšifrování a obnovu dělá uživatel lokálně. Konfigurace zálohy soukromý klíč v prostředí
+  odmítne.
+- Env soubory s tokeny jen mimo repozitář (`~/.config/…`); `.env*` a `*.env` jsou v
+  `.gitignore`. Stažené zálohy a rozšifrované SQL mimo repozitář, po použití smazat.
+- Asistentovi dávat tokeny s minimálními oprávněními a krátkou platností (správa infrastruktury
+  token A, ne token B ani build token); po dokončení práce tokeny odvolat.
+- Výstupy (logy, testy, PR) kontrolovat na tokeny, podepsané URL a osobní údaje; testy
+  používají jen syntetická data a generované klíče. GitHub secret scanning v repozitáři
+  nechat zapnutý.
 
 ## License
 

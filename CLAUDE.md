@@ -75,6 +75,44 @@ platí v každé session.
   schématu a záznamů migrací). Destruktivní (`DROP`, `DELETE`, `UPDATE`, `RENAME`, `REPLACE`)
   mají přísnější režim: výslovné povolení, v produkci samostatně.
 
+## Automatické zálohy D1 (GitHub Releases / R2)
+
+- Společné jádro `lib/backup/` (export, kontrola SQL, SHA-256, manifest, retence, gzip + age,
+  upozornění) a dva backendy: **GitHub Releases** (výchozí; šifrované snapshoty v SOUKROMÉM
+  repozitáři, GitHub Actions podle šablony `backup/github-actions/d1-backup.yml`, nezávislý
+  monitor `worker/backup-monitor/`) a volitelný **R2** (`worker/backup/`, Cloudflare
+  Workflows, neaktivní). CLI `scripts/backup.ts` (`pnpm backup:*`). Popis: README,
+  „Automatické zálohy D1“. Doplňuje ruční zálohy před migracemi (`db:backup:*`).
+- Konfigurace jen přes `BACKUP_*` (validuje `lib/backup/config.ts`); přepnutí backendu vždy
+  výslovné (`BACKUP_BACKEND`). Credentials nikdy ve verzovaných souborech.
+- Bez výslovného souhlasu uživatele: nevytvářet ani neměnit zálohovací repozitář, Actions,
+  secrets ani budgety; nespouštět produkční zálohu; nenasazovat monitor
+  (`pnpm run backup:monitor:deploy`) ani R2 Worker (`pnpm run backup:r2:deploy`); neaktivovat
+  R2 ani nic placeného; nic nemazat. Testovací R2 prostředí (`pnpm run backup:r2:deploy:test`)
+  jen pokud je R2 aktivované.
+- GitHub: zálohovací repozitář musí být soukromý (kód to ověřuje); produkční SQL vždy šifrované
+  age (veřejný klíč `BACKUP_AGE_RECIPIENT`). Soukromý klíč age má **jen uživatel** – nikdy
+  v repozitáři, GitHub Actions, Cloudflare, logu ani v prostředí Claude; nikdy o něj nežádat.
+- Actions s produkčním D1 tokenem běží jen z auditovaného commitu (`CODE_COMMIT` v soukromém
+  repozitáři, změna jen vědomě uživatelem), akce připnuté na SHA, bez `pull_request`
+  spouštěčů, `permissions: contents: write`, secrets jen v kroku zálohy. Šablonu nikdy
+  neaktivovat v tomto veřejném repozitáři (`.github/workflows`).
+- Snapshot se nikdy nepřepisuje: GitHub draft → upload → ověření → publikace (422 = souběh,
+  vyhodnotit existující); R2 jen podmíněný `put()` (`If-None-Match: *`). Retence (30/12) jen po
+  úspěšné záloze a jen jednoznačně rozpoznaných snapshotů této databáze a prostředí; chyba
+  výpisu = nic nemazat.
+- Export vždy `dump_options.compatibility: "d1"`; nikdy `sqlite3_cli_only`. R2: strop exportu
+  150 MiB, tvrdý strop bucketu 9 GB a upozornění nad 7 GB neměnit bez souhlasu; jen R2
+  Standard; bucket nikdy veřejný. Netvrdit absolutní záruku nulových nákladů.
+- Upozornění jsou v produkci povinná (`RESEND_API_KEY`, `CONFLICT_ALERT_EMAIL`); `alert-test`
+  jen na správcovskou adresu, nikdy hostům.
+- Obnova jen do NOVÉ D1 (`pnpm backup:restore`, potvrzení názvem cíle); do produkční D1 se
+  nikdy neimportuje. Obnova produkce jen na výslovný pokyn uživatele; zkušební D1 po ověření
+  smazat.
+- Do logů, výsledků, PR ani výstupů nikdy token, podepsanou URL, obsah SQL, osobní údaje ani
+  klíče. Stažený / rozšifrovaný snapshot jen dočasně mimo repozitář a po použití smazat. Testy
+  jen se syntetickými daty a klíči generovanými v testu.
+
 ## Cloudflare konfigurace mimo git
 
 Skutečný stav (nastaveno ručně v dashboardu, v diffu není vidět):
@@ -89,6 +127,19 @@ Skutečný stav (nastaveno ručně v dashboardu, v diffu není vidět):
 - Token pro správu D1 (záloha a migrace, mimo build): samostatný user token s Account Settings
   Read, **D1 Edit**, User Details Read, Memberships Read; v cloudové session Claude ho doplňuje
   proxy pro `api.cloudflare.com`. Build token zůstává D1 **Read** – nikdy ho nerozšiřovat.
+- Token **B** `D1_EXPORT_API_TOKEN` (export D1 pro zálohu): samostatný user token jen
+  Account → D1 → Edit (D1 nejde omezit na jednu databázi). GitHub backend: Actions secret
+  v soukromém zálohovacím repozitáři (+ `BACKUP_CLOUDFLARE_ACCOUNT_ID`, `RESEND_API_KEY`,
+  `CONFLICT_ALERT_EMAIL`). R2 Worker (`wrangler.backup.jsonc`): stejné secrets přes
+  `wrangler secret put … --config wrangler.backup.jsonc [--env test]`. Monitor
+  (`wrangler.backup-monitor.jsonc`): `BACKUP_GITHUB_REPO`, `BACKUP_GITHUB_TOKEN` (fine-grained,
+  jen zálohovací repozitář, Contents Read-only), `RESEND_API_KEY`, `CONFLICT_ALERT_EMAIL`.
+  Nikdy jako secret nepoužít administrátorský token, build token ani token pro správu.
+- Token **A** pro správu zálohovací infrastruktury (Claude): Workers R2 Storage Edit, Workers
+  Scripts Edit, Account Settings Read, User Details Read, Memberships Read (+ D1 Edit pro
+  migrace). Oprávnění jsou na úrovni účtu – Workers Scripts Edit technicky dovolí měnit i
+  rezervační Worker; ten Claude přímo nenasazuje (jen přes merge). R2 musí být na účtu
+  aktivované (dashboard, rozhodnutí uživatele).
 - Secrets se nastavují jen přes `wrangler secret put` (produkce) a
   `wrangler preview base-config secret put` (sdílené všem Worker Previews). Preview potřebuje
   minimálně `ECHALUPY_ICAL_URL`, `BOOKING_ICAL_EXPORT_TOKEN`, `TURNSTILE_SECRET_KEY`
@@ -157,7 +208,8 @@ Skutečný stav (nastaveno ručně v dashboardu, v diffu není vidět):
 - Malé, logicky oddělené PR; nemíchat nesouvisející úklid do feature PR.
 - PR nemergovat bez souhlasu uživatele.
 - Před PR: `pnpm test`, `pnpm run build`, `pnpm exec wrangler deploy --dry-run --config wrangler.jsonc`
-  (`tsc --noEmit` má jednu známou chybu ve `vite.config.ts`, mimo rozsah).
+  a `bash scripts/check-typescript.sh` (povoluje jen známou chybu ve `vite.config.ts`, mimo
+  rozsah; jakákoli jiná diagnostika = chyba, stejně v CI).
 
 ### Styl PR popisů a komentářů
 
