@@ -1,21 +1,13 @@
 # Synthetic-only regression checks for D1 backup code. No Cloudflare or GitHub backup secrets.
 name: D1 backup regression tests
 
+# Spouští se u každého PR a pushe do main (bez filtru cest – zálohování závisí i na sdílených
+# souborech, např. worker/email/resend.ts, wrangler.backup*.jsonc, tsconfig.json).
+# `pull_request` (nikoli `pull_request_target`): PR z forků nedostanou secrets ani zápisový token.
 on:
   pull_request:
-    paths:
-      - 'lib/backup/**'
-      - 'worker/backup/**'
-      - 'worker/backup-monitor/**'
-      - 'scripts/backup.ts'
-      - 'scripts/lib/backup-cli.ts'
-      - 'tests/backup*.test.ts'
-      - 'tests/fixtures/**'
-      - 'backup/**'
-      - 'package.json'
-      - 'pnpm-lock.yaml'
-      - 'README.md'
-      - '.github/workflows/backup-regression-tests.yml'
+  push:
+    branches: [main]
   workflow_dispatch:
 
 permissions:
@@ -23,7 +15,7 @@ permissions:
 
 concurrency:
   group: d1-backup-tests-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   tests:
@@ -35,7 +27,8 @@ jobs:
           persist-credentials: false
       - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6.5.0
         with:
-          node-version: '24'
+          # Stejná hlavní verze jako produkční zálohovací workflow (backup/github-actions/d1-backup.yml).
+          node-version: '22'
       - name: Install dependencies
         run: |
           corepack enable
@@ -49,9 +42,8 @@ jobs:
         env:
           REQUIRE_AGE_INTEROP: '1'
         run: pnpm test
-      - name: TypeScript diagnostics (known pre-existing vite.config issue)
-        continue-on-error: true
-        run: pnpm exec tsc --noEmit --pretty false
+      - name: TypeScript (selže na jakoukoli novou diagnostiku; baseline jen vite.config.ts shodná s main)
+        run: bash scripts/check-typescript.sh
       - name: Build production bundle (no deployment)
         run: pnpm run build
       - name: Dry-run main Worker, backup monitor and optional R2 Worker
