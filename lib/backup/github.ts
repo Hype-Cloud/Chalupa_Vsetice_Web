@@ -363,7 +363,9 @@ export async function publishSnapshot(client: GithubClient, ref: SnapshotRef, by
   if (existing) return evaluateExisting(client, existing, manifest, policy);
 
   const draft = await client.createDraft(tag, `D1 záloha ${manifest.database} (${manifest.environment}) ${snapshotId(ref)}`, releaseBody(manifest));
-  let published = false;
+  // Once PATCH has been attempted its outcome may be unknown after a network error.
+  // Never delete this release in generic cleanup: GitHub may already have published it.
+  let publicationAttempted = false;
   try {
     const manifestBytes = new TextEncoder().encode(`${JSON.stringify(manifest, null, 2)}\n`);
     const fileAsset = await client.uploadAsset(draft.id, manifest.file.name, bytes, 'application/octet-stream');
@@ -372,6 +374,7 @@ export async function publishSnapshot(client: GithubClient, ref: SnapshotRef, by
     if ((await sha256Hex(await client.downloadAsset(fileAsset))) !== manifest.file.sha256) throw new BackupError('upload-verify-failed');
     if ((await sha256Hex(await client.downloadAsset(manifestAsset, 1024 ** 2))) !== (await sha256Hex(manifestBytes))) throw new BackupError('upload-verify-failed');
 
+    publicationAttempted = true;
     const result = await client.publish(draft.id);
     if (!result) {
       // Souběh: tag mezitím publikoval jiný běh – vlastní draft pryč, rozhodne existující snapshot.
@@ -380,15 +383,15 @@ export async function publishSnapshot(client: GithubClient, ref: SnapshotRef, by
       if (!winner) throw new BackupError('github-rejected');
       return evaluateExisting(client, winner, manifest, policy);
     }
-    published = true;
     const check = await client.releaseByTag(tag);
     if (!check || check.id !== draft.id || check.draft) throw new BackupError('publish-verify-failed');
     const snapshot = identifySnapshot(client.target, check);
     if (!snapshot || snapshot.file.size !== bytes.length) throw new BackupError('publish-verify-failed');
     return 'stored';
   } catch (error) {
-    // Neúplný snapshot se nikdy nehlásí jako úspěch; nepublikovaný draft se uklidí.
-    if (!published) await client.deleteRelease(draft.id).catch(() => client.deps.log('d1-backup: draft cleanup failed'));
+    // Safe only before PATCH. A timed-out PATCH may have succeeded server-side;
+    // leave uncertain drafts for age-based cleanup (which checks draft=true).
+    if (!publicationAttempted) await client.deleteRelease(draft.id).catch(() => client.deps.log('d1-backup: draft cleanup failed'));
     throw error;
   }
 }
