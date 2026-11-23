@@ -194,7 +194,7 @@ test('ztracená odpověď na PATCH po úspěšné publikaci nesmaže zveřejněn
     ...deps(),
     fetch: async (input, init) => {
       const req = new Request(input, init);
-      if (req.method === 'PATCH' && /\\/releases\\/\\d+$/.test(new URL(req.url).pathname)) {
+      if (req.method === 'PATCH' && new URL(req.url).pathname.split('/').at(-2) === 'releases') {
         const committed = await route(input, init);
         assert.ok(committed.ok, 'fake GitHub provedl publikaci');
         throw new Error('simulovaná ztráta odpovědi po úspěšném PATCH');
