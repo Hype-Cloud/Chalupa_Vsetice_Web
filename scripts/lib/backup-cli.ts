@@ -10,7 +10,7 @@
 // - Do výstupu jen identifikátory, velikosti a kontrolní součty – nikdy tokeny, obsah SQL ani klíče.
 
 import { createHash, randomBytes } from 'node:crypto';
-import { closeSync, existsSync, linkSync, mkdirSync, mkdtempSync, openSync, readFileSync, renameSync, rmSync, writeSync } from 'node:fs';
+import { closeSync, existsSync, linkSync, mkdirSync, mkdtempSync, openSync, readFileSync, realpathSync, renameSync, rmSync, writeSync } from 'node:fs';
 import { basename, dirname, isAbsolute, join, relative, resolve } from 'node:path';
 import { parseBackupConfig, type BackupBackend, type BackupConfig } from '../../lib/backup/config.ts';
 import { BackupError, errorKind, inspectSql, isObject, sha256Hex } from '../../lib/backup/core.ts';
@@ -81,9 +81,29 @@ function readConfig(deps: CliDeps, backend: BackupBackend, purpose: 'read' | 'ba
 // --- Bezpečné soubory ----------------------------------------------------------------------------
 
 /** Výstup mimo repozitář, nebo uvnitř jen do cesty ignorované Gitem. */
+/** Canonicalizes existing symlinked path components, including when the leaf is new. */
+function realOutputDirectory(dir: string): string {
+  let ancestor = resolve(dir);
+  const missing: string[] = [];
+  while (!existsSync(ancestor)) {
+    const parent = dirname(ancestor);
+    if (parent === ancestor) throw new CliError('výstupní cestu nelze ověřit');
+    missing.unshift(basename(ancestor));
+    ancestor = parent;
+  }
+  try {
+    return resolve(realpathSync(ancestor), ...missing);
+  } catch {
+    throw new CliError('výstupní cestu nelze ověřit');
+  }
+}
+
 export function assertSafeOutput(dir: string, deps: CliDeps): string {
-  const absolute = resolve(dir);
-  const rel = relative(resolve(deps.repoRoot), absolute);
+  // Lexical resolve() alone can be bypassed by a symlink outside the checkout
+  // pointing into a tracked directory (including a non-existent child folder).
+  const absolute = realOutputDirectory(dir);
+  const root = realOutputDirectory(deps.repoRoot);
+  const rel = relative(root, absolute);
   const inside = rel === '' || (!rel.startsWith('..') && !isAbsolute(rel));
   if (inside && !deps.isIgnored(join(absolute, '.d1-backup-probe'))) {
     throw new CliError('výstup v repozitáři musí být v cestě ignorované Gitem (např. .d1-backups/) – zálohy se nesmí dostat do commitu');
