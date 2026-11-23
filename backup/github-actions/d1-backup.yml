@@ -92,8 +92,9 @@ jobs:
           MODE: ${{ inputs.mode || 'run' }}
           BACKUP_GITHUB_REPO: ${{ github.repository }}
           BACKUP_GITHUB_TOKEN: ${{ github.token }}
-          BACKUP_CLOUDFLARE_ACCOUNT_ID: ${{ secrets.BACKUP_CLOUDFLARE_ACCOUNT_ID }}
-          D1_EXPORT_API_TOKEN: ${{ secrets.D1_EXPORT_API_TOKEN }}
+          # Přístup k D1 jen pro zálohu (mode run); monitor a alert-test token nedostanou.
+          BACKUP_CLOUDFLARE_ACCOUNT_ID: ${{ (inputs.mode || 'run') == 'run' && secrets.BACKUP_CLOUDFLARE_ACCOUNT_ID || '' }}
+          D1_EXPORT_API_TOKEN: ${{ (inputs.mode || 'run') == 'run' && secrets.D1_EXPORT_API_TOKEN || '' }}
           RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}
           CONFLICT_ALERT_EMAIL: ${{ secrets.CONFLICT_ALERT_EMAIL }}
           CONFLICT_ALERT_FROM: ${{ secrets.CONFLICT_ALERT_FROM }}

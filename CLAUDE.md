@@ -208,7 +208,8 @@ Skutečný stav (nastaveno ručně v dashboardu, v diffu není vidět):
 - Malé, logicky oddělené PR; nemíchat nesouvisející úklid do feature PR.
 - PR nemergovat bez souhlasu uživatele.
 - Před PR: `pnpm test`, `pnpm run build`, `pnpm exec wrangler deploy --dry-run --config wrangler.jsonc`
-  (`tsc --noEmit` má jednu známou chybu ve `vite.config.ts`, mimo rozsah).
+  a `bash scripts/check-typescript.sh` (povoluje jen známou chybu ve `vite.config.ts`, mimo
+  rozsah; jakákoli jiná diagnostika = chyba, stejně v CI).
 
 ### Styl PR popisů a komentářů
 

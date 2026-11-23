@@ -222,7 +222,7 @@ Aktuální stav ověřuje `pnpm test`; počty v tabulce odpovídají tomuto běh
 | smoke.test.ts | 9 | Smoke test veřejných endpointů proti skutečnému Workeru: produkce (POST 404, `booking-config` vypnutý) a Preview, bez tokenů a zápisů, odhalení zapnutého POST, výpadku D1, úniku osobních údajů a veřejného exportu, `/calendar/*` s `X-Robots-Tag` přepsaným platformou v Preview. |
 | backup.test.ts | 26 | Automatická záloha D1 → R2 ve workerd (Miniflare: skutečné R2, DigestStream, FixedLengthStream): export a dotazování, chyby API (HTTP, JSON, `status: error`, chybějící/neplatná URL či bookmark), vypršená URL, výpadek a chybějící délka streamu, validace obsahu (prostředí, schéma, migrace, zkrácení, UTF-8, cizí soubor), MD5, idempotence, souběžné zápisy do stejného snapshotu (podmíněný put `If-None-Match: *`, právě jeden uspěje, žádné přepsání; dvě souběžné instance Workflow), retence 30/12 jen po úspěchu, úklid `pending/`, kontrola stáří 48 h a objemu, povinná upozornění v produkci (chybějící konfigurace, výpadek Resend bez ztráty zálohy, test doručení), tvrdý strop kapacity, obnova snapshotu do samostatné D1, konfigurace samostatného Workeru. |
 | backup-core.test.ts | 14 | Společné jádro záloh: konfigurace `BACKUP_*` (explicitní backend, fail closed bez šifrování v produkci, odmítnutí soukromého klíče age, chyby bez hodnot, nepovinné hodnoty jiných backendů), identifikátory snapshotů, manifest, retence 30/12, gzip + age se syntetickými klíči (špatný klíč, poškozený soubor, neplatný příjemce), kompatibilita s nástrojem `age`. |
-| backup-github.test.ts | 31 | Backend GitHub Releases nad falešným API: šifrovaný denní i měsíční snapshot s manifestem, idempotence, nepřepisování, souběžné publikace (právě jedna uspěje), selhání a ověření uploadu (draft smazán), povinně soukromý repozitář, retence jen vlastních snapshotů (cizí releasy, drafty), chyba výpisu nic nemaže, monitor stáří s tokenem jen pro čtení, žádné secrets v logu a upozorněních, CLI (list, download, verify, decrypt, odmítnutí přepsání a poškozeného souboru), integrační obnova do nové lokální D1 (migrace, počty řádků), obnova z lokálního souboru, šablona GitHub Actions a konfigurace monitoru. |
+| backup-github.test.ts | 36 | Backend GitHub Releases nad falešným API: šifrovaný denní i měsíční snapshot s manifestem, idempotence, nepřepisování, souběžné publikace (právě jedna uspěje), selhání a ověření uploadu (draft smazán), povinně soukromý repozitář, retence jen vlastních snapshotů (cizí releasy, drafty), chyba výpisu nic nemaže, monitor stáří s tokenem jen pro čtení, žádné secrets v logu a upozorněních, CLI (list, download, verify, decrypt, odmítnutí přepsání a poškozeného souboru), integrační obnova do nové lokální D1 (migrace, počty řádků), obnova z lokálního souboru, šablona GitHub Actions a konfigurace monitoru; schéma obnovy ze skutečného exportu D1 proti SQLite (U+2028/U+2029, klíčová slova jako sloupce), selhání a souběh lokálního zápisu, přerušení nekonečného streamu, stderr skutečného procesu Wrangleru, nejednoznačný PATCH/422. |
 | frontend-quote.test.ts | 14 | Frontend rezervační sekce: cena jen z `/api/quote` (kontrakt proti skutečnému handleru), nightly se slevou, exact-stay, 422 a chyby serveru/sítě jako české hlášky, načítání bez staré ceny, souběh (starší odpověď nepřepíše novější), nový požadavek při změně termínu a hostů, žádný klientský výpočet ceny. |
 | i18n.test.ts | 17 | Jazykové verze: úplnost katalogů cs/en/de/ua (klíče, parametry, plurály, žádný český text ani HTML), fallback, volba jazyka (?lang, localStorage, čeština) a persistence, množná čísla, data a CZK v každém jazyce, kalendář, rezervační panel po přepnutí, přepínač, žádné pevné texty v komponentách ani pevná cena noci (3 000 / 2 990 Kč); orientační cena jen z `PRICE_PER_NIGHT`. |
 | date-input.test.ts | 8 | Vstup data DD.MM.RRRR ↔ ISO: přestupný rok, neexistující den a měsíc, rozepsané datum bez chyby, odmítnutí amerického a ISO tvaru, všechna zobrazená data den → měsíc → rok (angličtina bez měsíc/den). |
@@ -232,7 +232,7 @@ Aktuální stav ověřuje `pnpm test`; počty v tabulce odpovídají tomuto běh
 | confirmation-email.test.ts | 34 | Potvrzovací e-mail: `locale` cs/en/de/ua (jiné → 422), nová rezervace = jeden e-mail s klíčem z interního UUID, replay i souběžný dvojklik znovu naplánují potvrzení se stejným klíčem a s uloženým e-mailem a jazykem, replay bez e-mailu (422, zrušená, bez jazyka), stejný veřejný kód po resetu čítače → různé klíče, UUID mimo API/e-mail/log, žádná synchronní práce před `ctx.waitUntil`, předgenerované ikony (bez rastrování ve Workeru), Preview → testovací schránka, produkce → host, odesílatel z business identity, business config (telefon E.164 → `tel:` a český zápis, validace), hlavička (jméno, značka, termín pobytu), kompaktní termín ve 4 jazycích, pořadí platební sekce a QR bez popisku, úvod se splatností, instrukcemi před příjezdem a kontaktem (bez věty o souhrnu), nadpis „Souhrn rezervace“ ve 4 jazycích, platba ve dvou sloupcích (QR vlevo, údaje vpravo) a na mobilu pod sebou, IBAN bez `nowrap` se zalomením po skupinách, patička bez oddělovacích znaků, nezměněná hlavička (otisk HTML a PNG) i patička (otisk HTML), QR 174 px se zaoblenými rohy a beze změny PNG, linka jen pod nadpisem „Platební údaje“ (nad „Těšíme se…“ žádná), nezměněný telefonický kontakt (otisk HTML), telefonický kontakt a patička (jméno → web, `mailto:`, `IČ` jako prostý text, žádný registr ani „IČO“), Preview bez banneru a adresy hosta (jen `[TEST]` v předmětu), domek bez vlastního pozadí a jméno jednotnou vahou, odkaz na registr odstraněný z konfigurace i dokumentace, výchozí světlá varianta, kontakty v plaintextu, renderer bez napevno zapsaných údajů provozovatele, chybějící konfigurace → skip bez upozornění, selhání providera (timeout, síť, HTTP 4xx/5xx) → 201 a jedno interní upozornění bez osobních a bankovních údajů, selhání upozornění nic dalšího nespouští, odložené odeslání, obsah HTML i textu ve 4 jazycích ze stejných dat jako API, QR příloha (cid) = SPAYD, escapování HTML, nové znění věty o e-mailu. |
 | payment.test.ts | 9 | Platby: pražské datum → `DDMMYY`, `NN` 01–99, splatnost (konec pražského dne po 24 h, změny času, vždy 24–48 h), IBAN (kontrolní součet, odvození čísla účtu), SPAYD (serverová cena, VS = kód, zpráva `Rezervace {kód}`), QR jako PNG (pixely = matice) se SVG fallbackem, kopírování do schránky, kontrola, že repozitář neobsahuje skutečný IBAN. |
 | calendar.test.ts | 15 | Odkaz do kalendáře: unikátní neveřejný token oddělený od id/kódu/VS, replay a souběžný dvojklik → stejná `calendarUrl`, dvě rezervace → různé URL, legacy `NULL` token (replay, e-mail i web bez odkazu), origin (produkce vždy hlavní web, Preview origin požadavku), endpoint (pending/paid → událost, hlavičky, HEAD, 405; neplatný tvar bez dotazu do D1, neznámý a zrušený → 404; bez D1 503; token se neloguje), validní VCALENDAR/VEVENT (ical.js), CRLF, 75 oktetů, stabilní UID, 14:00/11:00 v zimě, v létě i přes přechod času, žádné osobní/bankovní/interní údaje, e-mail (hlavička a Termín = stejný href, splatnost bez odkazu, věta ve 4 jazycích; příloha `pobyt.ics` s `method=PUBLISH` = stejná událost jako odkaz, bez osobních údajů, replay stejný obsah, produkce hostovi, legacy bez přílohy), web přijme jen serverovou URL, Worker obsluhuje `/calendar/*`, žádná externí calendar služba, CHECK a UNIQUE migrace 0010. |
-| **Celkem** | **449** | |
+| **Celkem** | **471** | |
 
 ### Testované scénáře
 
@@ -1577,12 +1577,17 @@ konfiguraci (vlastní workflow soubor / prostředí wrangleru / env soubor) a od
 age se nikdy nespustí. Hodnota obsahující soukromý klíč age (`AGE-SECRET-KEY-…`) v prostředí
 zálohy nebo kontroly je odmítnuta.
 
-**Ověření k 23. 11. 2026:** CI běh PR #43 prošel s 466 úspěšnými testy a bez
-přeskočených; build a dry-runy veřejného Workeru, backup monitoru a R2 Workeru prošly.
-`tsc --noEmit` stále hlásí známý `TS2322` ve `vite.config.ts`, který je identický
-s `main`; tento problém není touto větví opraven. Oprava zálohování tím není
-ověřena proti skutečné vzdálené D1 ani skutečnému GitHub Releases API; integrační
-testy používají syntetická data, lokální D1 a fake GitHub API.
+**Stav ověření (23. 11. 2026):** lokálně `pnpm test` 471/471 s povinnou interoperabilitou
+`age` (`REQUIRE_AGE_INTEROP=1`, bez přeskočených testů); build a dry-runy veřejného Workeru,
+backup monitoru a R2 Workeru prošly. CI (`.github/workflows/backup-regression-tests.yml`) běží
+u každého PR a pushe do `main` bez filtru cest a bez secrets (`pull_request`, `contents: read`),
+na Node 22 jako produkční zálohovací workflow. TypeScript kontroluje `scripts/check-typescript.sh`:
+projde jen bez chyb, nebo s jedinou známou diagnostikou `TS2322` ve `vite.config.ts`
+(`configPath: false`, shodná s `main`, mimo rozsah zálohování); jakákoli jiná či další
+diagnostika CI zastaví. Integrační testy používají syntetická data, lokální D1 a fake GitHub
+API – proti skutečné vzdálené D1 ani skutečnému GitHub Releases API zálohování ověřeno není.
+**Automatické zálohování je neaktivní:** produkční workflow v soukromém repozitáři má jen ruční
+spouštěč a nulový `CODE_COMMIT`, schedule není nastavený a monitor ani R2 Worker nejsou nasazené.
 
 ### Backend GitHub Releases
 
@@ -1595,7 +1600,10 @@ testy používají syntetická data, lokální D1 a fake GitHub API.
   → upload obou assetů → stažení zpět a ověření SHA-256 → **publikace** (`draft=false`) →
   kontrola, že tag patří tomuto releasu. Při chybě **před pokusem o publikaci** se draft
   smaže. Pokud se ztratí odpověď na PATCH, stav publikace není jistý: release se nemaže,
-  aby se neodstranila již vytvořená záloha. Další běh znovu ověří uložený snapshot.
+  aby se neodstranila již vytvořená záloha. Při 422 na PATCH se nejdřív ověří stav releasu
+  (`GET /releases/{id}`): smaže se jen prokazatelný draft, publikovaný release se ověří jako po
+  úspěšné publikaci, nedostupné ověření skončí chybou bez mazání. Další běh znovu ověří
+  uložený snapshot; opuštěné drafty uklidí retence po 24 h.
 - **Měsíční** snapshot = první úspěšná záloha měsíce, stejný ověřený soubor (bez nového exportu).
 - **Meze kontroly úplnosti:** kontrola hlavičky, schématu, migrací a prostředí odhalí některé
   zkrácené či chybné exporty. SHA-256 prokazuje integritu stažených bajtů, nikoli to,
@@ -1732,9 +1740,15 @@ pnpm backup:decrypt -- --file <soubor>.sql.gz.age --identity ~/klice/d1-backup-k
 - Stažení ověří manifest (databáze, prostředí, snapshot, název), velikost a SHA-256 – poškozený
   nebo neúplný soubor odmítne. Výchozí výstup `~/d1-backups/<databáze>-<prostředí>/`; uvnitř
   repozitáře jen do cesty ignorované Gitem (`.d1-backups/`). Nic se nepřepíše bez `--force`,
-  zápis je atomický (dočasný soubor 0600 → create-only hardlink; s `--force` atomické
-  přejmenování bez předchozího smazání cíle), stažení nic nemaže. Žádné veřejné
-  HTTP stahování (Worker zálohy neposkytuje).
+  zápis: dočasný soubor 0600 (fsync) → create-only hardlink, který existující ani souběžně
+  vzniklý soubor nikdy nepřepíše; na filesystému bez hardlinků (FAT/exFAT, část síťových
+  úložišť) exkluzivní vytvoření `open(…, 'wx')` (neúplný soubor se po chybě smaže); s `--force`
+  atomické přejmenování bez předchozího smazání cíle. Stažení nic nemaže. Výstup do
+  repozitáře se pozná i přes symlink či jinou velikost písmen (kanonická cesta, inode).
+  Žádné veřejné HTTP stahování (Worker zálohy neposkytuje).
+- stderr Wrangleru se nikdy nevypisuje: u importu SQL (`d1 execute --file`) se zahodí celý,
+  u ostatních příkazů se z něj odvodí jen pevná klasifikace (oprávnění/token, existující
+  název databáze, účet, síť).
 - `verify --identity` i `decrypt` ověří i rozšifrované SQL (SHA-256, struktura, migrace).
   Rozšifrované `.sql` obsahuje osobní údaje – po použití smazat.
 - R2: `--backend r2` s `BACKUP_R2_BUCKET`, `BACKUP_CLOUDFLARE_ACCOUNT_ID` a `BACKUP_R2_API_TOKEN`
@@ -1818,6 +1832,13 @@ jádrem; konfigurace stejnými `BACKUP_*` (`BACKUP_BACKEND=r2` ve vars).
 - Obnova kontroluje existenci tabulek včetně prázdných, indexů, triggerů
   a pohledů, počty řádků a normalizované CREATE definice ze sqlite_master.
   Nejde o kryptografickou garanci úplné obnovitelnosti všech databázových operací.
+  Očekávané objekty se odvozují jen ze začátků rozdělených SQL příkazů, takže obsah
+  textových hodnot (např. U+2028/U+2029 nebo „CREATE …“ v řetězci) je neovlivní.
+- **Otevřené riziko – interní tabulky vzdálené D1:** kontrola „neočekávaných objektů“ vyjímá
+  jen `_cf_METADATA` (lokální D1). Pokud skutečná vzdálená D1 v `sqlite_master` ukazuje další
+  interní tabulky (např. `_cf_KV`), obnova skončí falešným selháním kontroly schématu.
+  Ověří se při první zkušební obnově do nové D1 v Cloudflare; výjimky se rozšíří jen podle
+  skutečně zjištěných názvů, kontrola se neobchází.
 - R2 retence se při automatických bězích řídí metadaty databáze a prostředí.
   Objekty bez metadat nebo patřící jiné databázi nejsou automaticky mazány.
   Při kolizi denního či měsíčního klíče s neoznačeným objektem běh selže.

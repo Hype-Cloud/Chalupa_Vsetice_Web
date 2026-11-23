@@ -864,6 +864,8 @@ test('šablona Actions: auditovaný commit, akce připnuté na SHA, minimální 
   assert.equal(withSecrets.length, 1);
   assert.ok(withSecrets[0].startsWith('Záloha'));
   assert.ok(!/AGE-SECRET-KEY/.test(text));
+  // D1 token a účet jen pro zálohu (mode run), ne pro monitor ani alert-test.
+  assert.match(yaml, /D1_EXPORT_API_TOKEN: \$\{\{ \(inputs\.mode \|\| 'run'\) == 'run' && secrets\.D1_EXPORT_API_TOKEN \|\| '' \}\}/);
   assert.ok(/BACKUP_AGE_RECIPIENT: age1/.test(yaml));
   // Placeholder commitu nesmí projít kontrolou.
   assert.match(yaml, /!= 0{40}/);
