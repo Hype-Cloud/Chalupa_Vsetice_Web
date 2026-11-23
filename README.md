@@ -1586,9 +1586,15 @@ zálohy nebo kontroly je odmítnuta.
 - **Průběh:** export D1 → kontrola SQL (struktura, migrace, `meta.environment`, velikost =
   `Content-Length`) → SHA-256 → gzip (ověřený zpětným rozbalením) → age → manifest → **draft**
   → upload obou assetů → stažení zpět a ověření SHA-256 → **publikace** (`draft=false`) →
-  kontrola, že tag patří tomuto releasu. Do publikace snapshot neexistuje; při jakékoli chybě
-  se vlastní draft smaže a běh skončí chybou – neúplný upload se nikdy nehlásí jako úspěch.
+  kontrola, že tag patří tomuto releasu. Při chybě **před pokusem o publikaci** se draft
+  smaže. Pokud se ztratí odpověď na PATCH, stav publikace není jistý: release se nemaže,
+  aby se neodstranila již vytvořená záloha. Další běh znovu ověří uložený snapshot.
 - **Měsíční** snapshot = první úspěšná záloha měsíce, stejný ověřený soubor (bez nového exportu).
+- **Meze kontroly úplnosti:** kontrola hlavičky, schématu, migrací a prostředí odhalí některé
+  zkrácené či chybné exporty. SHA-256 prokazuje integritu stažených bajtů, nikoli to,
+  že zdrojová D1 obsahovala právě a pouze řádky v souboru. Chybějící kompletní INSERT
+  může být syntakticky neodhalitelný. Nezávislá obnova do nové D1 ověřuje, že **to, co je
+  ve snapshotu**, lze importovat, ale bez kontroly proti zdroji nedokazuje úplnost zdroje.
 - **Manifest:** databáze, prostředí, typ a datum snapshotu, čas exportu, bookmark, počet
   migrací, velikost a SHA-256 SQL i souboru, komprese, šifrování a veřejné klíče příjemců,
   verze formátu. Žádná credentials ani osobní údaje.
@@ -1719,7 +1725,8 @@ pnpm backup:decrypt -- --file <soubor>.sql.gz.age --identity ~/klice/d1-backup-k
 - Stažení ověří manifest (databáze, prostředí, snapshot, název), velikost a SHA-256 – poškozený
   nebo neúplný soubor odmítne. Výchozí výstup `~/d1-backups/<databáze>-<prostředí>/`; uvnitř
   repozitáře jen do cesty ignorované Gitem (`.d1-backups/`). Nic se nepřepíše bez `--force`,
-  zápis je atomický (dočasný soubor 0600 → přejmenování), stažení nic nemaže. Žádné veřejné
+  zápis je atomický (dočasný soubor 0600 → create-only hardlink; s `--force` atomické
+  přejmenování bez předchozího smazání cíle), stažení nic nemaže. Žádné veřejné
   HTTP stahování (Worker zálohy neposkytuje).
 - `verify --identity` i `decrypt` ověří i rozšifrované SQL (SHA-256, struktura, migrace).
   Rozšifrované `.sql` obsahuje osobní údaje – po použití smazat.
