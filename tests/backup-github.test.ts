@@ -494,6 +494,13 @@ test('monitor s digestem assetu odmítá chybějící digest, bez fallbacku na v
   await assert.rejects(exact.downloadAsset({ id: 1, size: -1 }), { kind: 'asset-too-large' });
 });
 
+test('CLI: chybový stderr Wrangleru se nepropaguje do logů při importu SQL s osobními údaji', () => {
+  const entrypoint = readFileSync(join(ROOT, 'scripts/backup.ts'), 'utf8');
+  assert.match(entrypoint, /stdio: \['ignore', 'pipe', 'pipe'\]/);
+  assert.match(entrypoint, /child\.stderr\.resume\(\)/);
+  assert.doesNotMatch(entrypoint, /stdio: \['ignore', 'pipe', 'inherit'\]/);
+});
+
 test('CLI: symlink mimo checkout nesmí obejít ochranu proti zápisu SQL do Gitu', () => {
   const dir = mkdtempSync(join(tmpdir(), 'backup-symlink-'));
   try {
