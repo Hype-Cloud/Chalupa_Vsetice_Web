@@ -14,6 +14,7 @@ on:
       - 'backup/**'
       - 'package.json'
       - 'pnpm-lock.yaml'
+      - 'README.md'
       - '.github/workflows/backup-regression-tests.yml'
   workflow_dispatch:
 
