@@ -10,7 +10,7 @@
 // - Do výstupu jen identifikátory, velikosti a kontrolní součty – nikdy tokeny, obsah SQL ani klíče.
 
 import { createHash, randomBytes } from 'node:crypto';
-import { closeSync, existsSync, mkdirSync, mkdtempSync, openSync, readFileSync, renameSync, rmSync, writeSync } from 'node:fs';
+import { closeSync, existsSync, linkSync, mkdirSync, mkdtempSync, openSync, readFileSync, renameSync, rmSync, writeSync } from 'node:fs';
 import { basename, dirname, isAbsolute, join, relative, resolve } from 'node:path';
 import { parseBackupConfig, type BackupBackend, type BackupConfig } from '../../lib/backup/config.ts';
 import { BackupError, errorKind, inspectSql, isObject, sha256Hex } from '../../lib/backup/core.ts';
@@ -101,8 +101,16 @@ export function writeAtomic(path: string, bytes: Uint8Array, force: boolean): vo
     let offset = 0;
     while (offset < bytes.length) offset += writeSync(fd, bytes, offset, bytes.length - offset);
     closeSync(fd);
-    if (force && existsSync(path)) rmSync(path);
-    renameSync(temp, path);
+    if (force) {
+      // Node's rename replaces an existing file atomically on the same filesystem.
+      // Never unlink the original first: a failed rename must preserve it.
+      renameSync(temp, path);
+    } else {
+      // Atomic create-only publication: no race between existsSync and rename
+      // can accidentally overwrite a newly created destination.
+      linkSync(temp, path);
+      rmSync(temp);
+    }
   } catch (error) {
     try {
       closeSync(fd);
