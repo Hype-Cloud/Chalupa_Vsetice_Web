@@ -1,6 +1,6 @@
 import test, { beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { generateX25519Identity, identityToRecipient } from 'age-encryption';
@@ -10,7 +10,7 @@ import { sealSnapshot } from '../lib/backup/seal.ts';
 import { GithubClient, identifySnapshot, publishSnapshot, RELEASE_MARKER, releaseTag, type GithubDeps } from '../lib/backup/github.ts';
 import { runGithubBackup, runGithubMonitor } from '../lib/backup/github-run.ts';
 import { buildManifest, type SnapshotManifest, type SnapshotRef } from '../lib/backup/snapshot.ts';
-import { expectedRowCounts, expectedSchema, expectedSchemaDefinitions, normalizedSchemaSql, runCli, sqlStatements, writeAtomic, type CliDeps } from '../scripts/lib/backup-cli.ts';
+import { assertSafeOutput, expectedRowCounts, expectedSchema, expectedSchemaDefinitions, normalizedSchemaSql, runCli, sqlStatements, writeAtomic, type CliDeps } from '../scripts/lib/backup-cli.ts';
 import { FakeGithub } from './fixtures/fake-github.ts';
 
 // Backend GitHub Releases: běh zálohy (export → gzip → age → draft → upload → ověření →
@@ -492,6 +492,19 @@ test('monitor s digestem assetu odmítá chybějící digest, bez fallbacku na v
   await assert.rejects(mkClient(new Uint8Array([1, 2, 3])).downloadAsset({ id: 1, size: 4 }, 4), { kind: 'size-mismatch' });
   await assert.rejects(exact.downloadAsset({ id: 1, size: 5 }, 4), { kind: 'asset-too-large' });
   await assert.rejects(exact.downloadAsset({ id: 1, size: -1 }), { kind: 'asset-too-large' });
+});
+
+test('CLI: symlink mimo checkout nesmí obejít ochranu proti zápisu SQL do Gitu', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'backup-symlink-'));
+  try {
+    const alias = join(dir, 'alias');
+    symlinkSync(join(ROOT, 'tests'), alias, 'dir');
+    const d = cli(dir);
+    assert.throws(() => assertSafeOutput(alias, d), /ignorované Gitem/);
+    assert.throws(() => assertSafeOutput(join(alias, 'new-subfolder'), d), /ignorované Gitem/);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
 });
 
 test('lokální zápis: create-only a atomický --force zachovají cílový soubor při selhání', () => {
