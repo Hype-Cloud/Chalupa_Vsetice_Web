@@ -61,8 +61,11 @@ const deps: CliDeps = {
       : null,
   wrangler: (wargs, { cwd, env }) =>
     new Promise((resolve, reject) => {
-      // stdin zavřený: wrangler se na nic neptá; stdout se čte (JSON), stderr do terminálu.
-      const child = spawn(process.execPath, [wranglerBin(), ...wargs], { cwd, env: { ...process.env, ...env }, stdio: ['ignore', 'pipe', 'inherit'] });
+      // stdin zavřený: wrangler se na nic neptá; stdout se čte (JSON).
+      // stderr se odvede do prázdna: chyby Wrangleru mohou obsahovat fragmenty SQL/PII.
+      // Naše CLI vrací pouze bezpečný generický druh chyby a kód ukončení.
+      const child = spawn(process.execPath, [wranglerBin(), ...wargs], { cwd, env: { ...process.env, ...env }, stdio: ['ignore', 'pipe', 'pipe'] });
+      child.stderr.resume(); // never collect or log potentially sensitive SQL
       let stdout = '';
       child.stdout.on('data', (chunk) => (stdout += chunk));
       child.on('error', reject);
