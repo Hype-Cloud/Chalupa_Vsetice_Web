@@ -10,7 +10,7 @@ import { sealSnapshot } from '../lib/backup/seal.ts';
 import { GithubClient, identifySnapshot, publishSnapshot, RELEASE_MARKER, releaseTag, type GithubDeps } from '../lib/backup/github.ts';
 import { runGithubBackup, runGithubMonitor } from '../lib/backup/github-run.ts';
 import { buildManifest, type SnapshotManifest, type SnapshotRef } from '../lib/backup/snapshot.ts';
-import { expectedRowCounts, expectedSchema, expectedSchemaDefinitions, normalizedSchemaSql, runCli, sqlStatements, type CliDeps } from '../scripts/lib/backup-cli.ts';
+import { expectedRowCounts, expectedSchema, expectedSchemaDefinitions, normalizedSchemaSql, runCli, sqlStatements, writeAtomic, type CliDeps } from '../scripts/lib/backup-cli.ts';
 import { FakeGithub } from './fixtures/fake-github.ts';
 
 // Backend GitHub Releases: běh zálohy (export → gzip → age → draft → upload → ověření →
@@ -451,7 +451,28 @@ test('monitor s digestem assetu odmítá chybějící digest, bez fallbacku na v
   await assert.rejects(runGithubMonitor(env, deps()), { kind: 'asset-digest-mismatch' });
 });
 
- // --- CLI a integrační obnova ---------------------------------------------------------------------------
+ test('lokální zápis: create-only a atomický --force zachovají cílový soubor při selhání', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'backup-atomic-'));
+  const file = join(dir, 'snapshot.sql.gz.age');
+  try {
+    writeAtomic(file, new TextEncoder().encode('původní'), false);
+    assert.equal(readFileSync(file, 'utf8'), 'původní');
+    assert.throws(() => writeAtomic(file, new TextEncoder().encode('jiný'), false));
+    assert.equal(readFileSync(file, 'utf8'), 'původní', 'bez --force nic nepřepisuje');
+    writeAtomic(file, new TextEncoder().encode('nový'), true);
+    assert.equal(readFileSync(file, 'utf8'), 'nový');
+    // Replacing an existing directory must fail without removing the directory.
+    const protectedDir = join(dir, 'existující-adresář');
+    mkdirSync(protectedDir);
+    assert.throws(() => writeAtomic(protectedDir, new TextEncoder().encode('nepovolené'), true));
+    assert.ok(existsSync(protectedDir), 'selhání rename nesmí odstranit existující cíl');
+    assert.deepEqual(readdirSync(dir).filter((name) => name.endsWith('.tmp')), [], 'žádné dočasné soubory');
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+// --- CLI a integrační obnova ---------------------------------------------------------------------------
 
 function cli(dir: string, d1?: D1Database, existing: string[] = []): CliDeps & { output: string[]; wranglerCalls: string[][] } {
   const output: string[] = [];
