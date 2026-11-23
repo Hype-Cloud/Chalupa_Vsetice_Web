@@ -126,7 +126,10 @@ test('SQL export: povinné struktury a prostředí se ověřují, ale nelze prok
   assert.ok(inspect(noMigrations).problems.includes('missing-migration-rows'));
   const noEnv = original.replace(/^INSERT INTO "meta".*\n/gm, '');
   assert.ok(inspect(noEnv).problems.includes('environment-mismatch'));
-  const noReservationsSchema = original.replace(/^CREATE TABLE reservations \([\s\S]*?\n\);\n/m, '');
+  const reservationStart = original.indexOf('CREATE TABLE reservations (');
+  const reservationRows = original.indexOf('INSERT INTO "reservations"', reservationStart);
+  assert.ok(reservationStart >= 0 && reservationRows > reservationStart);
+  const noReservationsSchema = original.slice(0, reservationStart) + original.slice(reservationRows);
   assert.ok(inspect(noReservationsSchema).problems.includes('missing-reservationsSchema'));
   const missingCompleteRow = original.replace(/^INSERT INTO "reservations".*\n/m, '');
   assert.notEqual(missingCompleteRow, original);
