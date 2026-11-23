@@ -186,6 +186,12 @@ export class GithubClient {
   }
 
   /** Publikace draftu; 422 = tag mezitím obsadil jiný release (souběh) → null. */
+  /** Release podle id (i draft – token s push), nebo null, pokud neexistuje. */
+  async releaseById(releaseId: number): Promise<GithubRelease | null> {
+    const { data } = await this.json<GithubRelease>('GET', `/releases/${releaseId}`, undefined, [404]);
+    return data;
+  }
+
   async publish(releaseId: number): Promise<GithubRelease | null> {
     const { status, data } = await this.json<GithubRelease>('PATCH', `/releases/${releaseId}`, { draft: false, make_latest: 'false' }, [422]);
     return status === 422 ? null : data;
@@ -394,11 +400,18 @@ export async function publishSnapshot(client: GithubClient, ref: SnapshotRef, by
     publicationAttempted = true;
     const result = await client.publish(draft.id);
     if (!result) {
-      // Souběh: tag mezitím publikoval jiný běh – vlastní draft pryč, rozhodne existující snapshot.
-      await client.deleteRelease(draft.id);
-      const winner = await client.releaseByTag(tag);
-      if (!winner) throw new BackupError('github-rejected');
-      return evaluateExisting(client, winner, manifest, policy);
+      // 422: obvykle souběh (tag mezitím publikoval jiný běh). Mazat smíme jen release, který je
+      // prokazatelně stále draft – po opakovaném PATCH mohl být už publikovaný. Nejistý stav
+      // (chyba dotazu) skončí výjimkou bez mazání.
+      const current = await client.releaseById(draft.id);
+      if (current && current.draft === false) {
+        // Publikovaný navzdory 422 → stejné ověření jako po úspěšném PATCH (níže).
+      } else {
+        if (current) await client.deleteRelease(draft.id);
+        const winner = await client.releaseByTag(tag);
+        if (!winner) throw new BackupError('github-rejected');
+        return evaluateExisting(client, winner, manifest, policy);
+      }
     }
     const check = await client.releaseByTag(tag);
     if (!check || check.id !== draft.id || check.draft) throw new BackupError('publish-verify-failed');

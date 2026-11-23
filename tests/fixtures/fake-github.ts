@@ -143,6 +143,11 @@ export class FakeGithub {
     match = /^\/releases\/(\d+)$/.exec(rest);
     if (match) {
       const index = this.releases.findIndex((r) => r.id === Number(match![1]));
+      if (request.method === 'GET') {
+        // Drafty vidí jen token s push (jako GitHub).
+        if (index < 0 || (this.releases[index].draft && readOnly)) return json({ message: 'Not Found' }, 404);
+        return json(this.view(this.releases[index]));
+      }
       if (request.method === 'DELETE') {
         if (readOnly) return json({ message: 'forbidden' }, 403);
         if (index < 0) return json({ message: 'Not Found' }, 404);

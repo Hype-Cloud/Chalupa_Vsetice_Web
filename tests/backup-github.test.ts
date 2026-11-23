@@ -189,6 +189,50 @@ test('souběh: dvě současné publikace stejného snapshotu → právě jedna u
   }
 });
 
+test('nejednoznačný PATCH: GitHub release publikuje, ale vrátí 422 → release se nesmaže a snapshot se ověří', async () => {
+  const ref = { type: 'daily' as const, date: '2030-01-15' };
+  const sealed = await sealedFor(ref, 'syntetický obsah 422');
+  const injected: GithubDeps = {
+    ...deps(),
+    fetch: async (input, init) => {
+      const req = new Request(input, init);
+      if (req.method === 'PATCH' && new URL(req.url).pathname.split('/').at(-2) === 'releases') {
+        const committed = await route(input, init);
+        assert.ok(committed.ok, 'fake GitHub provedl publikaci');
+        return Response.json({ message: 'Validation Failed' }, { status: 422 });
+      }
+      return route(input, init);
+    },
+  };
+  assert.equal(await publishSnapshot(new GithubClient(target, GH_TOKEN, injected), ref, sealed.bytes, sealed.manifest, 'verify'), 'stored');
+  const published = github.releases.filter((r) => r.tag_name === releaseTag(target, ref));
+  assert.equal(published.length, 1);
+  assert.equal(published[0].draft, false, 'publikovaný release se po 422 nesmí smazat');
+  assert.ok(!github.requests.some((r) => r.method === 'DELETE'), 'žádné mazání');
+});
+
+test('422 a nedostupné ověření stavu draftu → chyba bez mazání (nejistý snapshot se zachová)', async () => {
+  const ref = { type: 'daily' as const, date: '2030-01-16' };
+  const sealed = await sealedFor(ref, 'syntetický obsah nejistý');
+  let draftId = 0;
+  const injected: GithubDeps = {
+    ...deps(),
+    fetch: async (input, init) => {
+      const req = new Request(input, init);
+      const parts = new URL(req.url).pathname.split('/');
+      if (req.method === 'PATCH' && parts.at(-2) === 'releases') {
+        draftId = Number(parts.at(-1));
+        return Response.json({ message: 'Validation Failed' }, { status: 422 });
+      }
+      if (req.method === 'GET' && parts.at(-2) === 'releases' && Number(parts.at(-1)) === draftId) throw new Error('síťová chyba');
+      return route(input, init);
+    },
+  };
+  await assert.rejects(publishSnapshot(new GithubClient(target, GH_TOKEN, injected), ref, sealed.bytes, sealed.manifest, 'verify'), { kind: 'github-unavailable' });
+  assert.ok(github.releases.some((r) => r.id === draftId), 'draft zůstává pro pozdější úklid podle stáří');
+  assert.ok(!github.requests.some((r) => r.method === 'DELETE'));
+});
+
 test('ztracená odpověď na PATCH po úspěšné publikaci nesmaže zveřejněný release', async () => {
   const ref = { type: 'daily' as const, date: '2030-01-15' };
   const sealed = await sealedFor(ref, 'syntetický obsah');
