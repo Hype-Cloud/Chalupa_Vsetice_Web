@@ -83,6 +83,9 @@ platí v každé session.
   monitor `worker/backup-monitor/`) a volitelný **R2** (`worker/backup/`, Cloudflare
   Workflows, neaktivní). CLI `scripts/backup.ts` (`pnpm backup:*`). Popis: README,
   „Automatické zálohy D1“. Doplňuje ruční zálohy před migracemi (`db:backup:*`).
+- Stav k 23. 11. 2026: produkční záloha do GitHub Releases běží denně (02:17 UTC, soukromý
+  repozitář `Hype-Cloud/Chalupa_Vsetice_DB_Backup`, `CODE_COMMIT` `a77abdb`); obnova ověřena do
+  nové D1. Monitor ani R2 Worker nasazené nejsou. Změna `CODE_COMMIT` jen se souhlasem uživatele.
 - Konfigurace jen přes `BACKUP_*` (validuje `lib/backup/config.ts`); přepnutí backendu vždy
   výslovné (`BACKUP_BACKEND`). Credentials nikdy ve verzovaných souborech.
 - Bez výslovného souhlasu uživatele: nevytvářet ani neměnit zálohovací repozitář, Actions,
