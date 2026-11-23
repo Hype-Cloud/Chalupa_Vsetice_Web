@@ -289,6 +289,24 @@ function resolveRef(value: string | undefined, snapshots: readonly ListedSnapsho
 
 // --- Obnova ----------------------------------------------------------------------------------------
 
+/** Odstraní jen úvodní SQL komentáře; komentáře uvnitř CREATE/TRIGGER zachová. */
+function withoutLeadingSqlComments(value: string): string {
+  let text = value.trimStart();
+  for (;;) {
+    if (text.startsWith('--')) {
+      const end = text.indexOf('\n');
+      if (end < 0) return '';
+      text = text.slice(end + 1).trimStart();
+    } else if (text.startsWith('/*')) {
+      const end = text.indexOf('*/');
+      if (end < 0) return '';
+      text = text.slice(end + 2).trimStart();
+    } else {
+      return text.trim();
+    }
+  }
+}
+
 /** SQL příkazy exportu D1 – respektuje uvozovky, komentáře a vícepříkazové BEGIN…END triggery.
  * Používá se pouze k počítání INSERTů a očekávaného schématu při obnově/testování.
  * Nejde o obecný SQL parser ani o důkaz úplnosti obsahu vůči zdrojové databázi. */
@@ -345,7 +363,7 @@ export function sqlStatements(sql: string): string[] {
     if (ch === '`') { state = 'backtick'; continue; }
     if (ch === '[') { state = 'bracket'; continue; }
     if (ch === ';' && !triggerBody) {
-      const statement = sql.slice(start, i + 1).trim();
+      const statement = withoutLeadingSqlComments(sql.slice(start, i + 1));
       if (statement) out.push(statement);
       start = i + 1;
       trigger = false;
@@ -355,7 +373,7 @@ export function sqlStatements(sql: string): string[] {
     }
   }
   flushWord();
-  const rest = sql.slice(start).trim();
+  const rest = withoutLeadingSqlComments(sql.slice(start));
   if (rest) out.push(rest);
   return out;
 }
