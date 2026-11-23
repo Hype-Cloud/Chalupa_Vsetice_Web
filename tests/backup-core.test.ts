@@ -118,6 +118,23 @@ test('generic profil: Cloudflare D1 UUID a název databáze se ověřují před 
   await verifyGenericDatabaseIdentity({ ...config, schemaProfile: 'chalupa' }, { ...deps, fetch: async () => assert.fail('Chalupa profil nemění REST API') });
 });
 
+test('SQL export: povinné struktury a prostředí se ověřují, ale nelze prokázat kompletnost dat', () => {
+  const original = new TextDecoder().decode(EXPORT);
+  const inspect = (sql: string) => inspectSql(new TextEncoder().encode(sql), 'production');
+  assert.deepEqual(inspect(original).problems, []);
+  const noMigrations = original.replace(/^INSERT INTO "d1_migrations".*\n/gm, '');
+  assert.ok(inspect(noMigrations).problems.includes('missing-migration-rows'));
+  const noEnv = original.replace(/^INSERT INTO "meta".*\n/gm, '');
+  assert.ok(inspect(noEnv).problems.includes('environment-mismatch'));
+  const noReservationsSchema = original.replace(/^CREATE TABLE reservations \([\s\S]*?\n\);\n/m, '');
+  assert.ok(inspect(noReservationsSchema).problems.includes('missing-reservationsSchema'));
+  const missingCompleteRow = original.replace(/^INSERT INTO "reservations".*\n/m, '');
+  assert.notEqual(missingCompleteRow, original);
+  // Validní soubor s vynechaným celým INSERT nelze odhalit ze samotného SQL bez
+  // nezávislého seznamu/počtu řádků původní D1. Test chrání proti falešným garancím.
+  assert.deepEqual(inspect(missingCompleteRow).problems, []);
+});
+
 // --- Snapshoty, manifest, retence --------------------------------------------------------------------
 
 test('snapshot: identifikátory s přísnou kontrolou data; názvy souborů', () => {
