@@ -1586,8 +1586,11 @@ projde jen bez chyb, nebo s jedinou známou diagnostikou `TS2322` ve `vite.confi
 (`configPath: false`, shodná s `main`, mimo rozsah zálohování); jakákoli jiná či další
 diagnostika CI zastaví. Integrační testy používají syntetická data, lokální D1 a fake GitHub
 API – proti skutečné vzdálené D1 ani skutečnému GitHub Releases API zálohování ověřeno není.
-**Automatické zálohování je neaktivní:** produkční workflow v soukromém repozitáři má jen ruční
-spouštěč a nulový `CODE_COMMIT`, schedule není nastavený a monitor ani R2 Worker nejsou nasazené.
+**Provozní stav (23. 11. 2026):** produkční záloha běží v soukromém repozitáři denně ve
+02:17 UTC (+ ruční spuštění) z auditovaného `CODE_COMMIT` `a77abdb`. Ověřeno: zkušební záloha
+Preview a první produkční záloha (šifrovaný denní i měsíční snapshot), obnova Preview snapshotu
+do nové D1 v Cloudflare (rozšifrování, import, počty řádků, migrace, schéma). Nezávislý monitor
+ani R2 Worker nasazené nejsou; selhání zálohy hlásí upozornění přes Resend a e-mail GitHubu.
 
 ### Backend GitHub Releases
 
