@@ -405,7 +405,7 @@ test('SQL splitter obnovy: víceřádkový trigger, CASE, komentáře a escapova
   assert.match(statements[3], /UPDATE "things" SET note = CASE/);
   assert.match(statements[3], /END;$/);
   assert.equal(expectedSchemaDefinitions(sql).get('history_log')?.includes('ELSE NEW.note END'), true);
-  assert.equal(expectedRowCounts(sql).get('things'), undefined, 'poznámka před INSERT může být důvodem pro opatrnost parseru; nesmí vymýšlet počty');
+  assert.equal(expectedRowCounts(sql).get('things'), 1, 'komentář před INSERT nesmí skrýt řádek při kontrole obnovy');
   const plain = sqlStatements("INSERT INTO \"things\" VALUES(2,'a;''b'); INSERT INTO \"things\" VALUES(3,'c');");
   assert.equal(plain.length, 2);
 });
