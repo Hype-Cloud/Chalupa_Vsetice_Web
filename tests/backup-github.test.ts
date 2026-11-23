@@ -273,6 +273,20 @@ test('ověření uploadu: poškozený uložený obsah → upload-verify-failed, 
   assert.equal(github.releases.length, 0);
 });
 
+test('GITHUB_TOKEN s permissions.push=false (GitHub App) zálohu provede; token bez zápisu selže až na zápisu s bezpečnou diagnostikou', async () => {
+  // Fake vrací u repozitáře permissions.push=false jako skutečný GitHub pro GITHUB_TOKEN.
+  const ok = await runGithubBackup(ENV, deps());
+  assert.equal(ok.daily, 'stored');
+  // Token jen pro čtení: export proběhne, první zápis (draft) skončí 403 → nic se neuloží.
+  github = new FakeGithub({ owner: OWNER, repo: REPO, token: GH_TOKEN, readOnlyTokens: [GH_READ_TOKEN] });
+  github.now = () => now;
+  logs = [];
+  await assert.rejects(runGithubBackup({ ...ENV, BACKUP_GITHUB_TOKEN: GH_READ_TOKEN }, deps()), { kind: 'github-forbidden' });
+  assert.equal(github.releases.length, 0);
+  assert.ok(logs.includes('d1-backup: GitHub POST /releases → HTTP 403'), logs.join('\n'));
+  assertNoSecrets(logs.join('\n'));
+});
+
 test('soukromý repozitář je povinný: veřejný → odmítnuto před exportem', async () => {
   github = new FakeGithub({ owner: OWNER, repo: REPO, token: GH_TOKEN, private: false });
   await assert.rejects(runGithubBackup(ENV, deps()), { kind: 'repository-not-private' });

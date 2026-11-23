@@ -136,6 +136,7 @@ export class GithubClient {
     }
     if (!response.ok) {
       await response.body?.cancel().catch(() => undefined);
+      this.deps.log(`d1-backup: GitHub ${this.describe(method, path)} → HTTP ${response.status}`);
       throw new BackupError(httpKind(response));
     }
     if (response.status === 204) return { status: 204, data: null };
@@ -151,8 +152,14 @@ export class GithubClient {
     const { data } = await this.json<{ private?: boolean; visibility?: string; permissions?: { push?: boolean; pull?: boolean }; archived?: boolean }>('GET', '');
     if (!data || data.private !== true || (data.visibility !== undefined && data.visibility === 'public')) throw new BackupError('repository-not-private');
     if (access === 'write' && data.archived) throw new BackupError('repository-archived');
-    // `permissions` vrací GitHub jen pro uživatelské tokeny; u GITHUB_TOKEN chybí (ověří zápis sám).
-    if (access === 'write' && data.permissions && data.permissions.push === false) throw new BackupError('github-forbidden');
+    // Pole `permissions` se nevyhodnocuje: u GITHUB_TOKEN (GitHub App) může uvádět push=false
+    // i při `contents: write`. Chybějící oprávnění k zápisu odhalí až skutečný zápis (403).
+  }
+
+  /** Bezpečný popis požadavku pro log: metoda a tvar cesty bez id, tagů a dotazu. */
+  private describe(method: string, path: string): string {
+    const shape = path.split('?')[0].replace(/\/tags\/[^/]+/, '/tags/{tag}').replace(/\/\d+/g, '/{id}') || '/';
+    return `${method} ${shape}`;
   }
 
   /** Všechny releasy (včetně draftů viditelných tokenu s push). Chyba kterékoli stránky = výjimka. */
@@ -225,6 +232,7 @@ export class GithubClient {
     }
     if (!response.ok) {
       await response.body?.cancel().catch(() => undefined);
+      this.deps.log(`d1-backup: GitHub upload asset → HTTP ${response.status}`);
       throw new BackupError(response.status === 422 ? 'upload-rejected' : 'upload-failed');
     }
     const asset = (await response.json().catch(() => null)) as GithubAsset | null;

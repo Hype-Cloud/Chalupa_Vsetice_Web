@@ -108,7 +108,11 @@ export class FakeGithub {
 
     if (url.hostname !== 'api.github.com') return json({ message: 'unexpected host' }, 599);
     const path = url.pathname;
-    if (path === base && request.method === 'GET') return json({ private: this.options.private, visibility: this.options.private ? 'private' : 'public', archived: false });
+    if (path === base && request.method === 'GET') {
+      // Jako skutečný GitHub u GITHUB_TOKEN (GitHub App): `permissions.push` může být false
+      // i u tokenu se zápisem obsahu – zápis se rozhoduje až u konkrétní operace.
+      return json({ private: this.options.private, visibility: this.options.private ? 'private' : 'public', archived: false, permissions: { admin: false, push: false, pull: true } });
+    }
     if (!path.startsWith(base)) return json({ message: 'Not Found' }, 404);
     const rest = path.slice(base.length);
 
