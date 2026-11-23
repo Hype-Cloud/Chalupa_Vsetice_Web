@@ -10,13 +10,13 @@
 //
 // Konfigurace z proměnných prostředí (BACKUP_*), volitelně --env-file <soubor> (mimo repozitář).
 
-import { spawn, spawnSync } from 'node:child_process';
+import { spawnSync } from 'node:child_process';
 import { createRequire } from 'node:module';
 import { homedir, tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { createInterface } from 'node:readline/promises';
 import { fileURLToPath } from 'node:url';
-import { runCli, type CliDeps } from './lib/backup-cli.ts';
+import { runCli, spawnWrangler, type CliDeps } from './lib/backup-cli.ts';
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
 // Wrangler jen pro obnovu a R2 (v GitHub Actions se nepoužívá).
@@ -59,18 +59,8 @@ const deps: CliDeps = {
           }
         }
       : null,
-  wrangler: (wargs, { cwd, env }) =>
-    new Promise((resolve, reject) => {
-      // stdin zavřený: wrangler se na nic neptá; stdout se čte (JSON).
-      // stderr se odvede do prázdna: chyby Wrangleru mohou obsahovat fragmenty SQL/PII.
-      // Naše CLI vrací pouze bezpečný generický druh chyby a kód ukončení.
-      const child = spawn(process.execPath, [wranglerBin(), ...wargs], { cwd, env: { ...process.env, ...env }, stdio: ['ignore', 'pipe', 'pipe'] });
-      child.stderr.resume(); // never collect or log potentially sensitive SQL
-      let stdout = '';
-      child.stdout.on('data', (chunk) => (stdout += chunk));
-      child.on('error', reject);
-      child.on('close', (code) => resolve({ code: code ?? 1, stdout }));
-    }),
+  // stderr Wrangleru se nikdy nevypisuje (u importu SQL se zahodí, jinak jen klasifikace) – spawnWrangler.
+  wrangler: (wargs, { cwd, env }) => spawnWrangler([process.execPath, wranglerBin()], wargs, { cwd, env: { ...process.env, ...env } }),
 };
 
 process.exitCode = await runCli(argv, deps);

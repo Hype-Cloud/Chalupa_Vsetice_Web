@@ -9,6 +9,7 @@
 //   po importu porovná migrace a počty řádků. Dočasné SQL (osobní údaje) se vždy smaže.
 // - Do výstupu jen identifikátory, velikosti a kontrolní součty – nikdy tokeny, obsah SQL ani klíče.
 
+import { spawn } from 'node:child_process';
 import { createHash, randomBytes } from 'node:crypto';
 import { closeSync, existsSync, fsyncSync, linkSync, mkdirSync, mkdtempSync, openSync, readFileSync, realpathSync, renameSync, rmSync, writeSync } from 'node:fs';
 import { basename, dirname, isAbsolute, join, relative, resolve } from 'node:path';
@@ -30,8 +31,69 @@ export interface CliDeps extends GithubDeps {
   isIgnored: (path: string) => boolean;
   /** Dotaz v terminálu; null = není interaktivní terminál. */
   prompt: ((question: string) => Promise<string>) | null;
-  wrangler: (args: string[], options: { cwd: string; env: Record<string, string> }) => Promise<{ code: number; stdout: string }>;
+  wrangler: (args: string[], options: { cwd: string; env: Record<string, string> }) => Promise<WranglerResult>;
 }
+
+export interface WranglerResult {
+  code: number;
+  stdout: string;
+  /** Bezpečně klasifikovaná příčina selhání (nikdy surový stderr). */
+  problem?: string;
+}
+
+const STDOUT_LIMIT = 16 * 1024 ** 2;
+const STDERR_LIMIT = 64 * 1024;
+
+/** Bezpečná klasifikace chyby Wrangleru – jen pevné texty, nikdy obsah stderr. */
+export function classifyWranglerError(stderr: string): string | undefined {
+  if (/Authentication error|\[code: 10000\]|not authenticated|Invalid (?:API )?token|CLOUDFLARE_API_TOKEN/i.test(stderr)) return 'chybí oprávnění nebo neplatný API token';
+  if (/already exists|\[code: 7502\]/i.test(stderr)) return 'databáze s tímto názvem už existuje';
+  if (/More than one account|account_id/i.test(stderr)) return 'nejasný účet Cloudflare (zkontrolujte BACKUP_CLOUDFLARE_ACCOUNT_ID)';
+  if (/ENOTFOUND|ECONNREFUSED|ETIMEDOUT|fetch failed/i.test(stderr)) return 'síťová chyba při volání Cloudflare API';
+  return undefined;
+}
+
+/**
+ * Spuštění Wrangleru bez interakce. stdout se čte (JSON, s horním limitem). stderr se nikdy
+ * nevypisuje: u importu SQL (`d1 execute --file`) se zahodí celý (může obsahovat SQL a osobní
+ * údaje), u ostatních příkazů se omezeně zachytí jen pro klasifikaci běžných chyb.
+ */
+export function spawnWrangler(command: readonly string[], args: readonly string[], options: { cwd: string; env: NodeJS.ProcessEnv }): Promise<WranglerResult> {
+  const sensitive = args.some((a) => a === '--file' || a.startsWith('--file='));
+  return new Promise((resolvePromise, reject) => {
+    const child = spawn(command[0], [...command.slice(1), ...args], { cwd: options.cwd, env: options.env, stdio: ['ignore', 'pipe', 'pipe'] });
+    let stdout = '';
+    let stderr = '';
+    let overflow = false;
+    child.stdout.setEncoding('utf8');
+    child.stdout.on('data', (chunk: string) => {
+      if (stdout.length + chunk.length > STDOUT_LIMIT) {
+        overflow = true;
+        child.kill();
+        return;
+      }
+      stdout += chunk;
+    });
+    if (sensitive) child.stderr.resume();
+    else {
+      child.stderr.setEncoding('utf8');
+      child.stderr.on('data', (chunk: string) => {
+        if (stderr.length < STDERR_LIMIT) stderr += chunk.slice(0, STDERR_LIMIT - stderr.length);
+      });
+    }
+    child.on('error', reject);
+    child.on('close', (code) => {
+      const result: WranglerResult = { code: overflow ? 1 : (code ?? 1), stdout: overflow ? '' : stdout };
+      if (result.code !== 0) {
+        const problem = overflow ? 'nečekaně velký výstup Wrangleru' : sensitive ? undefined : classifyWranglerError(stderr);
+        if (problem) result.problem = problem;
+      }
+      resolvePromise(result);
+    });
+  });
+}
+
+const withProblem = (message: string, result: WranglerResult) => (result.problem ? `${message} (${result.problem})` : message);
 
 export const USAGE = `Použití: node scripts/backup.ts <příkaz> [volby]
   list      --backend github|r2
@@ -538,7 +600,7 @@ async function restore(options: Record<string, string | true>, deps: CliDeps): P
 
     // 3) Cíl nesmí existovat (chrání produkci i jakoukoli jinou existující D1).
     const listed = await run(['d1', 'list', '--json']);
-    if (listed.code !== 0) throw new CliError('výpis D1 selhal – obnova zastavena');
+    if (listed.code !== 0) throw new CliError(withProblem('výpis D1 selhal – obnova zastavena', listed));
     const existing = wranglerJson(listed.stdout);
     if (!Array.isArray(existing)) throw new CliError('neočekávaný výpis D1');
     if (existing.some((db) => isObject(db) && db.name === target)) throw new CliError(`D1 „${target}“ už existuje – obnova jen do nové databáze`);
@@ -552,7 +614,7 @@ async function restore(options: Record<string, string | true>, deps: CliDeps): P
     const sqlPath = join(work, 'restore.sql');
     writeAtomic(sqlPath, sql, false);
     const created = await run(['d1', 'create', target, '--update-config=false']);
-    if (created.code !== 0) throw new CliError('vytvoření D1 selhalo');
+    if (created.code !== 0) throw new CliError(withProblem('vytvoření D1 selhalo', created));
     const imported = await run(['d1', 'execute', target, '--remote', '--yes', `--file=${sqlPath}`]);
     rmSync(sqlPath, { force: true });
     if (imported.code !== 0) throw new CliError(`import selhal – nová D1 „${target}“ může být neúplná; smažte ji (wrangler d1 delete ${target})`);
@@ -695,7 +757,7 @@ export async function runCli(argv: readonly string[], deps: CliDeps): Promise<nu
           if (!workflow || !/^[a-z0-9-]+$/.test(workflow)) throw new CliError('chybí BACKUP_R2_WORKFLOW (název Cloudflare Workflow zálohy)');
           const mode = command === 'run' ? 'backup' : command;
           const result = await deps.wrangler(['workflows', 'trigger', workflow, JSON.stringify({ mode })], { cwd: deps.repoRoot, env: {} });
-          if (result.code !== 0) throw new CliError('spuštění Workflow selhalo');
+          if (result.code !== 0) throw new CliError(withProblem('spuštění Workflow selhalo', result));
           deps.out(`Workflow ${workflow} spuštěn (${mode}); výsledek v dashboardu nebo „wrangler workflows instances list ${workflow}“.`);
           return 0;
         }

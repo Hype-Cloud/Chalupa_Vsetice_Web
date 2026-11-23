@@ -1,5 +1,6 @@
 import test, { beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
+import { spawnSync } from 'node:child_process';
 import { existsSync, linkSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, renameSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -525,11 +526,50 @@ test('monitor s digestem assetu odmítá chybějící digest, bez fallbacku na v
   await assert.rejects(exact.downloadAsset({ id: 1, size: -1 }), { kind: 'asset-too-large' });
 });
 
-test('CLI: chybový stderr Wrangleru se nepropaguje do logů při importu SQL s osobními údaji', () => {
-  const entrypoint = readFileSync(join(ROOT, 'scripts/backup.ts'), 'utf8');
-  assert.match(entrypoint, /stdio: \['ignore', 'pipe', 'pipe'\]/);
-  assert.match(entrypoint, /child\.stderr\.resume\(\)/);
-  assert.doesNotMatch(entrypoint, /stdio: \['ignore', 'pipe', 'inherit'\]/);
+test('GitHub downloadAsset (M3): nekonečný stream se přeruší hned po překročení limitu, ne až na konci odpovědi', async () => {
+  let pulled = 0;
+  let cancelled = false;
+  const endless = new ReadableStream<Uint8Array>({
+    pull(controller) {
+      pulled++;
+      if (pulled > 10_000) throw new Error('stream se nepřerušil');
+      controller.enqueue(new Uint8Array(1024));
+    },
+    cancel() {
+      cancelled = true;
+    },
+  });
+  const client = new GithubClient(target, GH_TOKEN, { ...deps(), fetch: async () => new Response(endless) });
+  // Deklarovaná velikost 4 KiB: čtení musí skončit nejpozději pátým kusem (4 KiB + 1 KiB > limit).
+  await assert.rejects(client.downloadAsset({ id: 1, size: 4 * 1024 }), { kind: 'size-mismatch' });
+  assert.ok(pulled <= 6, `přečteno ${pulled} kusů – čtení nepokračovalo po překročení limitu`);
+  assert.equal(cancelled, true, 'zbytek odpovědi se zruší');
+});
+
+test('CLI (M9): stderr skutečného procesu Wrangleru se nikdy nevypíše; import SQL bez diagnostiky, ostatní příkazy jen klasifikace', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'backup-wrangler-'));
+  const SECRET = 'jan.novak@example.invalid INSERT INTO "reservations" VALUES(\'tajna-poznamka\')';
+  try {
+    // Falešný Wrangler: syntetická citlivá data na stderr, stdout se strukturou výsledku, exit 1.
+    const fake = join(dir, 'fake-wrangler.mjs');
+    writeFileSync(fake, `process.stderr.write(${JSON.stringify(`✘ [ERROR] Authentication error [code: 10000] ${SECRET}\n`)}); process.stdout.write('{"ok":false}'); process.exit(1);`);
+    // spawnWrangler běží v samostatném procesu, aby šlo zachytit cokoli, co by propustil na stdio.
+    const runner = join(dir, 'runner.mts');
+    writeFileSync(runner, `import { spawnWrangler } from ${JSON.stringify(join(ROOT, 'scripts/lib/backup-cli.ts'))};
+const cmd = [process.execPath, ${JSON.stringify(fake)}];
+const imported = await spawnWrangler(cmd, ['d1', 'execute', 'x', '--remote', '--file=/tmp/restore.sql'], { cwd: ${JSON.stringify(dir)}, env: process.env });
+const created = await spawnWrangler(cmd, ['d1', 'create', 'x'], { cwd: ${JSON.stringify(dir)}, env: process.env });
+console.log(JSON.stringify({ imported, created }));`);
+    const child = spawnSync(process.execPath, [runner], { encoding: 'utf8' });
+    assert.equal(child.status, 0, child.stderr);
+    assert.ok(!child.stdout.includes('tajna-poznamka') && !child.stderr.includes('tajna-poznamka'), 'citlivý stderr se nesmí dostat na výstup');
+    assert.ok(!child.stdout.includes('example.invalid') && !child.stderr.includes('example.invalid'));
+    const { imported, created } = JSON.parse(child.stdout.trim().split('\n').at(-1)!) as Record<string, { code: number; stdout: string; problem?: string }>;
+    assert.deepEqual(imported, { code: 1, stdout: '{"ok":false}' }, 'import SQL: bez diagnostiky ze stderr');
+    assert.deepEqual(created, { code: 1, stdout: '{"ok":false}', problem: 'chybí oprávnění nebo neplatný API token' }, 'ostatní příkazy: jen pevná klasifikace');
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
 });
 
 test('CLI: symlink mimo checkout nesmí obejít ochranu proti zápisu SQL do Gitu', () => {
