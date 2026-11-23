@@ -387,6 +387,29 @@ test('monitor: nesouhlas GitHub digestu nebo neúplný nejnovější release vyv
   await assert.rejects(runGithubMonitor(env, deps()), { kind: 'snapshot-invalid' });
 });
 
+test('SQL splitter obnovy: víceřádkový trigger, CASE, komentáře a escapované středníky', () => {
+  const sql = [
+    'CREATE TABLE "things" (id INTEGER PRIMARY KEY, note TEXT);',
+    'CREATE TABLE "history" (note TEXT);',
+    'CREATE UNIQUE INDEX "things_id" ON "things" (id);',
+    'CREATE TRIGGER "history_log" AFTER INSERT ON "things"',
+    'BEGIN',
+    '  INSERT INTO "history" VALUES(\'text; s apostrofem \'\'dvojitým\'\'\');',
+    '  UPDATE "things" SET note = CASE WHEN NEW.note IS NULL THEN \'x;y\' ELSE NEW.note END WHERE id=NEW.id;',
+    'END;',
+    '-- komentář obsahuje ;, ale neukončuje další příkaz',
+    'INSERT INTO "things" VALUES(1, \'semicolon; inside\');',
+  ].join('\n');
+  const statements = sqlStatements(sql);
+  assert.equal(statements.length, 5, statements.join('\n---\n'));
+  assert.match(statements[3], /UPDATE "things" SET note = CASE/);
+  assert.match(statements[3], /END;$/);
+  assert.equal(expectedSchemaDefinitions(sql).get('history_log')?.includes('ELSE NEW.note END'), true);
+  assert.equal(expectedRowCounts(sql).get('things'), undefined, 'poznámka před INSERT může být důvodem pro opatrnost parseru; nesmí vymýšlet počty');
+  const plain = sqlStatements("INSERT INTO \"things\" VALUES(2,'a;''b'); INSERT INTO \"things\" VALUES(3,'c');");
+  assert.equal(plain.length, 2);
+});
+
 test('obnova: parser schématu počítá i prázdné tabulky, indexy a triggery', () => {
   const sql = new TextDecoder().decode(EXPORT);
   const objects = expectedSchema(sql);
