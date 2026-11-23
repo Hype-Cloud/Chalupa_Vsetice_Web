@@ -230,19 +230,36 @@ export class GithubClient {
 
   /** Obsah assetu (přesměrování na podepsanou URL řeší fetch; Authorization se cizí doméně neposílá). */
   async downloadAsset(asset: Pick<GithubAsset, 'id' | 'size'>, maxBytes = GITHUB_ASSET_LIMIT): Promise<Uint8Array> {
-    if (asset.size > maxBytes) throw new BackupError('asset-too-large');
+    if (!Number.isSafeInteger(asset.size) || asset.size <= 0 || asset.size > maxBytes) throw new BackupError('asset-too-large');
     const response = await this.send(this.repoPath(`/releases/assets/${asset.id}`), { method: 'GET', headers: this.headers('application/octet-stream'), redirect: 'follow', timeout: TRANSFER_TIMEOUT_MS });
-    if (!response.ok) {
+    if (!response.ok || !response.body) {
       await response.body?.cancel().catch(() => undefined);
       throw new BackupError(response.status === 404 ? 'snapshot-not-found' : 'download-failed');
     }
-    let bytes: Uint8Array;
+    // Do not trust the GitHub-reported asset size or Content-Length for memory safety.
+    // Stop streaming as soon as the actual response exceeds either hard limit.
+    const reader = response.body.getReader();
+    const chunks: Uint8Array[] = [];
+    let received = 0;
     try {
-      bytes = new Uint8Array(await response.arrayBuffer());
-    } catch {
-      throw new BackupError('download-interrupted');
+      for (;;) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        received += value.byteLength;
+        if (received > asset.size || received > maxBytes) throw new BackupError('size-mismatch');
+        chunks.push(value);
+      }
+    } catch (error) {
+      await reader.cancel().catch(() => undefined);
+      throw error instanceof BackupError ? error : new BackupError('download-interrupted');
     }
-    if (bytes.length !== asset.size) throw new BackupError('size-mismatch');
+    if (received !== asset.size) throw new BackupError('size-mismatch');
+    const bytes = new Uint8Array(received);
+    let offset = 0;
+    for (const chunk of chunks) {
+      bytes.set(chunk, offset);
+      offset += chunk.byteLength;
+    }
     return bytes;
   }
 }
