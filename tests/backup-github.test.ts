@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { generateX25519Identity, identityToRecipient } from 'age-encryption';
 import { Miniflare } from 'miniflare';
+import { DatabaseSync } from 'node:sqlite';
 import { sha256Hex } from '../lib/backup/core.ts';
 import { sealSnapshot } from '../lib/backup/seal.ts';
 import { GithubClient, identifySnapshot, publishSnapshot, RELEASE_MARKER, releaseTag, type GithubDeps } from '../lib/backup/github.ts';
@@ -385,6 +386,36 @@ test('monitor: nesouhlas GitHub digestu nebo neúplný nejnovější release vyv
   github.seed({ ...(await seededSnapshot('daily', '2030-01-16')), assets: [] });
   now = new Date('2030-01-16T15:00:00Z');
   await assert.rejects(runGithubMonitor(env, deps()), { kind: 'snapshot-invalid' });
+});
+
+test('schéma obnovy ze skutečného exportu D1: U+2028/U+2029 v textu ani klíčová slova jako názvy sloupců nevytvoří fantomové objekty', () => {
+  // Fixture vygenerovaný `wrangler d1 export --local` (lokální D1): text s U+2028, U+2029, \n a \r
+  // obsahující „CREATE …“, sloupce trigger/end/begin/temp bez uvozovek, víceřádkový trigger s CASE.
+  const sql = readFileSync(join(ROOT, 'tests/fixtures/d1-export-edge.sql'), 'utf8');
+  assert.ok(sql.includes('\u2028CREATE TABLE phantom_ls') && sql.includes('\u2029CREATE VIEW phantom_ps'), 'fixture obsahuje U+2028 i U+2029 doslova');
+  // Referenční stav: skutečná SQLite po importu celého exportu.
+  const reference = new DatabaseSync(':memory:');
+  reference.exec(sql);
+  const master = reference.prepare("SELECT type, name, sql FROM sqlite_master WHERE name NOT LIKE 'sqlite_%' ORDER BY name").all() as { type: string; name: string; sql: string }[];
+  assert.deepEqual(master.map((o) => o.name), ['audit', 'kw', 'notes', 'notes_audit', 'notes_n', 'notes_view']);
+  const objects = expectedSchema(sql);
+  const definitions = expectedSchemaDefinitions(sql);
+  assert.deepEqual([...objects.keys()].sort(), master.map((o) => o.name), 'žádné fantomové objekty z textových hodnot');
+  assert.deepEqual([...definitions.keys()].sort(), master.map((o) => o.name));
+  for (const o of master) {
+    assert.equal(objects.get(o.name), o.type, o.name);
+    assert.equal(definitions.get(o.name), normalizedSchemaSql(o.sql), o.name);
+  }
+  // Počty řádků odpovídají SQLite (prázdná tabulka audit nemá INSERT).
+  const counts = expectedRowCounts(sql);
+  for (const o of master.filter((m) => m.type === 'table')) {
+    assert.equal(counts.get(o.name) ?? 0, (reference.prepare(`SELECT COUNT(*) AS n FROM "${o.name}"`).get() as { n: number }).n, o.name);
+  }
+  // Rozdělené příkazy jdou provést jednotlivě a dají stejný výsledek jako celý export.
+  const split = new DatabaseSync(':memory:');
+  for (const statement of sqlStatements(sql)) split.exec(statement);
+  assert.deepEqual(split.prepare("SELECT type, name, sql FROM sqlite_master WHERE name NOT LIKE 'sqlite_%' ORDER BY name").all(), master);
+  assert.deepEqual(split.prepare('SELECT * FROM notes ORDER BY id').all(), reference.prepare('SELECT * FROM notes ORDER BY id').all());
 });
 
 test('SQL splitter obnovy: víceřádkový trigger, CASE, komentáře a escapované středníky', () => {

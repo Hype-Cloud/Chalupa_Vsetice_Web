@@ -338,12 +338,16 @@ export function sqlStatements(sql: string): string[] {
   let trigger = false;
   let triggerBody = false;
   let caseDepth = 0;
-  let seenCreate = false;
+  // Úvodní tokeny příkazu: trigger je jen `CREATE [TEMP|TEMPORARY] TRIGGER …`, nikoli výskyt
+  // slova TRIGGER/BEGIN/END kdekoli v příkazu (např. sloupce `trigger`, `begin`, `end`).
+  let leading: string[] = [];
   const flushWord = () => {
     if (!word) return;
     const token = word.toUpperCase();
-    if (token === 'CREATE') seenCreate = true;
-    else if (seenCreate && token === 'TRIGGER') trigger = true;
+    if (leading.length < 3) {
+      leading.push(token);
+      if (leading[0] === 'CREATE' && (leading[1] === 'TRIGGER' || ((leading[1] === 'TEMP' || leading[1] === 'TEMPORARY') && leading[2] === 'TRIGGER'))) trigger = true;
+    }
     if (trigger) {
       if (token === 'BEGIN') triggerBody = true;
       else if (triggerBody && token === 'CASE') caseDepth++;
@@ -389,7 +393,7 @@ export function sqlStatements(sql: string): string[] {
       trigger = false;
       triggerBody = false;
       caseDepth = 0;
-      seenCreate = false;
+      leading = [];
     }
   }
   flushWord();
@@ -398,16 +402,27 @@ export function sqlStatements(sql: string): string[] {
   return out;
 }
 
-/** Očekávané počty řádků podle INSERT příkazů exportu (bez interních tabulek SQLite). */
-/** SQL exportem definované uživatelské objekty; interní sqlite_* neověřujeme. */
-export function expectedSchema(sql: string): Map<string, string> {
-  const objects = new Map<string, string>();
-  const expression = /^CREATE\s+(?:UNIQUE\s+)?(TABLE|INDEX|TRIGGER|VIEW)\s+(?:IF\s+NOT\s+EXISTS\s+)?(?:"([^"]+)"|([A-Za-z_][\w]*))/gmi;
-  for (const match of sql.matchAll(expression)) {
-    const name = match[2] ?? match[3];
-    if (!name.startsWith('sqlite_')) objects.set(name, match[1].toLowerCase());
+const SCHEMA_STATEMENT = /^CREATE\s+(?:UNIQUE\s+)?(TABLE|INDEX|TRIGGER|VIEW)\s+(?:IF\s+NOT\s+EXISTS\s+)?(?:"((?:[^"]|"")+)"|([A-Za-z_][\w]*))/i;
+
+/**
+ * Objekty schématu exportu odvozené z rozdělených SQL příkazů (`sqlStatements`): rozhoduje jen
+ * začátek příkazu, takže obsah textových hodnot (včetně U+2028/U+2029 či „CREATE …“ v řetězci)
+ * seznam objektů neovlivní. Interní objekty `sqlite_*` se neověřují.
+ */
+function schemaObjects(sql: string): { name: string; type: string; definition: string }[] {
+  const objects: { name: string; type: string; definition: string }[] = [];
+  for (const statement of sqlStatements(sql)) {
+    const match = SCHEMA_STATEMENT.exec(statement);
+    if (!match) continue;
+    const name = match[2] !== undefined ? match[2].replace(/""/g, '"') : match[3];
+    if (!name.startsWith('sqlite_')) objects.push({ name, type: match[1].toLowerCase(), definition: normalizedSchemaSql(statement) });
   }
   return objects;
+}
+
+/** SQL exportem definované uživatelské objekty (název → typ). */
+export function expectedSchema(sql: string): Map<string, string> {
+  return new Map(schemaObjects(sql).map((o) => [o.name, o.type]));
 }
 
 /** SQLite ukládá CREATE bez koncového středníku a IF NOT EXISTS.
@@ -420,19 +435,12 @@ export function normalizedSchemaSql(sql: string): string {
     .trim();
 }
 
-/** Úplné definice CREATE z ověřeného D1 exportu, nikoli jen názvy objektů. */
+/** Úplné definice CREATE z ověřeného D1 exportu, nikoli jen názvy objektů (stejný zdroj jako expectedSchema). */
 export function expectedSchemaDefinitions(sql: string): Map<string, string> {
-  const definitions = new Map<string, string>();
-  const pattern = /^CREATE\s+(?:UNIQUE\s+)?(?:TABLE|INDEX|TRIGGER|VIEW)\s+(?:IF\s+NOT\s+EXISTS\s+)?(?:"([^"]+)"|([A-Za-z_][\w]*))/i;
-  for (const statement of sqlStatements(sql)) {
-    const match = pattern.exec(statement.trim());
-    if (!match) continue;
-    const name = match[1] ?? match[2];
-    if (!name.startsWith('sqlite_')) definitions.set(name, normalizedSchemaSql(statement));
-  }
-  return definitions;
+  return new Map(schemaObjects(sql).map((o) => [o.name, o.definition]));
 }
 
+/** Očekávané počty řádků podle INSERT příkazů exportu (bez interních tabulek SQLite). */
 export function expectedRowCounts(sql: string): Map<string, number> {
   const counts = new Map<string, number>();
   for (const statement of sqlStatements(sql)) {
