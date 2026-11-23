@@ -289,21 +289,74 @@ function resolveRef(value: string | undefined, snapshots: readonly ListedSnapsho
 
 // --- Obnova ----------------------------------------------------------------------------------------
 
-/** SQL příkazy (středník mimo řetězec na konci řádku) – stejné dělení jako import D1. */
+/** SQL příkazy exportu D1 – respektuje uvozovky, komentáře a vícepříkazové BEGIN…END triggery.
+ * Používá se pouze k počítání INSERTů a očekávaného schématu při obnově/testování.
+ * Nejde o obecný SQL parser ani o důkaz úplnosti obsahu vůči zdrojové databázi. */
 export function sqlStatements(sql: string): string[] {
   const out: string[] = [];
-  let current = '';
-  let quoted = false;
+  let start = 0;
+  let state: 'single' | 'double' | 'backtick' | 'bracket' | 'line-comment' | 'block-comment' | null = null;
+  let word = '';
+  let trigger = false;
+  let triggerBody = false;
+  let caseDepth = 0;
+  let seenCreate = false;
+  const flushWord = () => {
+    if (!word) return;
+    const token = word.toUpperCase();
+    if (token === 'CREATE') seenCreate = true;
+    else if (seenCreate && token === 'TRIGGER') trigger = true;
+    if (trigger) {
+      if (token === 'BEGIN') triggerBody = true;
+      else if (triggerBody && token === 'CASE') caseDepth++;
+      else if (triggerBody && token === 'END') {
+        if (caseDepth > 0) caseDepth--;
+        else triggerBody = false;
+      }
+    }
+    word = '';
+  };
   for (let i = 0; i < sql.length; i++) {
-    const c = sql[i];
-    current += c;
-    if (c === "'") quoted = !quoted;
-    else if (c === ';' && !quoted && (sql[i + 1] === '\n' || sql[i + 1] === '\r' || i + 1 === sql.length)) {
-      out.push(current.trim());
-      current = '';
+    const ch = sql[i];
+    const next = sql[i + 1];
+    if (state === 'line-comment') {
+      if (ch === '\n') state = null;
+      continue;
+    }
+    if (state === 'block-comment') {
+      if (ch === '*' && next === '/') { state = null; i++; }
+      continue;
+    }
+    if (state) {
+      const closing = state === 'single' ? "'" : state === 'double' ? '"' : state === 'backtick' ? '`' : ']';
+      if (ch === closing) {
+        // SQLite escaped quote: '' or "" (also doubled backticks/closing brackets).
+        if (next === closing) i++;
+        else state = null;
+      }
+      continue;
+    }
+    if (/[A-Za-z0-9_]/.test(ch)) { word += ch; continue; }
+    flushWord();
+    if (ch === '-' && next === '-') { state = 'line-comment'; i++; continue; }
+    if (ch === '/' && next === '*') { state = 'block-comment'; i++; continue; }
+    if (ch === "'") { state = 'single'; continue; }
+    if (ch === '"') { state = 'double'; continue; }
+    if (ch === '`') { state = 'backtick'; continue; }
+    if (ch === '[') { state = 'bracket'; continue; }
+    if (ch === ';' && !triggerBody) {
+      const statement = sql.slice(start, i + 1).trim();
+      if (statement) out.push(statement);
+      start = i + 1;
+      trigger = false;
+      triggerBody = false;
+      caseDepth = 0;
+      seenCreate = false;
     }
   }
-  if (current.trim()) out.push(current.trim());
+  flushWord();
+  const rest = sql.slice(start).trim();
+  if (rest) out.push(rest);
   return out;
 }
 
