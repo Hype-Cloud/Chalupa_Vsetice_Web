@@ -451,7 +451,27 @@ test('monitor s digestem assetu odmítá chybějící digest, bez fallbacku na v
   await assert.rejects(runGithubMonitor(env, deps()), { kind: 'asset-digest-mismatch' });
 });
 
- test('lokální zápis: create-only a atomický --force zachovají cílový soubor při selhání', () => {
+ test('GitHub downloadAsset: skutečný stream nesmí překročit limit ani deklarovanou velikost', async () => {
+  const bytes = new Uint8Array([1, 2, 3, 4]);
+  const mkClient = (actual: Uint8Array) => new GithubClient(target, GH_TOKEN, {
+    ...deps(),
+    fetch: async () => new Response(new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(actual.subarray(0, 2));
+        controller.enqueue(actual.subarray(2));
+        controller.close();
+      },
+    }), { headers: { 'content-length': String(actual.length) } }),
+  });
+  const exact = mkClient(bytes);
+  assert.deepEqual(await exact.downloadAsset({ id: 1, size: 4 }, 4), bytes);
+  await assert.rejects(mkClient(new Uint8Array([1, 2, 3, 4, 5])).downloadAsset({ id: 1, size: 4 }, 4), { kind: 'size-mismatch' });
+  await assert.rejects(mkClient(new Uint8Array([1, 2, 3])).downloadAsset({ id: 1, size: 4 }, 4), { kind: 'size-mismatch' });
+  await assert.rejects(exact.downloadAsset({ id: 1, size: 5 }, 4), { kind: 'asset-too-large' });
+  await assert.rejects(exact.downloadAsset({ id: 1, size: -1 }), { kind: 'asset-too-large' });
+});
+
+test('lokální zápis: create-only a atomický --force zachovají cílový soubor při selhání', () => {
   const dir = mkdtempSync(join(tmpdir(), 'backup-atomic-'));
   const file = join(dir, 'snapshot.sql.gz.age');
   try {
