@@ -11,7 +11,7 @@
 
 import { spawn } from 'node:child_process';
 import { createHash, randomBytes } from 'node:crypto';
-import { closeSync, existsSync, fsyncSync, linkSync, mkdirSync, mkdtempSync, openSync, readFileSync, realpathSync, renameSync, rmSync, writeSync } from 'node:fs';
+import { closeSync, existsSync, fsyncSync, statSync, linkSync, mkdirSync, mkdtempSync, openSync, readFileSync, realpathSync, renameSync, rmSync, writeSync } from 'node:fs';
 import { basename, dirname, isAbsolute, join, relative, resolve } from 'node:path';
 import { parseBackupConfig, type BackupBackend, type BackupConfig } from '../../lib/backup/config.ts';
 import { BackupError, errorKind, inspectSql, isObject, sha256Hex } from '../../lib/backup/core.ts';
@@ -154,9 +154,31 @@ function realOutputDirectory(dir: string): string {
     ancestor = parent;
   }
   try {
-    return resolve(realpathSync(ancestor), ...missing);
+    return resolve(realpathSync.native(ancestor), ...missing);
   } catch {
     throw new CliError('výstupní cestu nelze ověřit');
+  }
+}
+
+/**
+ * Je některý existující předek `path` (včetně něj) stejný adresář jako `root` (zařízení + inode)?
+ * Pokryje case-insensitive filesystémy (macOS, Windows), kde se cesty liší jen velikostí písmen.
+ */
+function hasAncestorDirectory(path: string, root: string): boolean {
+  let rootStat;
+  try {
+    rootStat = statSync(root);
+  } catch {
+    return false;
+  }
+  for (let current = path; ; current = dirname(current)) {
+    try {
+      const stat = statSync(current);
+      if (stat.dev === rootStat.dev && stat.ino === rootStat.ino) return true;
+    } catch {
+      // neexistující část cesty – pokračovat k předkovi
+    }
+    if (dirname(current) === current) return false;
   }
 }
 
@@ -166,7 +188,7 @@ export function assertSafeOutput(dir: string, deps: CliDeps): string {
   const absolute = realOutputDirectory(dir);
   const root = realOutputDirectory(deps.repoRoot);
   const rel = relative(root, absolute);
-  const inside = rel === '' || (!rel.startsWith('..') && !isAbsolute(rel));
+  const inside = rel === '' || (!rel.startsWith('..') && !isAbsolute(rel)) || hasAncestorDirectory(absolute, root);
   if (inside && !deps.isIgnored(join(absolute, '.d1-backup-probe'))) {
     throw new CliError('výstup v repozitáři musí být v cestě ignorované Gitem (např. .d1-backups/) – zálohy se nesmí dostat do commitu');
   }
