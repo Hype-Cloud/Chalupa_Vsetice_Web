@@ -780,6 +780,42 @@ test('CLI: list, download latest (ověřený, mimo repozitář), verify, decrypt
   }
 });
 
+test('obnova do vzdálené D1: interní _cf_KV se toleruje, jiný neočekávaný objekt (i _cf_*) obnovu zastaví', async () => {
+  await runGithubBackup(ENV, deps());
+  const dir = mkdtempSync(join(tmpdir(), 'backup-restore-cf-'));
+  try {
+    const keyFile = join(dir, 'key.txt');
+    writeFileSync(keyFile, `${identity}\n`, { mode: 0o600 });
+    for (const [extraObject, expectedExit] of [['_cf_KV', 0], ['_cf_UNKNOWN', 1], ['cizi_tabulka', 1]] as const) {
+      const mf = new Miniflare({ modules: true, script: 'export default { fetch() { return new Response(null); } }', compatibilityDate: '2026-05-01', d1Databases: { DB: `restore-cf-${extraObject}` } });
+      try {
+        const d1 = (await mf.getD1Database('DB')) as unknown as D1Database;
+        const d = cli(dir, d1);
+        // Vzdálená D1 vrací v sqlite_master navíc interní tabulku (jako skutečný Cloudflare).
+        const inner = d.wrangler;
+        d.wrangler = async (args, options) => {
+          const result = await inner(args, options);
+          if (args.some((a) => a.includes('sqlite_master'))) {
+            const parsed = JSON.parse(result.stdout) as { results: unknown[] }[];
+            parsed[0].results.push({ type: 'table', name: extraObject, sql: `CREATE TABLE ${extraObject} (key TEXT PRIMARY KEY, value BLOB)` });
+            return { ...result, stdout: JSON.stringify(parsed) };
+          }
+          return result;
+        };
+        const target = `restore-cf-${extraObject.replace(/_/g, '').toLowerCase()}`;
+        const code = await runCli(['restore', '--backend', 'github', '--snapshot', 'latest', '--target', target, '--identity', keyFile, '--confirm', target], d);
+        assert.equal(code, expectedExit, `${extraObject}: ${d.output.join(' | ')}`);
+        if (expectedExit === 0) assert.ok(d.output.some((l) => l.startsWith('Obnova ověřena:')));
+        else assert.ok(d.output.at(-1)?.includes(`neočekávané objekty schématu: ${extraObject}`));
+      } finally {
+        await mf.dispose();
+      }
+    }
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test('integrace: export → gzip → age → GitHub → stažení → rozšifrování → obnova do NOVÉ D1 → schéma, migrace a počty odpovídají', async () => {
   await runGithubBackup(ENV, deps());
   const dir = mkdtempSync(join(tmpdir(), 'backup-restore-'));
