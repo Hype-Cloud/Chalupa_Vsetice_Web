@@ -27,7 +27,7 @@ concurrency:
 jobs:
   tests:
     runs-on: ubuntu-24.04
-    timeout-minutes: 15
+    timeout-minutes: 25
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
         with:
@@ -48,3 +48,13 @@ jobs:
         env:
           REQUIRE_AGE_INTEROP: '1'
         run: pnpm test
+      - name: TypeScript diagnostics (known pre-existing vite.config issue)
+        continue-on-error: true
+        run: pnpm exec tsc --noEmit --pretty false
+      - name: Build production bundle (no deployment)
+        run: pnpm run build
+      - name: Dry-run main Worker, backup monitor and optional R2 Worker
+        run: |
+          pnpm exec wrangler deploy --dry-run --config wrangler.jsonc
+          pnpm run backup:monitor:check
+          pnpm run backup:r2:check
